@@ -2,6 +2,8 @@ package models
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"net"
 	"server/ecs"
 	"server/state"
@@ -11,38 +13,187 @@ import (
 // ActivePlayers maps player network addresses (IP:port) to their ecs.Entity ID.
 var ActivePlayers = &state.TypedSyncMap[string, ecs.Entity]{}
 
-// CreatePlayerEntity registers a new player entity in the ECS registry and initializes its components.
+// savedPlayerData holds loaded DB state for a returning player.
+type savedPlayerData struct {
+	Pos       ecs.PositionComponent
+	Stats     ecs.StatsComponent
+	Equipment ecs.EquipmentComponent
+	Inventory map[uint64]int
+}
+
+// loadSavedPlayerState queries the DB for an existing character by name.
+// Returns nil if no saved state exists (brand new player).
+func loadSavedPlayerState(name string) *savedPlayerData {
+	if DBEngine == nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Step 1: Find the character by unique name.
+	var oldCharID uint64
+	err := DBEngine.QueryRowContext(ctx,
+		"SELECT id FROM characters WHERE name = ?", name,
+	).Scan(&oldCharID)
+	if err == sql.ErrNoRows {
+		return nil // New player — no saved state
+	}
+	if err != nil {
+		fmt.Printf("[LOAD] DB lookup error for %s: %v\n", name, err)
+		return nil
+	}
+
+	// Step 2: Load dynamic state (position, stats, equipment).
+	var mapID, x, z, hp, maxHP, damage int
+	var weaponID, armorID uint64
+	err = DBEngine.QueryRowContext(ctx,
+		`SELECT map_id, x, z, hp, max_hp, damage, weapon_id, armor_id
+		 FROM character_states WHERE character_id = ?`,
+		oldCharID,
+	).Scan(&mapID, &x, &z, &hp, &maxHP, &damage, &weaponID, &armorID)
+	if err != nil && err != sql.ErrNoRows {
+		fmt.Printf("[LOAD] State lookup error for %s (id %d): %v\n", name, oldCharID, err)
+		// Fall through with zero values — use defaults below
+	}
+
+	// Step 3: Load inventory items.
+	inventory := make(map[uint64]int)
+	rows, err := DBEngine.QueryContext(ctx,
+		"SELECT item_template_id, quantity FROM character_inventory WHERE character_id = ?",
+		oldCharID,
+	)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var itemID uint64
+			var qty int
+			if err := rows.Scan(&itemID, &qty); err == nil {
+				inventory[itemID] = qty
+			}
+		}
+	}
+
+	fmt.Printf("[LOAD] Recovered state for %s (old id %d): map=%d pos=(%d,%d) hp=%d/%d atk=%d weapon=%d armor=%d items=%d\n",
+		name, oldCharID, mapID, x, z, hp, maxHP, damage, weaponID, armorID, len(inventory))
+
+	return &savedPlayerData{
+		Pos:       ecs.PositionComponent{MapID: mapID, X: x, Z: z},
+		Stats:     ecs.StatsComponent{HP: hp, MaxHP: maxHP, Dam: damage},
+		Equipment: ecs.EquipmentComponent{WeaponID: weaponID, ArmorID: armorID},
+		Inventory: inventory,
+	}
+}
+
+// CreatePlayerEntity registers a player entity in the ECS registry.
+// If the player has previously connected from this address (same Guest_XXXX name),
+// their saved position, stats, equipment, and inventory are restored from the database.
+// Otherwise, a fresh character with default stats is created.
 //
 // Parameters:
 //   - conn: The live TCP socket connection of the player client.
 //
 // Returns:
-//   - The newly registered ecs.Entity ID.
-//   - An error if database insertion fails.
+//   - The ecs.Entity ID registered in the ECS registry.
+//   - An error if database operations fail.
 func CreatePlayerEntity(conn net.Conn) (ecs.Entity, error) {
 	playerAddress := conn.RemoteAddr().String()
 	guestName := "Guest_" + playerAddress[len(playerAddress)-4:]
-	
-	// Create a new entity ID atomically
+
+	// Phase 1: Load saved state if this player has been here before.
+	saved := loadSavedPlayerState(guestName)
+
+	// Phase 2: Generate a fresh entity ID for this session.
 	entityID := ecs.GlobalRegistry.NewEntity()
 
-	// Save static player info (ID & Name) to database once at login/creation
+	// Phase 3: Persist to database.
 	if DBEngine != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if _, err := DBEngine.ExecContext(ctx, "INSERT INTO characters (id, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name)", entityID, guestName); err != nil {
-			return 0, err
+
+		tx, err := DBEngine.BeginTx(ctx, nil)
+		if err != nil {
+			return 0, fmt.Errorf("DB transaction start failed: %w", err)
+		}
+		defer tx.Rollback()
+
+		// Delete old rows for this name (FK ON DELETE CASCADE cleans child tables).
+		if saved != nil {
+			if _, err := tx.ExecContext(ctx,
+				"DELETE FROM characters WHERE name = ?", guestName,
+			); err != nil {
+				return 0, fmt.Errorf("DB delete old character failed: %w", err)
+			}
+		}
+
+		// Insert the new character row.
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO characters (id, name) VALUES (?, ?)", entityID, guestName,
+		); err != nil {
+			return 0, fmt.Errorf("DB insert character failed: %w", err)
+		}
+
+		// Insert or restore dynamic state.
+		if saved != nil {
+			// Restore saved state.
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, weapon_id, armor_id)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				entityID,
+				saved.Pos.MapID, saved.Pos.X, saved.Pos.Z,
+				saved.Stats.HP, saved.Stats.MaxHP, saved.Stats.Dam,
+				saved.Equipment.WeaponID, saved.Equipment.ArmorID,
+			); err != nil {
+				return 0, fmt.Errorf("DB insert character_states failed: %w", err)
+			}
+
+			// Restore inventory items.
+			for itemID, qty := range saved.Inventory {
+				if _, err := tx.ExecContext(ctx,
+					"INSERT INTO character_inventory (character_id, item_template_id, quantity) VALUES (?, ?, ?)",
+					entityID, itemID, qty,
+				); err != nil {
+					return 0, fmt.Errorf("DB insert character_inventory failed: %w", err)
+				}
+			}
+		} else {
+			// Brand new player — insert default state.
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, weapon_id, armor_id)
+				 VALUES (?, 1, 0, 0, 100, 100, 15, 0, 0)`,
+				entityID,
+			); err != nil {
+				return 0, fmt.Errorf("DB insert default character_states failed: %w", err)
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			return 0, fmt.Errorf("DB commit failed: %w", err)
 		}
 	}
 
-	// Set inline component values (not pointers)
-	ecs.GlobalRegistry.SetPosition(entityID, ecs.PositionComponent{MapID: 1, X: 0, Z: 0})
+	// Phase 4: Register ECS components.
+	if saved != nil {
+		ecs.GlobalRegistry.SetPosition(entityID, saved.Pos)
+		ecs.GlobalRegistry.SetStats(entityID, saved.Stats)
+		ecs.GlobalRegistry.SetEquipment(entityID, saved.Equipment)
+
+		// Restore inventory into ECS.
+		if len(saved.Inventory) > 0 {
+			ecs.GlobalRegistry.SetInventory(entityID, ecs.InventoryComponent{
+				Items: saved.Inventory,
+			})
+		}
+	} else {
+		ecs.GlobalRegistry.SetPosition(entityID, ecs.PositionComponent{MapID: 1, X: 0, Z: 0})
+		ecs.GlobalRegistry.SetStats(entityID, ecs.StatsComponent{HP: 100, MaxHP: 100, Dam: 15})
+		ecs.GlobalRegistry.SetEquipment(entityID, ecs.EquipmentComponent{WeaponID: 0, ArmorID: 0})
+	}
+
 	ecs.GlobalRegistry.SetConnection(entityID, ecs.ConnectionComponent{Conn: conn})
 	ecs.GlobalRegistry.SetMetadata(entityID, ecs.MetadataComponent{Name: guestName, Type: "player"})
-	ecs.GlobalRegistry.SetStats(entityID, ecs.StatsComponent{HP: 100, MaxHP: 100, Dam: 15})
-	ecs.GlobalRegistry.SetEquipment(entityID, ecs.EquipmentComponent{WeaponID: 0, ArmorID: 0})
 
-	// Track active player mapping
+	// Track active player mapping.
 	ActivePlayers.Set(playerAddress, entityID)
 
 	return entityID, nil
