@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strconv"
 	"server/ecs"
+	"strconv"
 )
 
 // MonsterTemplate defines the raw template data loaded from configuration.
@@ -15,6 +15,8 @@ type MonsterTemplate struct {
 	HP   int    `json:"hp"`
 	Dam  int    `json:"damage"`
 }
+
+var nextMonsterInstanceID = 1000
 
 // CreateMonsterEntity registers a monster template as an Entity in ECS.
 //
