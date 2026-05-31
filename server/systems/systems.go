@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"server/ecs"
+	"time"
 )
 
 // BroadcastSystem sends a raw byte payload to every entity with an active connection.
@@ -52,8 +53,12 @@ func writeConn(c net.Conn, data []byte) {
 	if c == nil {
 		return
 	}
-	// TODO: set c.SetWriteDeadline(time.Now().Add(writeTimeout)) khi production
-	c.Write(data) //nolint:errcheck — disconnect handled by read-side goroutine
+	// Set a 5-second write deadline to avoid blocking indefinitely on slow clients.
+	_ = c.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if _, err := c.Write(data); err != nil {
+		// Close the socket on write failure to trigger deferred disconnect cleanup in handleClient.
+		c.Close()
+	}
 }
 
 // MovementSystem validates and commits a position update.
@@ -69,6 +74,13 @@ func MovementSystem(entity ecs.Entity, x, z int) bool {
 	if !ok {
 		return false
 	}
+
+	// NEW CELL COLLISION GATE: Verify spatial passability status
+	if IsTileBlocked(pos.MapID, x, z) {
+		SendNoticeSystem(entity, []byte(fmt.Sprintf("Collision Alert: Path is blocked by a solid obstacle at coordinate (%d, %d)!\r\n", x, z)))
+		return false
+	}
+
 	pos.X = x
 	pos.Z = z
 	registry.SetPosition(entity, pos)
@@ -80,9 +92,9 @@ func MovementSystem(entity ecs.Entity, x, z int) bool {
 	if !metaOk {
 		return false
 	}
-	msg := fmt.Sprintf("Player %s moved to X=%d Z=%d\r\n", meta.Name, x, z)
-	BroadcastExcept(entity, []byte(msg))
-	fmt.Printf("[MOVEMENT] %s → (%d, %d)\n", meta.Name, x, z)
+	msg := fmt.Sprintf("Player %s moved to position: X=%d, Z=%d\r\n", meta.Name, x, z)
+	BroadcastToMap(pos.MapID, msg)
+	fmt.Printf("[MOVEMENT] %s → (%d, %d) on Map %d\n", meta.Name, x, z, pos.MapID)
 	return true
 }
 

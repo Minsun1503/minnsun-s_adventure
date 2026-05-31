@@ -1,0 +1,43 @@
+Phase 1: Core Networking & Concurrency Foundations
+Lecture 1: Low-Level TCP Socket Listeners and String Echo Protocols
+
+Lecture 2: Multi-Threaded Architecture and Client Goroutine Spawn Pools
+
+Lecture 3: Structured Request Parsers and Command String Tokenizers
+
+Lecture 4: State Persistence and Global Player Map Registries
+
+Lecture 5: Connection Lifecycle Management and Graceful Defer Cleanup Blocks
+
+Phase 2: In-Memory Storage & Data Architecture
+Lecture 6: Dynamic Broadcasters and Shared Network Data Pipelines
+
+Lecture 7: Decoupling Engine Logic into Architectural Packages (models/)
+
+Lecture 8: If-Initializers and Safe String-to-Integer Type Conversions
+
+Lecture 9: Memory Layouts: Struct Pointers vs. Copy-by-Value Struct Fields
+
+Lecture 10: Configuration Systems: Static JSON Monster Template Parsers
+
+Phase 3: Authoritative Systems Design
+Lecture 11: Command Input Filtering and Authoritative Parameter Validation
+
+Lecture 12: Struct Methods and Map Coordinate Boundaries Security Guardrails
+
+Lecture 13: Game Loops, Metronome Tickers, and State-Based Map Sleep Optimizations
+
+Lecture 14: Thread Safety, Data Race Conditions, and Mutex Access Gates
+
+Lecture 15: Dynamic Entities: Instantiating Live Map Creatures from Static Blueprints
+
+Phase 4: High-Performance ECS Refactoring
+Lecture 16: Designing a Lock-Free ECS Registry with Generic TypedSyncMap Data Columns
+
+Lecture 17: Atomic Entity Token Generators and Inline Value Memory Locality
+
+Lecture 18: Cross-Entity Interactions and the Copy-Modify-Overwrite Data Pattern
+
+Lecture 19: Proximity Query Engineering: Spatial Partitioning via Grid Chunks
+
+Lecture 20: The AI State Machine Loop: Decoupling Roaming, Chasing, and Leashing

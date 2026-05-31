@@ -3,7 +3,58 @@
 ## 1. Những gì đã làm (What was done)
 - Thêm hàm `send_notice_to_player(message string, conn net.Conn)` vào cuối file [server.go](file:///c:/Minnsun's Adventure/server/server.go) để trừu tượng hóa việc gửi gói tin/thông báo text đến client.
 - Thay thế dòng ghi trực tiếp `conn.Write` chào mừng người chơi ở dòng 43 bằng lời gọi hàm `send_notice_to_player`.
-  - Tái cấu trúc toàn bộ mã nguồn sang kiến trúc **ECS (Entity-Component-System)** hoàn chỉnh:
+- Cải tiến hàm [writeConn](file:///c:/Minnsun's Adventure/server/systems/systems.go#L51) trong [systems.go](file:///c:/Minnsun's Adventure/server/systems/systems.go) để thiết lập write deadline là 5 giây (tránh slow client block luồng) và tự động gọi `c.Close()` khi xảy ra lỗi ghi để buộc giải phóng và kích hoạt khối defer dọn dẹp trong [handleClient](file:///c:/Minnsun's Adventure/server/server.go#L76).
+- Tích hợp thông báo tấn công đặc biệt cho quái vật (Special monster combat & death notices) vào [combat.go](file:///c:/Minnsun's Adventure/server/systems/combat.go) để định dạng và phát các tin thông báo dạng custom (`💀 [DEATH]`, `⚔️ [COMBAT]`) đồng thời tránh lỗi xung đột ghi đè dữ liệu (Copy-Modify-Overwrite) trong máy trạng thái AI.
+- Thêm [InventoryComponent](file:///c:/Minnsun's Adventure/server/ecs/inventory_component.go) vào ECS Registry để quản lý đồ vật của người chơi và quái vật.
+- Thêm cơ chế rơi đồ và bảng loot quái vật (Loot Drop & Monster Loot Tables) tại [loot.go](file:///c:/Minnsun's Adventure/server/systems/loot.go) trong package `systems` để loại bỏ vòng lặp phụ thuộc (import cycle) với package `models`.
+- Tích hợp tính năng tự động rơi vật phẩm và cộng vào túi đồ của người chơi khi tiêu diệt quái vật thành công trực tiếp vào [AttackSystem](file:///c:/Minnsun's Adventure/server/systems/combat.go#L34).
+- Thêm cơ chế tra cứu hòm đồ [RunInventoryQuerySystem](file:///c:/Minnsun's Adventure/server/systems/inventory_query.go) hỗ trợ lệnh `I` / `INV` của người chơi.
+- Di chuyển bộ đăng ký vật phẩm [ItemRegistry](file:///c:/Minnsun's Adventure/server/systems/item.go) từ package `models` sang package `systems` để tránh vòng lặp phụ thuộc (import cycle) và khởi tạo chúng lúc khởi động Server.
+- Nâng cấp [StatsComponent](file:///c:/Minnsun's Adventure/server/ecs/ecs.go#L30) để hỗ trợ giới hạn sinh mệnh tối đa `MaxHP` của người chơi và quái vật, đồng thời cập nhật logic khởi tạo cho chúng tại [player.go](file:///c:/Minnsun's Adventure/server/models/player.go) và [monster.go](file:///c:/Minnsun's Adventure/server/models/monster.go).
+- Thêm hệ thống sử dụng vật phẩm [HandleItemUsageSystem](file:///c:/Minnsun's Adventure/server/systems/item_usage.go) để xử lý lệnh `USE [item_id]`, khấu trừ số lượng vật phẩm trong balo và hồi phục sinh mệnh an toàn dưới dạng giao thức ECS.
+- Nâng cấp cấu trúc [PositionComponent](file:///c:/Minnsun's Adventure/server/ecs/ecs.go#L16) với trường `MapID` để hỗ trợ hệ thống phân vùng bản đồ.
+- Tích hợp bộ phát tin phân vùng bản đồ [BroadcastToMap](file:///c:/Minnsun's Adventure/server/systems/broadcast.go) giúp giới hạn các thông điệp di chuyển và chiến đấu chỉ truyền tới những người chơi đứng cùng khu vực bản đồ.
+- Tích hợp `MapID` vào cấu trúc phân vùng không gian [ChunkKey](file:///c:/Minnsun's Adventure/server/systems/spatial.go#L18) và các hàm chuyển đổi [worldToChunk](file:///c:/Minnsun's Adventure/server/systems/spatial.go#L57), truy vấn lân cận [QueryRadius](file:///c:/Minnsun's Adventure/server/systems/spatial.go#L154) trong [spatial.go](file:///c:/Minnsun's Adventure/server/systems/spatial.go) để ngăn chặn hoàn toàn việc kiểm tra chéo không gian giữa các Map khác nhau (khắc phục hoàn toàn lỗi quái vật đuổi bắt chéo bản đồ).
+- Thêm hệ thống cổng dịch chuyển [ExecuteMapTransfer](file:///c:/Minnsun's Adventure/server/systems/gateway.go) hỗ trợ di chuyển an toàn giữa các map và đồng bộ vị trí thực thể tức thời vào Spatial Grid.
+- Tích hợp lệnh điều phối dịch chuyển `WARP [Map_ID] [X] [Z]` vào cấu trúc điều hướng lệnh [handleCommand](file:///c:/Minnsun's Adventure/server/server.go#L117) của [server.go](file:///c:/Minnsun's Adventure/server/server.go).
+- Loại bỏ toàn bộ emoji khỏi các gói tin mạng, thông báo lỗi và nhật ký thông báo hệ thống (portal, warp, item usage, command syntax) để chuẩn hóa giao tiếp text thuần túy.
+- **Nâng cấp Giao thức Nhị phân (Binary Packet Protocol)**:
+  - Thay đổi vòng lặp đọc của client trong `handleClient` ở [server.go](file:///c:/Minnsun's Adventure/server/server.go) sang giao thức nhị phân dạng `[Length uint16] [Opcode uint8] [Payload N-bytes]`.
+  - Thay thế hàm `handleCommand` thành `handleBinaryPacket` điều phối gói tin theo `Opcode` (1: MOVE, 2: INV, 3: USE, 4: WARP, 5: ATTACK, 6: INFO, 7: QUIT).
+  - Nâng cấp [HandlePlayerMovementSystem](file:///c:/Minnsun's Adventure/server/systems/movement.go) giải mã tọa độ X, Z (int32 BE) từ payload nhị phân.
+  - Nâng cấp [HandleItemUsageSystem](file:///c:/Minnsun's Adventure/server/systems/item_usage.go) giải mã `ItemID` (uint64 BE) từ payload nhị phân.
+  - Thêm `HandleWarpSystem` trong [systems/gateway.go](file:///c:/Minnsun's Adventure/server/systems/gateway.go) giải mã `MapID`, `X`, Z (int32 BE) từ payload nhị phân.
+  - Tạo file mock client nhị phân tại [mock_client.go](file:///C:/Users/84845.DESKTOP-6UDUU1B/.gemini/antigravity-ide/brain/1b3e3809-efc1-4008-b4b9-eca00115a78d/scratch/mock_client.go) để kiểm thử giao thức mới.
+- **Hệ thống Vật phẩm trên Mặt đất & Phân rã theo thời gian (Ground Item Drops & Lifetime Despawn)**:
+  - Thêm [LifetimeComponent](file:///c:/Minnsun's Adventure/server/ecs/lifetime_component.go) để theo dõi thời gian bắt đầu và thời lượng tồn tại của vật phẩm rơi trên đất.
+  - Cập nhật [ecs.go](file:///c:/Minnsun's Adventure/server/ecs/ecs.go) để đăng ký cột dữ liệu `lifetimes` và thực hiện dọn dẹp song song khi giải phóng thực thể trong `RemoveEntity` (nâng wg.Add từ 6 lên 7 để dọn sạch sẽ tránh rò rỉ).
+  - Viết hệ thống sinh vật phẩm `SpawnItemOnGround` và hệ thống quét phân rã `RunGroundItemDecaySystem` tại [systems/ground_item.go](file:///c:/Minnsun's Adventure/server/systems/ground_item.go) tự động dọn dẹp các vật phẩm hết hạn và đồng bộ ra khỏi `GlobalSpatialGrid` tránh lỗi ma thực thể (tích hợp **Spawn Guard** từ chối nạp template lỗi để tránh dữ liệu ảo).
+  - Tích hợp gọi hệ thống phân rã vào heartbeat game loop tại [gameloop.go](file:///c:/Minnsun's Adventure/server/systems/gameloop.go) chạy nền 250ms định kỳ.
+  - Tích hợp cơ chế sinh vật phẩm rơi tự do trên mặt đất khi quái vật bị tiêu diệt vào [combat.go](file:///c:/Minnsun's Adventure/server/systems/combat.go#L92), thay thế hoàn toàn việc tự động cộng đồ thẳng vào balo người chơi. Đồng thời áp dụng **Loot Scattering** tạo độ lệch ngẫu nhiên nhỏ (±1 ô tọa độ) và clamp trong biên giới bản đồ (0-100) để phân tán vật phẩm rơi trực quan hơn.
+- **Hệ thống Nhặt vật phẩm dưới đất (Ground Loot Pickup System)**:
+  - Thiết lập hệ thống [pickup.go](file:///c:/Minnsun's Adventure/server/systems/pickup.go) xử lý hàm `HandleItemPickupSystem` kiểm tra khoảng cách an toàn (dưới 5.0 đơn vị), xóa thực thể khỏi Spatial Grid và Registry tức thời để ngăn chặn lỗi trùng lặp (dupe) đồ, và chuyển vật phẩm vào túi đồ của người chơi.
+  - Đăng ký **Opcode 8 (PICKUP)** trong [server.go](file:///c:/Minnsun's Adventure/server/server.go) để nhận diện yêu cầu và giải mã ID vật phẩm rơi (uint64 BE, 8 bytes) chuyển tiếp qua Pickup System.
+  - Cập nhật client giả lập tại [mock_client.go](file:///C:/Users/84845.DESKTOP-6UDUU1B/.gemini/antigravity-ide/brain/1b3e3809-efc1-4008-b4b9-eca00115a78d/scratch/mock_client.go) để kiểm thử gói tin nhặt đồ nhị phân (Opcode 8) gửi về máy chủ.
+- **Trang bị slots & Tính toán chỉ số linh hoạt (Equipment slots & Stat Aggregator)**:
+  - Thêm [EquipmentComponent](file:///c:/Minnsun's Adventure/server/ecs/equipment_component.go) để theo dõi trạng thái trang bị của thực thể (Weapon, Armor).
+  - Cập nhật [ecs.go](file:///c:/Minnsun's Adventure/server/ecs/ecs.go) để đăng ký cột `equipment`, nâng số lượng luồng dọn dẹp song song trong `RemoveEntity` lên **9 luồng** (`wg.Add(9)`) tránh rò rỉ khi người chơi thoát, và cung cấp các hàm helper Get/Set.
+  - Nâng cấp [ItemTemplate](file:///c:/Minnsun's Adventure/server/systems/item.go#L4) để hỗ trợ các chỉ số cộng thêm (`SlotType`, `BonusDam`, `BonusHP`) và khởi tạo sẵn trang bị mẫu (`Iron Sword` cộng 15 Dam, `Leather Armor` cộng 30 HP).
+  - Xây dựng hệ thống tái tính toán chỉ số [RecalculateActiveStats](file:///c:/Minnsun's Adventure/server/systems/stat_engine.go#L9) làm nguồn chân lý duy nhất (Single Source of Truth) kết hợp chỉ số cơ bản của người chơi với chỉ số cộng thêm từ trang bị.
+  - Xây dựng hệ thống xử lý trang bị đồ [HandleEquipmentSystem](file:///c:/Minnsun's Adventure/server/systems/equipment.go#L9) để kiểm tra túi đồ, cập nhật khe cắm và tự động cập nhật lại combat stats.
+  - Cập nhật [player.go](file:///c:/Minnsun's Adventure/server/models/player.go#L19) để khởi tạo rỗng các trang bị khi người chơi mới kết nối.
+  - Đăng ký **Opcode 9 (EQUIP)** tại [server.go](file:///c:/Minnsun's Adventure/server/server.go) nhận diện yêu cầu trang bị nhị phân chứa ID vật phẩm (uint64 BE, 8 bytes).
+  - Cập nhật client giả lập tại [mock_client.go](file:///C:/Users/84845.DESKTOP-6UDUU1B/.gemini/antigravity-ide/brain/1b3e3809-efc1-4008-b4b9-eca00115a78d/scratch/mock_client.go) để kiểm thử gói tin trang bị nhị phân (Opcode 9).
+- **Hệ thống Lưới va chạm & Cản vật thể (Map Obstacles & Collision Blocking)**:
+  - Thêm [map_collision.go](file:///c:/Minnsun's Adventure/server/systems/map_collision.go) định nghĩa lưới va chạm `MapCollisionGrid` kích thước 101x101 để lưu trữ mảng cản tĩnh O(1) tránh duyệt danh sách ngầm. Thiết lập cản Town Square (50, 50) và dải tường Z=15 (X: 10-20) cho bản đồ số 1.
+  - Tích hợp hàm check va chạm `IsTileBlocked` trực tiếp vào hàm chuyển động [MovementSystem](file:///c:/Minnsun's Adventure/server/systems/systems.go#L76) của người chơi và quái vật. Mọi di chuyển vào ô cản sẽ bị từ chối chuyển động với cảnh báo text sạch emoji.
+  - Cập nhật thuật toán sinh bước đi ngẫu nhiên [roamStep](file:///c:/Minnsun's Adventure/server/systems/ai_roaming.go#L267) của quái vật AI để bỏ qua các tọa độ bị cản, tránh việc AI đi xuyên tường/vật thể.
+  - Kích hoạt khởi tạo lưới cản `InitializeCollisionMaps` trong main của [server.go](file:///c:/Minnsun's Adventure/server/server.go#L16) lúc Server boot.
+- **Hệ thống Tìm đường thông minh của quái vật AI (AI Localized Pathfinding)**:
+  - Thiết lập [pathfinding.go](file:///c:/Minnsun's Adventure/server/systems/pathfinding.go) cài đặt hàm `FindPath` thuật toán BFS để quái vật tự động tìm hướng đi vòng tránh ô cản trên lưới 2D.
+  - Tích hợp giới hạn tìm kiếm tối đa 400 nút duyệt để ngăn chặn suy giảm hiệu năng Game Loop (heartbeat 250ms).
+  - Cập nhật [ai_roaming.go](file:///c:/Minnsun's Adventure/server/systems/ai_roaming.go) áp dụng `FindPath` thay thế cho hàm đi thẳng `stepToward` khi quái vật đang đuổi bắt người chơi (`Chasing`) hoặc quay trở lại spawn (`Returning`).
+  - **Tối ưu hóa Memory Pool**: Triển khai `sync.Pool` tái sử dụng bộ đệm queue slice và maps thông qua struct `pathfindContext`, sử dụng hàm `clear()` tích hợp của Go để dọn dẹp bộ đệm map mà không giải phóng dung lượng đã cấp phát, triệt tiêu hoàn toàn heap allocations của thuật toán tìm đường trên Game Loop.
+- Tái cấu trúc toàn bộ mã nguồn sang kiến trúc **ECS (Entity-Component-System)** hoàn chỉnh:
   - Tạo package [ecs](file:///c:/Minnsun's Adventure/server/ecs/ecs.go) chứa thực thể `Entity` dạng `uint64` (thay cho dạng string) giúp tối ưu hóa tra cứu O(1) tránh băm chuỗi, và lưu trữ Component dưới dạng Inline value tránh cấp phát bộ nhớ phụ (heap allocs).
   - Tối ưu hóa Registry sử dụng cấu trúc `TypedSyncMap` an toàn luồng bọc quanh `sync.Map` được cài đặt tại [state.go](file:///c:/Minnsun's Adventure/server/state/state.go) giúp loại bỏ hoàn toàn cơ chế Mutex thô, đồng thời thực hiện xóa các Component song song thông qua `sync.WaitGroup`.
   - Loại bỏ hoàn toàn package `network` (đã xóa thư mục `network`) do không còn sử dụng.
@@ -16,6 +67,23 @@
   - Tích hợp `AIComponent` vào ECS Registry: Thêm trường `ai` kiểu `state.TypedSyncMap[Entity, AIComponent]` vào struct `Registry` trong [ecs.go](file:///c:/Minnsun's Adventure/server/ecs/ecs.go) và thực hiện xóa dọn dẹp AIComponent khi giải phóng Entity trong `RemoveEntity`.
   - Khắc phục lỗi biên dịch `MonsterTemplate` bằng cách tách biệt rõ ràng việc đăng ký static template (`CreateMonsterEntity` sử dụng ID tĩnh) và sinh thực thể quái vật sống (`SpawnMonsterFromTemplate` khởi tạo tọa độ thực tế, đăng ký vào spatial grid và kích hoạt AIComponent).
   - Tự động sinh (spawn) 5 thực thể quái vật sống (Slime, Wild Boar, Sea King Proto) từ template tại các tọa độ khởi tạo khác nhau khi Server khởi động thành công.
+- **Tích hợp hệ thống lưu trữ dữ liệu MySQL không chặn (Asynchronous Database Save Queue via MySQL)**:
+  - Khởi tạo Database MySQL và tạo các bảng `characters` (chứa dữ liệu tĩnh như tên người chơi), `character_states` (chứa dữ liệu động như vị trí, sinh mệnh, sát thương, trang bị) và `character_inventory` (balo hòm đồ) khi Server boot thông qua DSN `root:root@tcp(127.0.0.1:3306)/?parseTime=true`.
+  - Triển khai **Hàng đợi Kết nối & Thao tác Thao tác Đăng nhập (Throttled Login Queue / Connection Pool)** thông qua channel đệm `LoginQueue` (kích thước 1000) và 4 luồng chạy nền `StartLoginWorkerPool`. Khi client kết nối, socket được đẩy non-blocking vào hàng đợi, tránh block hoàn toàn luồng listener chấp nhận kết nối chính (`Accept()`).
+  - Thực hiện lưu thông tin tĩnh của người chơi (ID & Name) vào bảng `characters` một lần duy nhất khi họ kết nối thành công tại `CreatePlayerEntity` trong [models/player.go](file:///c:/Minnsun's Adventure/server/models/player.go). Nếu quá trình ghi DB tĩnh thất bại, Server từ chối kết nối (Handshake Connection Guard) để đảm bảo không rò rỉ hoặc sai lệch khóa ngoại.
+  - Khởi chạy luồng chạy nền Save Worker Engine (`StartSaveWorkerEngine`) lắng nghe channel `SaveQueue` để thực hiện ghi cơ sở dữ liệu bất đồng bộ. Hàng đợi này chỉ thực hiện cập nhật dữ liệu động (`character_states`, `character_inventory`) khi người chơi ngắt kết nối (`QUIT`), tối ưu hóa I/O bằng cách loại bỏ hoàn toàn các câu lệnh ghi dữ liệu tĩnh lặp đi lặp lại.
+  - Tích hợp `systems.QueuePlayerSave(playerEntity)` vào defer block dọn dẹp kết nối trong `handleClient` của [server.go](file:///c:/Minnsun's Adventure/server/server.go) để lưu trạng thái người chơi trước khi RemoveEntity dọn dẹp các component trong RAM.
+  - Giải quyết lỗi chu kỳ vòng lặp import (Import Cycle Error): Loại bỏ import `"server/systems"` và lời gọi update spatial grid ra khỏi [models/monster.go](file:///c:/Minnsun's Adventure/server/models/monster.go). Di chuyển cơ chế đăng ký Grid của quái vật khi Spawn lên hàm `main` của [server.go](file:///c:/Minnsun's Adventure/server/server.go), đảm bảo tính tree-structured của các dependency package trong Go.
+  - Sử dụng cú pháp MySQL `ON DUPLICATE KEY UPDATE` cho các câu lệnh Upsert để đảm bảo tương thích tốt nhất với hệ quản trị cơ sở dữ liệu MySQL (thay vì SQLite `ON CONFLICT` nguyên bản).
+  - Tạo file SQL schema tham chiếu chi tiết tại [schema.sql](file:///c:/Minnsun's Adventure/server/schema.sql) để dễ dàng kiểm tra cấu trúc bảng.
+  - Tích hợp ràng buộc duy nhất `UNIQUE KEY idx_char_name (name)` cho bảng `characters` nhằm tối ưu hóa tra cứu và tránh trùng lặp tên nhân vật.
+  - Áp dụng `context.WithTimeout` cho mọi thao tác DB: 3 giây cho login (`CreatePlayerEntity` trong [player.go](file:///c:/Minnsun's Adventure/server/models/player.go)), 5 giây cho save worker (`executeWriteToSQL` trong [save_engine.go](file:///c:/Minnsun's Adventure/server/systems/save_engine.go)). Giải phóng luồng worker nhanh chóng khi DB gặp sự cố.
+- **Hệ thống Gói Tin Lỗi Nhị phân (Binary Error Opcode)**:
+  - Tạo file [error_packet.go](file:///c:/Minnsun's Adventure/server/systems/error_packet.go) định nghĩa Opcode `0xFF` (255) dành riêng cho phản hồi lỗi hệ thống từ Server về Client.
+  - Format gói tin: `[Length uint16 BE][Opcode 0xFF][ErrorCode uint16 BE][MessageLen uint16 BE][Message UTF-8]`.
+  - Các mã lỗi được định nghĩa sẵn: `ErrCodeServerFull (1)` — hàng đợi Login đầy, `ErrCodeDatabaseError (2)` — lỗi DB timeout/failure, `ErrCodeInternalError (3)` — lỗi nội bộ không mong đợi.
+  - Hàm `SendErrorPacket(conn, errorCode, message)` ghi trực tiếp vào `net.Conn` thô (không cần entity ECS) vì tại thời điểm lỗi login, entity chưa tồn tại trong Registry.
+  - Thay thế tất cả các lời gọi `conn.Write([]byte("Error: ..."))` text thô trong [server.go](file:///c:/Minnsun's Adventure/server/server.go) bằng `SendErrorPacket` nhị phân, giúp Unity Client parse `ErrorCode` để hiển thị popup lỗi chính xác thay vì chuỗi text thô.
 
 ## 2. Những "đặc sản" logic vừa tìm thấy (Discovered Logic Specialties)
 - Server sử dụng giao thức TCP thô ở cổng `:1503`.
@@ -23,7 +91,11 @@
 - Sử dụng mô hình ECS tách biệt tuyệt đối giữa Dữ liệu (Components) và Logic (Systems). Các thực thể chỉ tương tác qua ID kiểu `ecs.Entity` (chuỗi địa chỉ cho người chơi, hoặc ID quái vật).
 - Cấu trúc thư mục Client Unity nằm dưới thư mục `client/Minnsun's Adventure` và chứa các file mã nguồn/asset cần thiết phải được theo dõi bởi Git, trong khi thư mục `Library/` chứa hàng ngàn file cache sinh ra bởi Unity.
 - Các thực thể AI quái vật sẽ tự động chuyển đổi trạng thái (Idle -> Roaming -> Chasing -> Attacking -> Returning) phụ thuộc vào khoảng cách người chơi thông qua `ProximitySystem` và `SpatialGrid`.
+- Database lưu trữ sử dụng MySQL (DSN local mặc định là `root:root@tcp(127.0.0.1:3306)/?parseTime=true`).
+- Ràng buộc import chéo Go: Go Package không cho phép import chéo giữa hai thư mục package độc lập. Do đó, các package phụ trợ như `models` chỉ nên cung cấp dữ liệu cấu trúc thô và thao tác DB thô, không được import ngược lại package `systems`. Các logic đăng ký và tương tác hệ thống chéo phải được chuyển lên `server.go` điều phối chính.
+- Giao thức lỗi nhị phân: Opcode 255 (0xFF) là opcode dành riêng cho Server Error. Client Unity cần switch trên `ErrorCode` (uint16 BE) tại byte offset 3-4 sau opcode để hiển thị popup tương ứng.
 
 ## 3. Những việc còn dang dở (Pending tasks)
+- Khôi phục (Load) dữ liệu người chơi từ DB khi họ đăng nhập (hiện tại người chơi kết nối luôn được khởi tạo dưới tên Guest mới với chỉ số mặc định, chưa được load ngược lại từ các bảng `character_states` và `character_inventory`).
 - Tự chạy và kiểm thử kiểm soát đa kết nối Client trong môi trường ECS mới.
 - Kết nối logic Client Unity với ECS Server thông qua TCP client.

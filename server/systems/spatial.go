@@ -16,8 +16,9 @@ const chunkSize = 20
 // ChunkKey identifies a single spatial partition cell by its grid coordinates.
 // Derived from world position: ChunkKey{X: pos.X / chunkSize, Z: pos.Z / chunkSize}
 type ChunkKey struct {
-	X int
-	Z int
+	MapID int
+	X     int
+	Z     int
 }
 
 // chunkEntry holds an entity and its precise world position inside the chunk.
@@ -58,8 +59,9 @@ func newSpatialGrid() *SpatialGrid {
 // worldToChunk converts a world-space position into its ChunkKey.
 func worldToChunk(pos ecs.PositionComponent) ChunkKey {
 	return ChunkKey{
-		X: int(math.Floor(float64(pos.X) / chunkSize)),
-		Z: int(math.Floor(float64(pos.Z) / chunkSize)),
+		MapID: pos.MapID,
+		X:     int(math.Floor(float64(pos.X) / chunkSize)),
+		Z:     int(math.Floor(float64(pos.Z) / chunkSize)),
 	}
 }
 
@@ -168,7 +170,7 @@ func (g *SpatialGrid) QueryRadius(
 
 	for dz := -chunkRadius; dz <= chunkRadius; dz++ {
 		for dx := -chunkRadius; dx <= chunkRadius; dx++ {
-			key := ChunkKey{X: originChunk.X + dx, Z: originChunk.Z + dz}
+			key := ChunkKey{MapID: originChunk.MapID, X: originChunk.X + dx, Z: originChunk.Z + dz}
 			bucket, ok := g.chunks[key]
 			if !ok {
 				continue

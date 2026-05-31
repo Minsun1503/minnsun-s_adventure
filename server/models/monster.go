@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"server/ecs"
-	"server/systems"
 	"sync"
 )
 
@@ -94,16 +93,14 @@ func SpawnMonsterFromTemplate(templateID, spawnX, spawnZ int) (ecs.Entity, error
 		Type: "monster",
 	})
 
-	spawnPos := ecs.PositionComponent{X: spawnX, Z: spawnZ}
+	spawnPos := ecs.PositionComponent{MapID: 1, X: spawnX, Z: spawnZ}
 	ecs.GlobalRegistry.SetPosition(id, spawnPos)
 
 	ecs.GlobalRegistry.SetStats(id, ecs.StatsComponent{
-		HP:  t.HP,
-		Dam: t.Dam,
+		HP:    t.HP,
+		MaxHP: t.HP,
+		Dam:   t.Dam,
 	})
-
-	// Register in spatial grid before the first AI tick fires.
-	systems.GlobalSpatialGrid.UpdateEntityPosition(id, spawnPos)
 
 	// Derive leash radius from aggro radius — always 2× so monsters
 	// don't instantly give up but also don't chase indefinitely.

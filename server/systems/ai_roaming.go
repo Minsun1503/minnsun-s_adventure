@@ -131,7 +131,7 @@ func tickChasing(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 	}
 
 	// Step one unit toward the target.
-	nextX, nextZ := stepToward(myPos, targetPos)
+	nextX, nextZ := FindPath(myPos, targetPos)
 	MovementSystem(id, nextX, nextZ)
 	return ai
 }
@@ -202,7 +202,7 @@ func tickReturning(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 	}
 
 	// Step toward spawn via MovementSystem.
-	nextX, nextZ := stepToward(pos, spawnPos)
+	nextX, nextZ := FindPath(pos, spawnPos)
 	MovementSystem(id, nextX, nextZ)
 	return ai
 }
@@ -261,6 +261,11 @@ func roamStep(pos ecs.PositionComponent, ai ecs.AIComponent) (int, int, bool) {
 		// Must stay within global map bounds (MovementSystem also checks, but
 		// early-exit here avoids a useless system call).
 		if nx < 0 || nx > 100 || nz < 0 || nz > 100 {
+			continue
+		}
+
+		// Must not be blocked by static obstacles
+		if IsTileBlocked(pos.MapID, nx, nz) {
 			continue
 		}
 

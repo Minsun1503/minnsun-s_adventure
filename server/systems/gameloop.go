@@ -31,6 +31,9 @@ func tickWorld() {
 		return true
 	})
 
+	// Process floor items lifecycle expiration countdown
+	RunGroundItemDecaySystem()
+
 	// Only run AI ticks when at least one player is online.
 	// MAP SLEEP TRICK: zero players → no AI computation at all.
 	if !hasPlayers {
@@ -63,4 +66,7 @@ func UpdateWorldEntitiesSystem() {
 		processMonster(snap)
 		return true
 	})
+
+	// Process floor items lifecycle expiration countdown
+	RunGroundItemDecaySystem()
 }

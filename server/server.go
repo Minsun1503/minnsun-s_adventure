@@ -1,18 +1,65 @@
 package main
 
 import (
-	"bufio"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
-	"strconv"
-	"strings"
 
 	"server/ecs"
 	"server/models"
 	"server/systems"
 )
 
+// LoginQueue is a buffered channel that holds incoming TCP connections waiting to log in.
+var LoginQueue = make(chan net.Conn, 1000)
+
+// StartLoginWorkerPool spins up a pool of background worker goroutines to process connections.
+func StartLoginWorkerPool(workerCount int) {
+	for i := 0; i < workerCount; i++ {
+		go func(workerID int) {
+			fmt.Printf("[BOOT] Connection login worker #%d active.\n", workerID)
+			for conn := range LoginQueue {
+				processLogin(conn)
+			}
+		}(i)
+	}
+}
+
+// processLogin manages the database registration and player entity creation.
+func processLogin(conn net.Conn) {
+	playerEntity, err := models.CreatePlayerEntity(conn)
+	if err != nil {
+		fmt.Println("[CONNECT] Error registering character in DB:", err)
+		systems.SendErrorPacket(conn, systems.ErrCodeDatabaseError, "Temporary server database issue. Please try again later.")
+		conn.Close()
+		return
+	}
+
+	// Single snapshot lookup — covers name + spawn position in one call.
+	snap, ok := ecs.GlobalRegistry.GetSnapshot(playerEntity)
+	if !ok {
+		// Entity registration failed somehow; drop the connection cleanly.
+		conn.Close()
+		return
+	}
+
+	fmt.Printf("[CONNECT] %s (entity %d)\n", snap.Meta.Name, playerEntity)
+	systems.BroadcastSystem(
+		[]byte(fmt.Sprintf("Player %s has logged into the game!\r\n", snap.Meta.Name)),
+	)
+
+	go handleClient(conn, playerEntity, snap)
+}
+
 func main() {
+	systems.InitializeItemRegistry()
+	systems.InitializeLootTables()
+	systems.InitializeCollisionMaps()
+
+	models.InitializeDatabase("root:root@tcp(127.0.0.1:3306)/?parseTime=true")
+	systems.StartSaveWorkerEngine()
+
 	templates, err := models.LoadMonster("data/monster_templates.json")
 	if err != nil {
 		fmt.Println("CRITICAL SERVER BOOT ERROR:", err)
@@ -22,9 +69,13 @@ func main() {
 
 	spawned := 0
 	for _, t := range templates {
-		if _, err := models.SpawnFromDefaultPosition(t.ID); err != nil {
+		id, err := models.SpawnFromDefaultPosition(t.ID)
+		if err != nil {
 			fmt.Printf("[BOOT] Failed to spawn template %d (%s): %v\n", t.ID, t.Name, err)
 			continue
+		}
+		if pos, ok := ecs.GlobalRegistry.GetPosition(id); ok {
+			systems.GlobalSpatialGrid.UpdateEntityPosition(id, pos)
 		}
 		spawned++
 	}
@@ -39,6 +90,7 @@ func main() {
 	fmt.Println("[BOOT] Server listening on", lis.Addr())
 
 	systems.StartGameLoop()
+	StartLoginWorkerPool(4) // Start 4 connection login workers to process db queue
 
 	for {
 		conn, err := lis.Accept()
@@ -47,22 +99,13 @@ func main() {
 			return
 		}
 
-		playerEntity := models.CreatePlayerEntity(conn)
-
-		// Single snapshot lookup — covers name + spawn position in one call.
-		snap, ok := ecs.GlobalRegistry.GetSnapshot(playerEntity)
-		if !ok {
-			// Entity registration failed somehow; drop the connection cleanly.
+		select {
+		case LoginQueue <- conn:
+		default:
+			// Queue full! Tell the client and drop connection cleanly.
+			systems.SendErrorPacket(conn, systems.ErrCodeServerFull, "Server login queue is full. Please try again later.")
 			conn.Close()
-			continue
 		}
-
-		fmt.Printf("[CONNECT] %s (entity %d)\n", snap.Meta.Name, playerEntity)
-		systems.BroadcastSystem(
-			[]byte(fmt.Sprintf("Player %s has logged into the game!\r\n", snap.Meta.Name)),
-		)
-
-		go handleClient(conn, playerEntity, snap)
 	}
 }
 
@@ -80,7 +123,8 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		if live, ok := ecs.GlobalRegistry.GetMetadata(playerEntity); ok {
 			name = live.Name
 		}
-		systems.GlobalSpatialGrid.RemoveEntity(playerEntity) // ← NEW
+		systems.QueuePlayerSave(playerEntity)
+		systems.GlobalSpatialGrid.RemoveEntity(playerEntity)
 		ecs.GlobalRegistry.RemoveEntity(playerEntity)
 		models.ActivePlayers.Delete(conn.RemoteAddr().String())
 		systems.BroadcastSystem(
@@ -96,81 +140,79 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 	)
 	systems.SendNoticeSystem(playerEntity, []byte(spawnMsg))
 
-	scan := bufio.NewScanner(conn)
-	for scan.Scan() {
-		handleCommand(conn, playerEntity, scan.Text())
-	}
+	for {
+		var length uint16
+		if err := binary.Read(conn, binary.BigEndian, &length); err != nil {
+			break // Disconnected
+		}
 
-	if err := scan.Err(); err != nil {
-		fmt.Printf("[IO] Player %s read error: %v\n", conn.RemoteAddr(), err)
+		if length == 0 {
+			continue
+		}
+
+		packetBytes := make([]byte, length)
+		if _, err := io.ReadFull(conn, packetBytes); err != nil {
+			break // Disconnected or read error
+		}
+
+		opcode := packetBytes[0]
+		payload := packetBytes[1:]
+
+		handleBinaryPacket(conn, playerEntity, opcode, payload)
 	}
 	fmt.Printf("[DISCONNECT] %s (%s)\n", snap.Meta.Name, conn.RemoteAddr())
 }
 
-// handleCommand parses and dispatches a single line of input from a player.
-// Extracted from handleClient to keep the read-loop body flat and easy to extend.
+// handleBinaryPacket parses and dispatches a single binary packet from a player.
 //
 // Parameters:
-//   - conn:         Player's TCP socket (used only for the raw echo reply).
+//   - conn:         Player's TCP socket (used for direct response transmission).
 //   - playerEntity: ECS entity ID of the sending player.
-//   - message:      Raw text line received from the client.
-func handleCommand(conn net.Conn, playerEntity ecs.Entity, message string) {
-	fmt.Printf("[CMD] %s: %q\n", conn.RemoteAddr(), message)
+//   - opcode:       Operation code byte.
+//   - payload:      Raw packet payload bytes.
+func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, payload []byte) {
+	fmt.Printf("[CMD] %s: Opcode %d, Payload len %d\n", conn.RemoteAddr(), opcode, len(payload))
 
-	parts := strings.Fields(message)
-	if len(parts) == 0 {
-		return
-	}
-
-	switch strings.ToUpper(parts[0]) { // ToUpper một lần ở đây — tất cả case đều uppercase
-
-	case "M", "MOVE":
-		// Delegate hoàn toàn sang HandlePlayerMovementSystem.
-		// Không parse tọa độ ở đây nữa — đó là trách nhiệm của movement system.
-		errMsg, ok := systems.HandlePlayerMovementSystem(playerEntity, message)
+	switch opcode {
+	case systems.OpcodeC2SMove: // MOVE
+		errMsg, ok := systems.HandlePlayerMovementSystem(playerEntity, payload)
 		if !ok {
 			systems.SendNoticeSystem(playerEntity, []byte(errMsg))
 		}
-		// ok == true: MovementSystem đã tự broadcast, không cần làm gì thêm.
 
-	case "INFO":
-		if len(parts) != 2 {
-			systems.SendNoticeSystem(playerEntity, []byte("Usage: info <entity_id>\r\n"))
+	case systems.OpcodeC2SInv: // INV
+		if len(payload) != 0 {
+			systems.SendNoticeSystem(playerEntity, []byte("Error: INV packet payload must be empty.\r\n"))
 			return
 		}
-		id, err := strconv.Atoi(parts[1])
-		if err != nil {
-			systems.SendNoticeSystem(playerEntity, []byte("Entity ID must be a number.\r\n"))
-			return
-		}
-		text, err := systems.GetInfoSystem(ecs.Entity(id))
-		if err != nil {
-			systems.SendNoticeSystem(playerEntity, []byte("Entity not found.\r\n"))
-			return
-		}
-		systems.SendNoticeSystem(playerEntity, []byte(text))
+		inventoryTextPacket := systems.RunInventoryQuerySystem(playerEntity)
+		conn.Write([]byte(inventoryTextPacket))
 
-	case "ATTACK", "ATK":
-		// Syntax: attack <entity_id>
-		if len(parts) != 2 {
-			systems.SendNoticeSystem(playerEntity, []byte("Usage: attack <entity_id>\r\n"))
-			return
-		}
-		id, err := strconv.Atoi(parts[1])
-		if err != nil {
-			systems.SendNoticeSystem(playerEntity, []byte("Entity ID must be a number.\r\n"))
-			return
+	case systems.OpcodeC2SUse: // USE
+		noticePacket, success := systems.HandleItemUsageSystem(playerEntity, payload)
+		if success {
+			systems.BroadcastSystem([]byte(noticePacket))
+		} else {
+			systems.SendNoticeSystem(playerEntity, []byte(noticePacket))
 		}
 
-		result, errMsg := systems.AttackSystem(playerEntity, ecs.Entity(id))
+	case systems.OpcodeC2SWarp: // WARP
+		systemFeedback, _ := systems.HandleWarpSystem(playerEntity, payload)
+		systems.SendNoticeSystem(playerEntity, []byte(systemFeedback))
+
+	case systems.OpcodeC2SAttack: // ATTACK
+		if len(payload) != 8 {
+			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid ATTACK payload length. Expected 8 bytes.\r\n"))
+			return
+		}
+		targetID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
+
+		result, errMsg := systems.AttackSystem(playerEntity, targetID)
 		if errMsg != "" {
-			// Attack rejected before landing — notify attacker only.
 			systems.SendNoticeSystem(playerEntity, []byte(errMsg))
 			return
 		}
 
-		// Attack landed — AttackSystem already broadcast the outcome.
-		// Send a personal confirmation to the attacker with full detail.
 		if result.Killed {
 			systems.SendNoticeSystem(playerEntity,
 				[]byte(fmt.Sprintf("You killed %s!\r\n", result.TargetName)),
@@ -185,11 +227,51 @@ func handleCommand(conn net.Conn, playerEntity ecs.Entity, message string) {
 			)
 		}
 
-	case "QUIT":
+	case systems.OpcodeC2SInfo: // INFO
+		if len(payload) != 8 {
+			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid INFO payload length. Expected 8 bytes.\r\n"))
+			return
+		}
+		targetID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
+		text, err := systems.GetInfoSystem(targetID)
+		if err != nil {
+			systems.SendNoticeSystem(playerEntity, []byte("Entity not found.\r\n"))
+			return
+		}
+		systems.SendNoticeSystem(playerEntity, []byte(text))
+
+	case systems.OpcodeC2SQuit: // QUIT
+		if len(payload) != 0 {
+			systems.SendNoticeSystem(playerEntity, []byte("Error: QUIT packet payload must be empty.\r\n"))
+			return
+		}
 		fmt.Printf("[QUIT] %s requested disconnect.\n", conn.RemoteAddr())
 		conn.Close()
 
+	case systems.OpcodeC2SPickup: // PICKUP
+		if len(payload) != 8 {
+			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid PICKUP payload length. Expected 8 bytes.\r\n"))
+			return
+		}
+		itemEntityID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
+		personalFeedback, _ := systems.HandleItemPickupSystem(playerEntity, itemEntityID)
+		systems.SendNoticeSystem(playerEntity, []byte(personalFeedback))
+
+	case systems.OpcodeC2SEquip: // EQUIP
+		if len(payload) != 8 {
+			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid EQUIP payload length. Expected 8 bytes.\r\n"))
+			return
+		}
+		itemID := binary.BigEndian.Uint64(payload[0:8])
+		feedback, success := systems.HandleEquipmentSystem(playerEntity, itemID)
+		if success {
+			pos, _ := ecs.GlobalRegistry.GetPosition(playerEntity)
+			systems.BroadcastToMap(pos.MapID, feedback)
+		} else {
+			systems.SendNoticeSystem(playerEntity, []byte(feedback))
+		}
+
 	default:
-		conn.Write([]byte("Server echo: " + message + "\r\n"))
+		systems.SendNoticeSystem(playerEntity, []byte(fmt.Sprintf("Error: Unknown opcode %d\r\n", opcode)))
 	}
 }

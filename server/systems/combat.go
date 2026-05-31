@@ -2,6 +2,7 @@ package systems
 
 import (
 	"fmt"
+	"math/rand"
 	"server/ecs"
 )
 
@@ -87,7 +88,43 @@ func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
 
 	if remaining <= 0 {
 		result.Killed = true
-		DeathSystem(targetID, targetMeta, attackerMeta)
+		DeathSystem(targetID, attackerID, targetMeta, attackerMeta)
+
+		// Roll loot and spawn items on the ground if the killed target is a monster and attacker is a player
+		if targetMeta.Type == "monster" && attackerMeta.Type == "player" {
+			monsterTemplateID := uint64(1) // Example fallback lookup
+			droppedItems := RollLoot(monsterTemplateID)
+
+			if len(droppedItems) > 0 {
+				targetPos, hasPos := registry.GetPosition(targetID)
+				if hasPos {
+					for _, itemID := range droppedItems {
+						// Scatter: generate a small random offset between -1 and +1 grid tiles
+						offsetX := rand.Intn(3) - 1 // yields -1, 0, or 1
+						offsetZ := rand.Intn(3) - 1 // yields -1, 0, or 1
+
+						dropX := targetPos.X + offsetX
+						dropZ := targetPos.Z + offsetZ
+
+						// Clamp to map boundaries (0-100)
+						if dropX < 0 {
+							dropX = 0
+						}
+						if dropX > 100 {
+							dropX = 100
+						}
+						if dropZ < 0 {
+							dropZ = 0
+						}
+						if dropZ > 100 {
+							dropZ = 100
+						}
+
+						SpawnItemOnGround(itemID, targetPos.MapID, dropX, dropZ)
+					}
+				}
+			}
+		}
 	} else {
 		// Target survived — broadcast the hit to everyone on the map.
 		broadcastHit(result)
@@ -141,12 +178,20 @@ func DamageSystem(targetID ecs.Entity, amount int) int {
 //   - targetID:    entity that died.
 //   - targetMeta:  pre-fetched metadata (entity is about to be removed).
 //   - killerMeta:  attacker's metadata for the kill broadcast message.
-func DeathSystem(targetID ecs.Entity, targetMeta, killerMeta ecs.MetadataComponent) {
+func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.MetadataComponent) {
 	registry := ecs.GlobalRegistry
 
-	killMsg := fmt.Sprintf("[COMBAT] %s was slain by %s!\r\n",
-		targetMeta.Name, killerMeta.Name)
-	BroadcastSystem([]byte(killMsg))
+	var killMsg string
+	if killerMeta.Type == "monster" {
+		stats, _ := registry.GetStats(killerID)
+		killMsg = fmt.Sprintf("[DEATH] %s (#%d) struck Player %s for %d damage and DEFEATED them!\r\n",
+			killerMeta.Name, killerID, targetMeta.Name, stats.Dam)
+	} else {
+		killMsg = fmt.Sprintf("[COMBAT] %s was slain by %s!\r\n",
+			targetMeta.Name, killerMeta.Name)
+	}
+	targetPos, _ := registry.GetPosition(targetID)
+	BroadcastToMap(targetPos.MapID, killMsg)
 
 	// ← NEW: remove từ spatial grid trước khi ECS cleanup
 	GlobalSpatialGrid.RemoveEntity(targetID)
@@ -164,11 +209,19 @@ func DeathSystem(targetID ecs.Entity, targetMeta, killerMeta ecs.MetadataCompone
 // broadcastHit sends a hit notification to all connected clients.
 // Called only when the target survived (HP > 0 after hit).
 func broadcastHit(r CombatResult) {
-	msg := fmt.Sprintf(
-		"[COMBAT] %s hit %s for %d damage! (%s HP: %d)\r\n",
-		r.AttackerName, r.TargetName, r.Damage, r.TargetName, r.TargetHP,
-	)
-	BroadcastSystem([]byte(msg))
+	var msg string
+	attackerMeta, ok := ecs.GlobalRegistry.GetMetadata(r.AttackerID)
+	if ok && attackerMeta.Type == "monster" {
+		msg = fmt.Sprintf("[COMBAT] %s (#%d) hit Player %s for %d damage! (Player HP: %d)\r\n",
+			r.AttackerName, r.AttackerID, r.TargetName, r.Damage, r.TargetHP)
+	} else {
+		msg = fmt.Sprintf(
+			"[COMBAT] %s hit %s for %d damage! (%s HP: %d)\r\n",
+			r.AttackerName, r.TargetName, r.Damage, r.TargetName, r.TargetHP,
+		)
+	}
+	attackerPos, _ := ecs.GlobalRegistry.GetPosition(r.AttackerID)
+	BroadcastToMap(attackerPos.MapID, msg)
 	fmt.Printf("[HIT] %s → %s | dmg=%d hp_left=%d\n",
 		r.AttackerName, r.TargetName, r.Damage, r.TargetHP)
 }

@@ -14,8 +14,9 @@ type Entity uint64
 // Exception: ConnectionComponent keeps net.Conn as an interface (already a pointer).
 
 type PositionComponent struct {
-	X int
-	Z int
+	MapID int
+	X     int
+	Z     int
 }
 
 type ConnectionComponent struct {
@@ -28,20 +29,29 @@ type MetadataComponent struct {
 }
 
 type StatsComponent struct {
-	HP  int
-	Dam int
+	HP    int
+	MaxHP int
+	Dam   int
+}
+
+type ItemTemplateComponent struct {
+	TemplateID uint64
 }
 
 // Registry uses sync.Map per component type.
 // The separate "entities" SafeMap is eliminated — presence is implicit via component maps.
 // ID generation uses an atomic counter, making RegisterEntity lock-free.
 type Registry struct {
-	nextID    atomic.Uint64
-	positions state.TypedSyncMap[Entity, PositionComponent] // inline value, no pointer
-	conns     state.TypedSyncMap[Entity, ConnectionComponent]
-	metadata  state.TypedSyncMap[Entity, MetadataComponent] // inline value, no pointer
-	stats     state.TypedSyncMap[Entity, StatsComponent]    // inline value, no pointer
-	ai        state.TypedSyncMap[Entity, AIComponent]       // inline value, no pointer
+	nextID        atomic.Uint64
+	positions     state.TypedSyncMap[Entity, PositionComponent] // inline value, no pointer
+	conns         state.TypedSyncMap[Entity, ConnectionComponent]
+	metadata      state.TypedSyncMap[Entity, MetadataComponent] // inline value, no pointer
+	stats         state.TypedSyncMap[Entity, StatsComponent]    // inline value, no pointer
+	ai            state.TypedSyncMap[Entity, AIComponent]       // inline value, no pointer
+	inventories   state.TypedSyncMap[Entity, InventoryComponent]
+	lifetimes     state.TypedSyncMap[Entity, LifetimeComponent]
+	itemTemplates state.TypedSyncMap[Entity, ItemTemplateComponent]
+	equipment     state.TypedSyncMap[Entity, EquipmentComponent]
 }
 
 var GlobalRegistry = &Registry{}
@@ -53,18 +63,45 @@ func (r *Registry) NewEntity() Entity {
 
 // RemoveEntity deletes all components in parallel using a WaitGroup.
 // Previous: 5 sequential lock acquisitions.
-// Now: 5 concurrent sync.Map deletes.
+// Now: 9 concurrent sync.Map deletes.
 func (r *Registry) RemoveEntity(id Entity) {
 	var wg sync.WaitGroup
-	wg.Add(5)
+	wg.Add(9)
 	go func() { r.positions.Delete(id); wg.Done() }()
 	go func() { r.conns.Delete(id); wg.Done() }()
 	go func() { r.metadata.Delete(id); wg.Done() }()
 	go func() { r.stats.Delete(id); wg.Done() }()
 	go func() { r.ai.Delete(id); wg.Done() }()
+	go func() { r.inventories.Delete(id); wg.Done() }()
+	go func() { r.lifetimes.Delete(id); wg.Done() }()
+	go func() { r.itemTemplates.Delete(id); wg.Done() }()
+	go func() { r.equipment.Delete(id); wg.Done() }()
 	wg.Wait()
 }
 
+func (r *Registry) SetLifetime(id Entity, comp LifetimeComponent) {
+	r.lifetimes.Set(id, comp)
+}
+
+func (r *Registry) GetLifetime(id Entity) (LifetimeComponent, bool) {
+	return r.lifetimes.Get(id)
+}
+
+func (r *Registry) SetItemTemplate(id Entity, comp ItemTemplateComponent) {
+	r.itemTemplates.Set(id, comp)
+}
+
+func (r *Registry) GetItemTemplate(id Entity) (ItemTemplateComponent, bool) {
+	return r.itemTemplates.Get(id)
+}
+
+func (r *Registry) SetEquipment(id Entity, comp EquipmentComponent) {
+	r.equipment.Set(id, comp)
+}
+
+func (r *Registry) GetEquipment(id Entity) (EquipmentComponent, bool) {
+	return r.equipment.Get(id)
+}
 
 func (r *Registry) SetPosition(id Entity, comp PositionComponent) { // no pointer param
 	r.positions.Set(id, comp)
