@@ -99,6 +99,12 @@
   - Thêm hàm `loadSavedPlayerState(name)` trong [player.go](file:///c:/Minnsun's Adventure/server/models/player.go) để truy vấn MySQL lấy vị trí (X, Z, MapID), chỉ số (HP, MaxHP, Dam), trang bị (Weapon, Armor) và balo (Inventory) của người chơi cũ bằng `name`.
   - Thay đổi logic `CreatePlayerEntity` để tự động khôi phục dữ liệu đã lưu vào Registry ECS thay vì gán các chỉ số mặc định của nhân vật mới tinh.
   - Sử dụng cơ chế Transaction (`tx`) và xóa bản ghi cũ trước khi chèn ID thực thể mới (`DELETE` -> `INSERT`) nhằm đồng bộ ID thực thể dạng động trong RAM với MySQL.
+- **Hệ thống Đăng nhập & Xác thực bằng Username (Username-based Login System)**:
+  - Khai báo opcode C2S mới `OpcodeC2SLogin = 10` tại [`opcodes.go`](file:///c:/Minnsun's Adventure/server/protocol/opcodes.go).
+  - Nâng cấp `processLogin(conn)` trong [`server.go`](file:///c:/Minnsun's Adventure/server/server.go) để buộc gói tin đầu tiên gửi lên phải là gói tin đăng nhập có Opcode 10.
+  - Tích hợp kiểm thử tính hợp lệ Username (Validate & Sanitize 3-16 ký tự chữ và số) tại [`player.go`](file:///c:/Minnsun's Adventure/server/models/player.go).
+  - Thiết lập **Read Deadline 5 giây** khi chờ gói tin đăng nhập để ngăn chặn tấn công treo luồng (DoS) vào worker pool đăng nhập, reset về vô hạn sau khi khởi tạo thực thể thành công.
+  - Sử dụng trực tiếp `username` làm khóa định danh lưu và nạp CSDL thay cho cơ chế tự sinh theo cổng TCP port cũ.
 - **Hệ thống tự động hồi sinh quái vật (Automated Monster Respawn Scheduler)**:
   - Tạo tệp [`respawn.go`](file:///c:/Minnsun's Adventure/server/game/respawn.go) quản lý hàng đợi hồi sinh quái vật `GlobalRespawnManager` một cách an toàn luồng (Mutex).
   - Tích hợp hàm `RunRespawnSystem()` vào nhịp game loop heartbeat 250ms định kỳ tại [`gameloop.go`](file:///c:/Minnsun's Adventure/server/systems/gameloop.go). Khi thời gian chờ kết thúc, hệ thống gọi `models.SpawnMonsterFromTemplate` để tái tạo thực thể quái vật và tự động cập nhật vị trí lên Spatial Grid.
