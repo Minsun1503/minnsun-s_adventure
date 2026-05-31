@@ -124,6 +124,19 @@ func SpawnMonsterFromTemplate(templateID, spawnX, spawnZ int) (ecs.Entity, error
 	return id, nil
 }
 
+// GetTemplateByName returns a MonsterTemplate matching the given name.
+// Returns false if no template with that name has been loaded.
+func GetTemplateByName(name string) (MonsterTemplate, bool) {
+	templateStoreMu.RLock()
+	defer templateStoreMu.RUnlock()
+	for _, t := range templateStore {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return MonsterTemplate{}, false
+}
+
 // SpawnFromDefaultPosition spawns a monster at its template-defined default coordinates.
 // Convenience wrapper used during server boot when no override is needed.
 func SpawnFromDefaultPosition(templateID int) (ecs.Entity, error) {

@@ -35,6 +35,9 @@ func tickWorld() {
 	// Process floor items lifecycle expiration countdown
 	game.RunGroundItemDecaySystem()
 
+	// Process monster respawn queue
+	game.GlobalRespawnManager.RunRespawnSystem()
+
 	// Only run AI ticks when at least one player is online.
 	// MAP SLEEP TRICK: zero players → no AI computation at all.
 	if !hasPlayers {

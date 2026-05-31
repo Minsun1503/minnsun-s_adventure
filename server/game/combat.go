@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"math/rand"
 	"server/ecs"
+	"server/models"
 	"server/protocol"
 	"server/world"
+	"time"
 )
 
 // CombatResult is returned by AttackSystem to handleCommand.
@@ -204,6 +206,13 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 			conn.Conn.Close()
 		}
 	} else {
+		// Schedule monster respawn before purging the entity.
+		// Fetch the template ID by matching the monster's name.
+		if t, found := models.GetTemplateByName(targetMeta.Name); found {
+			GlobalRespawnManager.ScheduleMonsterRespawn(
+				t.ID, targetPos.MapID, t.SpawnX, t.SpawnZ, 15*time.Second,
+			)
+		}
 		registry.RemoveEntity(targetID)
 	}
 }
