@@ -12,135 +12,147 @@ import (
 	"server/systems"
 )
 
-// main is the main entry point to bootstrap and run the game server.
-// The boot sequence consists of:
-//  1. Loading the template monsters from the JSON config file and registering them as entities in ECS.
-//  2. Listening for incoming TCP socket connections on port `:1503`.
-//  3. Starting the ticking server heartbeat clock (Game Loop).
-//  4. Waiting for new player clients. When a player connects, the server registers a new Player entity in ECS
-//     and spins up a dedicated goroutine (`handleClient`) to handle their requests.
 func main() {
 	monsters, err := models.LoadMonster("data/monster_templates.json")
 	if err != nil {
 		fmt.Println("CRITICAL SERVER BOOT ERROR:", err)
 		return
 	}
-
-	for i := range monsters {
-		models.CreateMonsterEntity(monsters[i])
+	for _, t := range monsters {
+		models.CreateMonsterEntity(t)
 	}
-
-	fmt.Printf("[Engine] Successfully loaded %d monster templates into ECS Registry.\n", len(monsters))
+	fmt.Printf("[BOOT] Registered %d monster templates into ECS.\n", len(monsters))
 
 	lis, err := net.Listen("tcp", ":1503")
 	if err != nil {
-		fmt.Println("error occurred", err)
+		fmt.Println("[BOOT] Failed to bind port:", err)
 		return
 	}
 	defer lis.Close()
-	fmt.Println("server started on port", lis.Addr())
+	fmt.Println("[BOOT] Server listening on", lis.Addr())
 
-	// Start the background game loop
 	systems.StartGameLoop()
 
 	for {
-		fmt.Println("waiting to player")
 		conn, err := lis.Accept()
 		if err != nil {
-			fmt.Println("An error occurred", err)
+			fmt.Println("[ACCEPT] Error:", err)
 			return
 		}
-		
-		newPlayerEntity := models.CreatePlayerEntity(conn)
-		
-		playerName := ""
-		if meta := ecs.GlobalRegistry.GetMetadata(newPlayerEntity); meta != nil {
-			playerName = meta.Name
-		}
-		
-		fmt.Println("New player connected", newPlayerEntity)
-		systems.BroadcastSystem(fmt.Sprintf("Player %s has logged into the game!\r\n", playerName))
 
-		go handleClient(conn, newPlayerEntity)
+		playerEntity := models.CreatePlayerEntity(conn)
+
+		// Single snapshot lookup — covers name + spawn position in one call.
+		snap, ok := ecs.GlobalRegistry.GetSnapshot(playerEntity)
+		if !ok {
+			// Entity registration failed somehow; drop the connection cleanly.
+			conn.Close()
+			continue
+		}
+
+		fmt.Printf("[CONNECT] %s (entity %d)\n", snap.Meta.Name, playerEntity)
+		systems.BroadcastSystem(
+			[]byte(fmt.Sprintf("Player %s has logged into the game!\r\n", snap.Meta.Name)),
+		)
+
+		go handleClient(conn, playerEntity, snap)
 	}
 }
 
-// handleClient manages the lifecycle and handles incoming network commands for a specific player client.
-// It executes asynchronously as a dedicated goroutine per connected player.
-// When the player disconnects (or sends a quit command), it removes the entity from ECS, broadcasts logout notice, and closes socket.
+// handleClient manages the lifecycle of a single connected player.
+// snap is passed in from main so we avoid a redundant ECS lookup at goroutine start.
 //
 // Parameters:
-//   - conn: The TCP network socket link (net.Conn) of the player client.
-//   - playerEntity: The ecs.Entity representing the connected player character.
-func handleClient(conn net.Conn, playerEntity ecs.Entity) {
+//   - conn:         TCP socket for this player.
+//   - playerEntity: ECS entity ID.
+//   - snap:         Pre-fetched snapshot (name + spawn position already resolved).
+func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapshot) {
+	// Deferred cleanup: broadcast logout, remove from ECS, close socket.
 	defer func() {
-		playerName := ""
-		if meta := ecs.GlobalRegistry.GetMetadata(playerEntity); meta != nil {
-			playerName = meta.Name
+		// Re-fetch name in case it was mutated during the session (e.g. rename system).
+		name := snap.Meta.Name
+		if live, ok := ecs.GlobalRegistry.GetMetadata(playerEntity); ok {
+			name = live.Name
 		}
 		ecs.GlobalRegistry.RemoveEntity(playerEntity)
-		systems.BroadcastSystem(fmt.Sprintf("Player %s has logged out the game!\r\n", playerName))
+		models.ActivePlayers.Delete(conn.RemoteAddr().String())
+		systems.BroadcastSystem(
+			[]byte(fmt.Sprintf("Player %s has logged out the game!\r\n", name)),
+		)
 		conn.Close()
 	}()
 
-	playerName := ""
-	x, z := 0, 0
-	if meta := ecs.GlobalRegistry.GetMetadata(playerEntity); meta != nil {
-		playerName = meta.Name
-	}
-	if pos := ecs.GlobalRegistry.GetPosition(playerEntity); pos != nil {
-		x = pos.X
-		z = pos.Z
-	}
+	// Greet the player with their name and spawn position — both already in snap.
+	spawnMsg := fmt.Sprintf(
+		"Welcome to the Realm, %s!\r\nYour Spawn Position is X: %d, Z: %d\r\n",
+		snap.Meta.Name, snap.Pos.X, snap.Pos.Z,
+	)
+	systems.SendNoticeSystem(playerEntity, []byte(spawnMsg))
 
-	systems.SendNoticeSystem(playerEntity, fmt.Sprintf("Welcome to the Realm, %s!\r\nYour Spawn Position is X: %d, Z: %d\r\n", playerName, x, z))
 	scan := bufio.NewScanner(conn)
-
 	for scan.Scan() {
-		message := scan.Text()
-		length := len(message)
-		conn.Write([]byte("Server send: " + message + "\r\n"))
-
-		fmt.Println("Message Received", length, message)
-
-		if strings.HasPrefix(message, "m") {
-			mpart := strings.Split(message, " ")
-
-			if len(mpart) == 3 {
-				xVal, errX := strconv.Atoi(mpart[1])
-				zVal, errZ := strconv.Atoi(mpart[2])
-				if errX == nil && errZ == nil {
-					systems.MovementSystem(playerEntity, xVal, zVal)
-				} else {
-					systems.SendNoticeSystem(playerEntity, "Coordinates must be numbers.\r\n")
-				}
-			} else {
-				systems.SendNoticeSystem(playerEntity, "Invalid command, doesn't have 3 parts.\r\n")
-			}
-		} else if strings.HasPrefix(message, "quit") {
-			fmt.Printf("player %s send close command, shutting down server \n", conn.RemoteAddr())
-			break
-		} else if strings.HasPrefix(message, "info") {
-			parts := strings.Split(message, " ")
-			if len(parts) == 2 {
-				targetID := parts[1]
-				
-				infoText, err := systems.GetInfoSystem(ecs.Entity(targetID))
-				if err == nil {
-					systems.SendNoticeSystem(playerEntity, infoText)
-				} else {
-					systems.SendNoticeSystem(playerEntity, "Monster ID not found in database.\r\n")
-				}
-			} else {
-				systems.SendNoticeSystem(playerEntity, "Syntax error. Use: INFO [1-3]\r\n")
-			}
-		} else {
-			fmt.Println("Normal chat")
-		}
+		handleCommand(conn, playerEntity, scan.Text())
 	}
 
 	if err := scan.Err(); err != nil {
-		fmt.Printf("An error ocurred with player %s: %v\n", conn.RemoteAddr(), err)
+		fmt.Printf("[IO] Player %s read error: %v\n", conn.RemoteAddr(), err)
 	}
-	fmt.Printf("player %s disconnected, shuting down\n", conn.RemoteAddr())
+	fmt.Printf("[DISCONNECT] %s (%s)\n", snap.Meta.Name, conn.RemoteAddr())
+}
+
+// handleCommand parses and dispatches a single line of input from a player.
+// Extracted from handleClient to keep the read-loop body flat and easy to extend.
+//
+// Parameters:
+//   - conn:         Player's TCP socket (used only for the raw echo reply).
+//   - playerEntity: ECS entity ID of the sending player.
+//   - message:      Raw text line received from the client.
+func handleCommand(conn net.Conn, playerEntity ecs.Entity, message string) {
+	fmt.Printf("[CMD] %s: %q\n", conn.RemoteAddr(), message)
+
+	parts := strings.Fields(message) // Fields splits on any whitespace, handles extra spaces
+	if len(parts) == 0 {
+		return
+	}
+
+	switch parts[0] {
+
+	case "m", "move":
+		if len(parts) != 3 {
+			systems.SendNoticeSystem(playerEntity, []byte("Usage: m <x> <z>\r\n"))
+			return
+		}
+		xVal, errX := strconv.Atoi(parts[1])
+		zVal, errZ := strconv.Atoi(parts[2])
+		if errX != nil || errZ != nil {
+			systems.SendNoticeSystem(playerEntity, []byte("Coordinates must be integers.\r\n"))
+			return
+		}
+		systems.MovementSystem(playerEntity, xVal, zVal)
+
+	case "info":
+		if len(parts) != 2 {
+			systems.SendNoticeSystem(playerEntity, []byte("Usage: info <entity_id>\r\n"))
+			return
+		}
+		id, err := strconv.Atoi(parts[1])
+		if err != nil {
+			systems.SendNoticeSystem(playerEntity, []byte("Entity ID must be a number.\r\n"))
+			return
+		}
+		text, err := systems.GetInfoSystem(ecs.Entity(id))
+		if err != nil {
+			systems.SendNoticeSystem(playerEntity, []byte("Entity not found.\r\n"))
+			return
+		}
+		systems.SendNoticeSystem(playerEntity, []byte(text))
+
+	case "quit":
+		fmt.Printf("[QUIT] %s requested disconnect.\n", conn.RemoteAddr())
+		conn.Close() // triggers scan.Scan() to return false → handleClient cleans up
+
+	default:
+		// Normal chat — echo back, could be routed to a ChatSystem later.
+		conn.Write([]byte("Server echo: " + message + "\r\n"))
+	}
 }

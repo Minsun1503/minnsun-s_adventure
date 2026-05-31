@@ -2,82 +2,60 @@ package state
 
 import "sync"
 
-// SafeMap wraps a standard Go map with a sync.RWMutex to prevent concurrent read/write race conditions.
-// It uses Go Generics to support any comparable key type K and any value type V.
-type SafeMap[K comparable, V any] struct {
-	mu sync.RWMutex
-	m  map[K]V
-}
-
-// NewSafeMap initializes and returns a new thread-safe SafeMap instance.
+// TypedSyncMap wraps Go's standard sync.Map with Generics to provide compile-time type safety.
+// It is highly optimized for concurrent use cases where keys are mostly read rather than written,
+// or when multiple goroutines read, write, and overwrite keys for disjoint sets of cells.
 //
-// Returns:
-//   - A pointer to the initialized SafeMap[K, V].
-func NewSafeMap[K comparable, V any]() *SafeMap[K, V] {
-	return &SafeMap[K, V]{
-		m: make(map[K]V),
-	}
+// Parameters:
+//   - K: The comparable key type.
+//   - V: The value type.
+type TypedSyncMap[K comparable, V any] struct {
+	m sync.Map // The underlying thread-safe sync.Map.
 }
 
-// Set safely adds or updates a key-value pair in the map.
-// It acquires a write lock (Lock) to ensure exclusive access.
+// Set stores the key-value pair in the map, overwriting any existing value.
+// It is thread-safe and does not require explicit locking.
 //
 // Parameters:
 //   - key: The key associated with the value.
 //   - value: The value to store.
-func (sm *SafeMap[K, V]) Set(key K, value V) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	sm.m[key] = value
+func (t *TypedSyncMap[K, V]) Set(key K, value V) {
+	t.m.Store(key, value)
 }
 
-// Get safely retrieves a value from the map by its key.
-// It acquires a shared read lock (RLock) allowing concurrent reads.
+// Get retrieves the value associated with the key from the map.
+// It is optimized for concurrent lock-free reads.
 //
 // Parameters:
 //   - key: The key to look up.
 //
 // Returns:
-//   - The stored value of type V, or the zero value of V if the key does not exist.
-func (sm *SafeMap[K, V]) Get(key K) V {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.m[key]
+//   - The stored value of type V (or the zero value of V if not found).
+//   - A boolean flag indicating whether the key was found.
+func (t *TypedSyncMap[K, V]) Get(key K) (V, bool) {
+	v, ok := t.m.Load(key)
+	if !ok {
+		var zero V
+		return zero, false
+	}
+	return v.(V), true
 }
 
-// Delete safely removes a key and its associated value from the map.
-// It acquires a write lock (Lock) to ensure exclusive access.
+// Delete removes the key and its associated value from the map.
 //
 // Parameters:
 //   - key: The key to delete.
-func (sm *SafeMap[K, V]) Delete(key K) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	delete(sm.m, key)
+func (t *TypedSyncMap[K, V]) Delete(key K) {
+	t.m.Delete(key)
 }
 
-// Len safely returns the current number of elements stored in the map.
-// It acquires a shared read lock (RLock).
-//
-// Returns:
-//   - The total number of key-value pairs as an integer.
-func (sm *SafeMap[K, V]) Len() int {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return len(sm.m)
-}
-
-// Range safely iterates over all key-value pairs in the map, executing the provided callback function for each pair.
-// It acquires a shared read lock (RLock) to ensure the map remains unchanged during iteration.
+// Range calls the provided callback function sequentially for each key-value pair in the map.
+// If the callback function returns false, the iteration stops.
 //
 // Parameters:
-//   - f: A callback function accepting key K and value V.
-func (sm *SafeMap[K, V]) Range(f func(key K, value V)) {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	for k, v := range sm.m {
-		f(k, v)
-	}
+//   - f: A callback function accepting key K and value V, returning false to stop.
+func (t *TypedSyncMap[K, V]) Range(f func(key K, value V) bool) {
+	t.m.Range(func(k, v any) bool {
+		return f(k.(K), v.(V))
+	})
 }
-
-

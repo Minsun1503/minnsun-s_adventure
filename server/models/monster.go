@@ -5,18 +5,18 @@ import (
 	"fmt"
 	"os"
 	"server/ecs"
-	"strconv"
 )
+
+// Global tracker to ensure every spawned creature gets a distinct row anchor
+var nextMonsterInstanceID = 1000
 
 // MonsterTemplate defines the raw template data loaded from configuration.
 type MonsterTemplate struct {
-	ID   int    `json:"id"`
+	ID   uint64 `json:"id"`
 	Name string `json:"name"`
 	HP   int    `json:"hp"`
 	Dam  int    `json:"damage"`
 }
-
-var nextMonsterInstanceID = 1000
 
 // CreateMonsterEntity registers a monster template as an Entity in ECS.
 //
@@ -26,35 +26,59 @@ var nextMonsterInstanceID = 1000
 // Returns:
 //   - The newly registered ecs.Entity ID.
 func CreateMonsterEntity(m MonsterTemplate) ecs.Entity {
-	entityID := ecs.Entity(strconv.Itoa(m.ID))
+	entityID := ecs.Entity(m.ID)
 
-	ecs.GlobalRegistry.RegisterEntity(entityID)
-	ecs.GlobalRegistry.SetMetadata(entityID, &ecs.MetadataComponent{Name: m.Name, Type: "monster_template"})
-	ecs.GlobalRegistry.SetStats(entityID, &ecs.StatsComponent{HP: m.HP, Dam: m.Dam})
+	ecs.GlobalRegistry.SetMetadata(entityID, ecs.MetadataComponent{Name: m.Name, Type: "monster_template"})
+	ecs.GlobalRegistry.SetStats(entityID, ecs.StatsComponent{HP: m.HP, Dam: m.Dam})
 
 	return entityID
 }
 
-// SpawnMonsterInstance registers a live, active monster instance on the map in the ECS registry.
-// It assigns unique ID, spawn coordinates, and attaches its components.
+// SpawnMonsterFromTemplate instantiates a live monster on the map using a registered monster template.
+// It retrieves the template's properties from the ECS registry, generates a unique instance ID,
+// and attaches the corresponding components (Position, Metadata, Stats) to the new live entity.
 //
 // Parameters:
-//   - template: The base MonsterTemplate.
-//   - instanceID: Unique instance ID for the live monster (e.g., 1001, 1002).
-//   - x: Spawn X coordinate.
-//   - z: Spawn Z coordinate.
+//   - templateID: The unique ID identifying the static monster template.
+//   - spawnX: The initial X coordinate where the monster instance will spawn.
+//   - spawnZ: The initial Z coordinate where the monster instance will spawn.
 //
 // Returns:
-//   - The registered active monster instance ecs.Entity ID.
-func SpawnMonsterInstance(template MonsterTemplate, instanceID int, x, z int) ecs.Entity {
-	entityID := ecs.Entity("monster_instance_" + strconv.Itoa(instanceID))
+//   - The registered live monster instance ecs.Entity ID.
+//   - An error if the specified templateID is not found in the ECS registry.
+func SpawnMonsterFromTemplate(templateID int, spawnX int, spawnZ int) (ecs.Entity, error) {
+	// Look up the static read-only JSON profile registered in ecs.GlobalRegistry
+	templateEntity := ecs.Entity(templateID)
+	templateMeta, metaOk := ecs.GlobalRegistry.GetMetadata(templateEntity)
+	templateStats, statsOk := ecs.GlobalRegistry.GetStats(templateEntity)
 
-	ecs.GlobalRegistry.RegisterEntity(entityID)
-	ecs.GlobalRegistry.SetPosition(entityID, &ecs.PositionComponent{X: x, Z: z})
-	ecs.GlobalRegistry.SetMetadata(entityID, &ecs.MetadataComponent{Name: template.Name, Type: "monster"})
-	ecs.GlobalRegistry.SetStats(entityID, &ecs.StatsComponent{HP: template.HP, Dam: template.Dam})
+	if !metaOk || !statsOk {
+		return 0, fmt.Errorf("failed to spawn: template ID %d not found", templateID)
+	}
 
-	return entityID
+	// 1. Generate the unique Entity ID atomically using Registry
+	entityID := ecs.GlobalRegistry.NewEntity()
+
+	// 2. Populate columns using Registry helper tools with inline values
+	ecs.GlobalRegistry.SetMetadata(entityID, ecs.MetadataComponent{
+		Name: templateMeta.Name,
+		Type: "monster",
+	})
+
+	ecs.GlobalRegistry.SetPosition(entityID, ecs.PositionComponent{
+		X: spawnX,
+		Z: spawnZ,
+	})
+
+	ecs.GlobalRegistry.SetStats(entityID, ecs.StatsComponent{
+		HP:  templateStats.HP, // Unique current HP instance tracking
+		Dam: templateStats.Dam,
+	})
+
+	fmt.Printf("[ECS ENGINE] Row entry %d (%s) initialized at X:%d, Z:%d\n",
+		entityID, templateMeta.Name, spawnX, spawnZ)
+
+	return entityID, nil
 }
 
 // LoadMonster loads the list of template monsters from a pre-formatted JSON file.

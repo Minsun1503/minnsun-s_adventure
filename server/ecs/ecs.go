@@ -3,175 +3,159 @@ package ecs
 import (
 	"net"
 	"server/state"
+	"sync"
+	"sync/atomic"
 )
 
-// Entity represents a unique identifier for any game object in the ECS architecture.
-// Typically, it is derived from the player's TCP connection remote address (IP:port)
-// or a string representation of static data IDs (e.g., monster template ID).
-type Entity string
+// Entity is a uint64 for O(1) integer map lookup instead of string hashing.
+type Entity uint64
 
-// PositionComponent stores spatial coordinates for an entity on the game map.
-// The coordinates X and Z are represented as integers.
+// Components stored as inline values (not pointers) to avoid extra heap allocs.
+// Exception: ConnectionComponent keeps net.Conn as an interface (already a pointer).
+
 type PositionComponent struct {
-	X int // Horizontal coordinate.
-	Z int // Vertical/Depth coordinate.
+	X int
+	Z int
 }
 
-// ConnectionComponent holds the active network socket link for a player entity.
-// Systems can query this component to transmit packages or detect disconnection.
 type ConnectionComponent struct {
-	Conn net.Conn // The TCP socket connection.
+	Conn net.Conn
 }
 
-// MetadataComponent holds identification attributes such as name and category.
-// This is used to differentiate between players, monsters, or objects.
 type MetadataComponent struct {
-	Name string // The display name of the entity.
-	Type string // The classification type (e.g., "player" or "monster").
+	Name string
+	Type string
 }
 
-// StatsComponent holds attributes related to combat, health, and damage.
 type StatsComponent struct {
-	HP  int // Hit points / Health points.
-	Dam int // Attack damage power.
+	HP  int
+	Dam int
 }
 
-// Registry is the authoritative central database storing all Entities and their Components.
-// It leverages state.SafeMap to ensure that all read and write component stores are thread-safe,
-// allowing concurrent operations from multiple client goroutines.
+// Registry uses sync.Map per component type.
+// The separate "entities" SafeMap is eliminated — presence is implicit via component maps.
+// ID generation uses an atomic counter, making RegisterEntity lock-free.
 type Registry struct {
-	entities  *state.SafeMap[Entity, bool]                 // Set of all registered entities.
-	positions *state.SafeMap[Entity, *PositionComponent]  // Map of entities to their spatial position component.
-	conns     *state.SafeMap[Entity, *ConnectionComponent] // Map of entities to their active TCP network socket connection.
-	metadata  *state.SafeMap[Entity, *MetadataComponent]   // Map of entities to their naming and category metadata.
-	stats     *state.SafeMap[Entity, *StatsComponent]      // Map of entities to their health and combat statistics.
+	nextID    atomic.Uint64
+	positions state.TypedSyncMap[Entity, PositionComponent] // inline value, no pointer
+	conns     state.TypedSyncMap[Entity, ConnectionComponent]
+	metadata  state.TypedSyncMap[Entity, MetadataComponent] // inline value, no pointer
+	stats     state.TypedSyncMap[Entity, StatsComponent]    // inline value, no pointer
 }
 
-// GlobalRegistry is the main authoritative registry instance utilized by the game server.
-var GlobalRegistry = NewRegistry()
+var GlobalRegistry = &Registry{}
 
-// NewRegistry initializes and returns a new empty ECS registry with initialized safe component maps.
-//
-// Returns:
-//   - A pointer to the newly allocated Registry instance.
-func NewRegistry() *Registry {
-	return &Registry{
-		entities:  state.NewSafeMap[Entity, bool](),
-		positions: state.NewSafeMap[Entity, *PositionComponent](),
-		conns:     state.NewSafeMap[Entity, *ConnectionComponent](),
-		metadata:  state.NewSafeMap[Entity, *MetadataComponent](),
-		stats:     state.NewSafeMap[Entity, *StatsComponent](),
-	}
+// NewEntity generates a new unique Entity ID atomically — no lock needed.
+func (r *Registry) NewEntity() Entity {
+	return Entity(r.nextID.Add(1))
 }
 
-// RegisterEntity registers a new Entity ID in the central registry system.
-//
-// Parameters:
-//   - id: The unique Entity ID to register.
-func (r *Registry) RegisterEntity(id Entity) {
-	r.entities.Set(id, true)
-}
-
-// RemoveEntity removes an Entity ID from the registry and deletes all components associated with it.
-//
-// Parameters:
-//   - id: The unique Entity ID to completely unregister and clean up.
+// RemoveEntity deletes all components in parallel using a WaitGroup.
+// Previous: 5 sequential lock acquisitions.
+// Now: 4 concurrent sync.Map deletes.
 func (r *Registry) RemoveEntity(id Entity) {
-	r.entities.Delete(id)
-	r.positions.Delete(id)
-	r.conns.Delete(id)
-	r.metadata.Delete(id)
-	r.stats.Delete(id)
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() { r.positions.Delete(id); wg.Done() }()
+	go func() { r.conns.Delete(id); wg.Done() }()
+	go func() { r.metadata.Delete(id); wg.Done() }()
+	go func() { r.stats.Delete(id); wg.Done() }()
+	wg.Wait()
 }
 
-// SetPosition associates a PositionComponent with a specific Entity.
-//
-// Parameters:
-//   - id: The target Entity ID.
-//   - comp: A pointer to the PositionComponent to attach.
-func (r *Registry) SetPosition(id Entity, comp *PositionComponent) {
+func (r *Registry) SetPosition(id Entity, comp PositionComponent) { // no pointer param
 	r.positions.Set(id, comp)
 }
 
-// GetPosition retrieves the PositionComponent associated with a specific Entity.
-//
-// Parameters:
-//   - id: The target Entity ID.
-//
-// Returns:
-//   - A pointer to the entity's PositionComponent, or nil if not found.
-func (r *Registry) GetPosition(id Entity) *PositionComponent {
+func (r *Registry) GetPosition(id Entity) (PositionComponent, bool) {
 	return r.positions.Get(id)
 }
 
-// SetConnection associates a ConnectionComponent with a specific Entity.
-//
-// Parameters:
-//   - id: The target Entity ID.
-//   - comp: A pointer to the ConnectionComponent to attach.
-func (r *Registry) SetConnection(id Entity, comp *ConnectionComponent) {
+func (r *Registry) SetConnection(id Entity, comp ConnectionComponent) {
 	r.conns.Set(id, comp)
 }
 
-// GetConnection retrieves the ConnectionComponent associated with a specific Entity.
-//
-// Parameters:
-//   - id: The target Entity ID.
-//
-// Returns:
-//   - A pointer to the entity's ConnectionComponent, or nil if not found.
-func (r *Registry) GetConnection(id Entity) *ConnectionComponent {
+func (r *Registry) GetConnection(id Entity) (ConnectionComponent, bool) {
 	return r.conns.Get(id)
 }
 
-// SetMetadata associates a MetadataComponent with a specific Entity.
-//
-// Parameters:
-//   - id: The target Entity ID.
-//   - comp: A pointer to the MetadataComponent to attach.
-func (r *Registry) SetMetadata(id Entity, comp *MetadataComponent) {
+func (r *Registry) SetMetadata(id Entity, comp MetadataComponent) {
 	r.metadata.Set(id, comp)
 }
 
-// GetMetadata retrieves the MetadataComponent associated with a specific Entity.
-//
-// Parameters:
-//   - id: The target Entity ID.
-//
-// Returns:
-//   - A pointer to the entity's MetadataComponent, or nil if not found.
-func (r *Registry) GetMetadata(id Entity) *MetadataComponent {
+func (r *Registry) GetMetadata(id Entity) (MetadataComponent, bool) {
 	return r.metadata.Get(id)
 }
 
-// SetStats associates a StatsComponent with a specific Entity.
-//
-// Parameters:
-//   - id: The target Entity ID.
-//   - comp: A pointer to the StatsComponent to attach.
-func (r *Registry) SetStats(id Entity, comp *StatsComponent) {
+func (r *Registry) SetStats(id Entity, comp StatsComponent) {
 	r.stats.Set(id, comp)
 }
 
-// GetStats retrieves the StatsComponent associated with a specific Entity.
-//
-// Parameters:
-//   - id: The target Entity ID.
-//
-// Returns:
-//   - A pointer to the entity's StatsComponent, or nil if not found.
-func (r *Registry) GetStats(id Entity) *StatsComponent {
+func (r *Registry) GetStats(id Entity) (StatsComponent, bool) {
 	return r.stats.Get(id)
 }
 
-// GetAllEntities returns a slice containing all currently registered Entity IDs in the system.
-//
-// Returns:
-//   - A slice of Entity IDs.
+// GetAllEntities collects all entities that have at least a MetadataComponent.
+// Adjust to whichever component is "required" for a valid entity in your design.
 func (r *Registry) GetAllEntities() []Entity {
-	list := make([]Entity, 0, r.entities.Len())
-	r.entities.Range(func(key Entity, value bool) {
+	var list []Entity
+	r.metadata.Range(func(key Entity, _ MetadataComponent) bool {
 		list = append(list, key)
+		return true
 	})
 	return list
+}
+
+// EntitySnapshot holds a pre-fetched view of all components for one entity.
+// Populated in a single-pass range so callers never need follow-up lookups.
+type EntitySnapshot struct {
+	ID       Entity
+	Meta     MetadataComponent
+	Pos      PositionComponent
+	Stats    StatsComponent
+	HasPos   bool
+	HasStats bool
+}
+
+// RangeSnapshots iterates all entities that have a MetadataComponent and yields
+// an EntitySnapshot with Position and Stats pre-fetched — zero follow-up lookups.
+// The callback returns false to stop early (same contract as RangeMetadata).
+func (r *Registry) RangeSnapshots(f func(snap EntitySnapshot) bool) {
+	r.metadata.Range(func(id Entity, meta MetadataComponent) bool {
+		pos, hasPos := r.positions.Get(id)
+		stats, hasStats := r.stats.Get(id)
+		return f(EntitySnapshot{
+			ID:       id,
+			Meta:     meta,
+			Pos:      pos,
+			Stats:    stats,
+			HasPos:   hasPos,
+			HasStats: hasStats,
+		})
+	})
+}
+
+// RangeConnections iterates all entities that have a ConnectionComponent.
+// Dùng cho broadcast mà không cần build slice trung gian.
+func (r *Registry) RangeConnections(f func(id Entity, conn ConnectionComponent) bool) {
+	r.conns.Range(f)
+}
+
+// GetSnapshot returns a fully pre-fetched EntitySnapshot for a single entity.
+// Eliminates the pattern of calling GetMetadata + GetPosition + GetStats separately.
+func (r *Registry) GetSnapshot(id Entity) (EntitySnapshot, bool) {
+	meta, ok := r.metadata.Get(id)
+	if !ok {
+		return EntitySnapshot{}, false
+	}
+	pos, hasPos := r.positions.Get(id)
+	stats, hasStats := r.stats.Get(id)
+	return EntitySnapshot{
+		ID:       id,
+		Meta:     meta,
+		Pos:      pos,
+		Stats:    stats,
+		HasPos:   hasPos,
+		HasStats: hasStats,
+	}, true
 }

@@ -6,46 +6,52 @@ import (
 	"time"
 )
 
-// StartGameLoop initializes the server's heartbeat clock.
-// We set it to trigger exactly 4 times a second (250-millisecond ticks).
 func StartGameLoop() {
-	// A 250ms tick rate is perfect for classic 2D RPG logic loops
 	ticker := time.NewTicker(250 * time.Millisecond)
-
-	// Run the loop in a background thread so it doesn't block player connections
 	go func() {
 		fmt.Println("[ENGINE] Heartbeat game loop started at 4 ticks/sec.")
-
 		for range ticker.C {
-			// 1. Core check: Are there actually players on the map?
-			if !HasActivePlayers() {
-				// MAP SLEEP TRICK: If nobody is here, skip heavy math!
-				continue
-			}
-
-			// 2. If the map is awake, execute entity simulation math
-			// UpdateWorldEntitiesSystem()
+			tickWorld()
 		}
 	}()
 }
 
-// HasActivePlayers checks if there are any active player entities registered in ECS.
-//
-// Returns:
-//   - true if at least one entity has a MetadataComponent with type "player", false otherwise.
-func HasActivePlayers() bool {
-	registry := ecs.GlobalRegistry
-	entities := registry.GetAllEntities()
-	for _, entity := range entities {
-		if meta := registry.GetMetadata(entity); meta != nil && meta.Type == "player" {
-			return true
+// tickWorld does a single metadata scan per tick.
+// hasPlayers and monster processing happen in the same pass — no double scan.
+func tickWorld() {
+	hasPlayers := false
+
+	ecs.GlobalRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
+		switch snap.Meta.Type {
+		case "player":
+			hasPlayers = true
+		case "monster":
+			processMonster(snap)
 		}
+		return true // always full scan; early-exit only if you add a sleep gate
+	})
+
+	if !hasPlayers {
+		// MAP SLEEP TRICK: no players → skip heavy logic next tick
+		// (you can set a flag here to gate UpdateWorldEntitiesSystem)
 	}
-	return false
 }
 
-// UpdateWorldEntitiesSystem processes AI, monster logic, and status tickers.
+func processMonster(snap ecs.EntitySnapshot) {
+	if !snap.HasPos || !snap.HasStats {
+		return
+	}
+	fmt.Printf("[SYSTEM MONITOR] Active Instance ID: %d | Type: %s | Position: (%d, %d) | HP: %d\n",
+		snap.ID, snap.Meta.Name, snap.Pos.X, snap.Pos.Z, snap.Stats.HP)
+}
+
+// UpdateWorldEntitiesSystem — kept for external callers, now zero double-lookup.
 func UpdateWorldEntitiesSystem() {
-	// For this test lecture, let's just print out a heartbeat log line
-	fmt.Println("[LOOP] Map is active. Processing AI behavior matrix...")
+	ecs.GlobalRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
+		if snap.Meta.Type != "monster" || !snap.HasPos || !snap.HasStats {
+			return true
+		}
+		processMonster(snap)
+		return true
+	})
 }
