@@ -1,34 +1,26 @@
 package models
 
-import "net"
+import (
+	"net"
+	"server/ecs"
+)
 
-//create player struct
-type Player struct {
-	ID   string
-	Name string
-	X    string
-	Z    string
-	Conn net.Conn
-}
-
-// NewPlayer builds an authoritative character data structure in RAM.
-// It uses the player's network socket address to generate a unique ID
-// and a temporary guest nickname based on the last 4 digits of their port.
+// CreatePlayerEntity registers a new player entity in the ECS registry and initializes its components.
 //
-// Inputs:
-//   - conn: The live net.Conn TCP socket link for the player.
+// Parameters:
+//   - conn: The live TCP socket connection of the player client.
 //
 // Returns:
-//   - A memory pointer (*Player) pointing directly to the new character house.
-func NewPlayer(conn net.Conn) *Player {
+//   - The newly registered ecs.Entity ID.
+func CreatePlayerEntity(conn net.Conn) ecs.Entity {
 	playerAddress := conn.RemoteAddr().String()
 	guestName := "Guest_" + playerAddress[len(playerAddress)-4:]
+	entityID := ecs.Entity(playerAddress)
 
-	return &Player{
-		ID:   playerAddress,
-		Name: guestName,
-		X:    "0",
-		Z:    "0",
-		Conn: conn,
-	}
+	ecs.GlobalRegistry.RegisterEntity(entityID)
+	ecs.GlobalRegistry.SetPosition(entityID, &ecs.PositionComponent{X: 0, Z: 0})
+	ecs.GlobalRegistry.SetConnection(entityID, &ecs.ConnectionComponent{Conn: conn})
+	ecs.GlobalRegistry.SetMetadata(entityID, &ecs.MetadataComponent{Name: guestName, Type: "player"})
+
+	return entityID
 }
