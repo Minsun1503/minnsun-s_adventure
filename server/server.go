@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"server/db"
 	"server/ecs"
@@ -31,8 +32,64 @@ func StartLoginWorkerPool(workerCount int) {
 }
 
 // processLogin manages the database registration and player entity creation.
+// It reads the first packet which MUST be a LOGIN packet (opcode 10) containing
+// the player's chosen username.
 func processLogin(conn net.Conn) {
-	playerEntity, err := models.CreatePlayerEntity(conn)
+	// Set a 5-second read deadline to prevent login worker starvation DoS attacks
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	// Read packet length (2 bytes Big-Endian).
+	var length uint16
+	if err := binary.Read(conn, binary.BigEndian, &length); err != nil {
+		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Failed to read login packet length.")
+		conn.Close()
+		return
+	}
+	if length == 0 || length > 256 {
+		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid login packet length.")
+		conn.Close()
+		return
+	}
+
+	// Read the full packet payload.
+	packetBytes := make([]byte, length)
+	if _, err := io.ReadFull(conn, packetBytes); err != nil {
+		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Failed to read login packet payload.")
+		conn.Close()
+		return
+	}
+
+	// Validate opcode.
+	if packetBytes[0] != protocol.OpcodeC2SLogin {
+		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Expected LOGIN packet as first message.")
+		conn.Close()
+		return
+	}
+
+	// Payload format: [UsernameLen uint8][Username UTF-8 bytes]
+	payload := packetBytes[1:]
+	if len(payload) < 1 {
+		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Login packet too short.")
+		conn.Close()
+		return
+	}
+
+	usernameLen := int(payload[0])
+	if usernameLen == 0 || usernameLen > len(payload)-1 {
+		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid username length in login packet.")
+		conn.Close()
+		return
+	}
+
+	username := models.SanitizeUsername(string(payload[1 : 1+usernameLen]))
+	if !models.ValidateUsername(username) {
+		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Username must be 3-16 alphanumeric characters.")
+		conn.Close()
+		return
+	}
+
+	// Create or load the player entity using the validated username.
+	playerEntity, err := models.CreatePlayerEntity(conn, username)
 	if err != nil {
 		fmt.Println("[CONNECT] Error registering character in DB:", err)
 		protocol.SendErrorPacket(conn, protocol.ErrCodeDatabaseError, "Temporary server database issue. Please try again later.")
@@ -40,10 +97,12 @@ func processLogin(conn net.Conn) {
 		return
 	}
 
+	// Reset read deadline to infinity for the persistent client loop.
+	_ = conn.SetReadDeadline(time.Time{})
+
 	// Single snapshot lookup — covers name + spawn position in one call.
 	snap, ok := ecs.GlobalRegistry.GetSnapshot(playerEntity)
 	if !ok {
-		// Entity registration failed somehow; drop the connection cleanly.
 		conn.Close()
 		return
 	}

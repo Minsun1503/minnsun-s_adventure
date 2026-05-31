@@ -7,6 +7,7 @@ import (
 	"net"
 	"server/ecs"
 	"server/state"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,25 @@ type savedPlayerData struct {
 	Stats     ecs.StatsComponent
 	Equipment ecs.EquipmentComponent
 	Inventory map[uint64]int
+}
+
+// ValidateUsername checks that a username meets the server rules.
+// Requirements: 3-16 characters, alphanumeric only (A-Z, a-z, 0-9).
+func ValidateUsername(name string) bool {
+	if len(name) < 3 || len(name) > 16 {
+		return false
+	}
+	for _, ch := range name {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+// SanitizeUsername trims whitespace and converts to a canonical form.
+func SanitizeUsername(name string) string {
+	return strings.TrimSpace(name)
 }
 
 // loadSavedPlayerState queries the DB for an existing character by name.
@@ -54,7 +74,6 @@ func loadSavedPlayerState(name string) *savedPlayerData {
 	).Scan(&mapID, &x, &z, &hp, &maxHP, &damage, &weaponID, &armorID)
 	if err != nil && err != sql.ErrNoRows {
 		fmt.Printf("[LOAD] State lookup error for %s (id %d): %v\n", name, oldCharID, err)
-		// Fall through with zero values — use defaults below
 	}
 
 	// Step 3: Load inventory items.
@@ -85,23 +104,23 @@ func loadSavedPlayerState(name string) *savedPlayerData {
 	}
 }
 
-// CreatePlayerEntity registers a player entity in the ECS registry.
-// If the player has previously connected from this address (same Guest_XXXX name),
-// their saved position, stats, equipment, and inventory are restored from the database.
-// Otherwise, a fresh character with default stats is created.
+// CreatePlayerEntity registers a player entity in the ECS registry by username.
+// If the username already exists in the database, their saved position, stats,
+// equipment, and inventory are restored. Otherwise, a fresh character with
+// default stats is created and persisted.
 //
 // Parameters:
-//   - conn: The live TCP socket connection of the player client.
+//   - conn:     The live TCP socket connection of the player client.
+//   - username: The player's chosen username (already validated and sanitized).
 //
 // Returns:
 //   - The ecs.Entity ID registered in the ECS registry.
 //   - An error if database operations fail.
-func CreatePlayerEntity(conn net.Conn) (ecs.Entity, error) {
+func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 	playerAddress := conn.RemoteAddr().String()
-	guestName := "Guest_" + playerAddress[len(playerAddress)-4:]
 
-	// Phase 1: Load saved state if this player has been here before.
-	saved := loadSavedPlayerState(guestName)
+	// Phase 1: Load saved state if this username has been here before.
+	saved := loadSavedPlayerState(username)
 
 	// Phase 2: Generate a fresh entity ID for this session.
 	entityID := ecs.GlobalRegistry.NewEntity()
@@ -117,10 +136,10 @@ func CreatePlayerEntity(conn net.Conn) (ecs.Entity, error) {
 		}
 		defer tx.Rollback()
 
-		// Delete old rows for this name (FK ON DELETE CASCADE cleans child tables).
+		// Delete old rows for this username (FK ON DELETE CASCADE cleans child tables).
 		if saved != nil {
 			if _, err := tx.ExecContext(ctx,
-				"DELETE FROM characters WHERE name = ?", guestName,
+				"DELETE FROM characters WHERE name = ?", username,
 			); err != nil {
 				return 0, fmt.Errorf("DB delete old character failed: %w", err)
 			}
@@ -128,14 +147,13 @@ func CreatePlayerEntity(conn net.Conn) (ecs.Entity, error) {
 
 		// Insert the new character row.
 		if _, err := tx.ExecContext(ctx,
-			"INSERT INTO characters (id, name) VALUES (?, ?)", entityID, guestName,
+			"INSERT INTO characters (id, name) VALUES (?, ?)", entityID, username,
 		); err != nil {
 			return 0, fmt.Errorf("DB insert character failed: %w", err)
 		}
 
 		// Insert or restore dynamic state.
 		if saved != nil {
-			// Restore saved state.
 			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, weapon_id, armor_id)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -147,7 +165,6 @@ func CreatePlayerEntity(conn net.Conn) (ecs.Entity, error) {
 				return 0, fmt.Errorf("DB insert character_states failed: %w", err)
 			}
 
-			// Restore inventory items.
 			for itemID, qty := range saved.Inventory {
 				if _, err := tx.ExecContext(ctx,
 					"INSERT INTO character_inventory (character_id, item_template_id, quantity) VALUES (?, ?, ?)",
@@ -178,7 +195,6 @@ func CreatePlayerEntity(conn net.Conn) (ecs.Entity, error) {
 		ecs.GlobalRegistry.SetStats(entityID, saved.Stats)
 		ecs.GlobalRegistry.SetEquipment(entityID, saved.Equipment)
 
-		// Restore inventory into ECS.
 		if len(saved.Inventory) > 0 {
 			ecs.GlobalRegistry.SetInventory(entityID, ecs.InventoryComponent{
 				Items: saved.Inventory,
@@ -191,7 +207,7 @@ func CreatePlayerEntity(conn net.Conn) (ecs.Entity, error) {
 	}
 
 	ecs.GlobalRegistry.SetConnection(entityID, ecs.ConnectionComponent{Conn: conn})
-	ecs.GlobalRegistry.SetMetadata(entityID, ecs.MetadataComponent{Name: guestName, Type: "player"})
+	ecs.GlobalRegistry.SetMetadata(entityID, ecs.MetadataComponent{Name: username, Type: "player"})
 
 	// Track active player mapping.
 	ActivePlayers.Set(playerAddress, entityID)

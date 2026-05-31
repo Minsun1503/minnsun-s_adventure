@@ -19,15 +19,16 @@ package protocol
 // ─── Client → Server (C2S) Opcodes ──────────────────────────────────────────
 
 const (
-	OpcodeC2SMove   byte = 1 // Payload: [X int32 BE][Z int32 BE]
-	OpcodeC2SInv    byte = 2 // Payload: empty (request bag contents)
-	OpcodeC2SUse    byte = 3 // Payload: [ItemID uint64 BE]
-	OpcodeC2SWarp   byte = 4 // Payload: [MapID int32 BE][X int32 BE][Z int32 BE]
-	OpcodeC2SAttack byte = 5 // Payload: [TargetEntityID uint64 BE]
-	OpcodeC2SInfo   byte = 6 // Payload: [TargetEntityID uint64 BE]
-	OpcodeC2SQuit   byte = 7 // Payload: empty (graceful disconnect)
-	OpcodeC2SPickup byte = 8 // Payload: [GroundItemEntityID uint64 BE]
-	OpcodeC2SEquip  byte = 9 // Payload: [ItemTemplateID uint64 BE]
+	OpcodeC2SMove   byte = 1  // Payload: [X int32 BE][Z int32 BE]
+	OpcodeC2SInv    byte = 2  // Payload: empty (request bag contents)
+	OpcodeC2SUse    byte = 3  // Payload: [ItemID uint64 BE]
+	OpcodeC2SWarp   byte = 4  // Payload: [MapID int32 BE][X int32 BE][Z int32 BE]
+	OpcodeC2SAttack byte = 5  // Payload: [TargetEntityID uint64 BE]
+	OpcodeC2SInfo   byte = 6  // Payload: [TargetEntityID uint64 BE]
+	OpcodeC2SQuit   byte = 7  // Payload: empty (graceful disconnect)
+	OpcodeC2SPickup byte = 8  // Payload: [GroundItemEntityID uint64 BE]
+	OpcodeC2SEquip  byte = 9  // Payload: [ItemTemplateID uint64 BE]
+	OpcodeC2SLogin  byte = 10 // Payload: [UsernameLen uint8][Username UTF-8]
 )
 
 // ─── Server → Client (S2C) Opcodes ──────────────────────────────────────────
