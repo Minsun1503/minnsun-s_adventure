@@ -31,88 +31,165 @@ func StartLoginWorkerPool(workerCount int) {
 	}
 }
 
-// processLogin manages the database registration and player entity creation.
-// It reads the first packet which MUST be a LOGIN packet (opcode 10) containing
-// the player's chosen username.
-func processLogin(conn net.Conn) {
-	// Set a 5-second read deadline to prevent login worker starvation DoS attacks
-	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+// packetAuth holds parsed username/password from a LOGIN or REGISTER packet.
+type packetAuth struct {
+	username string
+	password string
+}
 
-	// Read packet length (2 bytes Big-Endian).
-	var length uint16
-	if err := binary.Read(conn, binary.BigEndian, &length); err != nil {
-		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Failed to read login packet length.")
-		conn.Close()
-		return
-	}
-	if length == 0 || length > 256 {
-		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid login packet length.")
-		conn.Close()
-		return
-	}
-
-	// Read the full packet payload.
-	packetBytes := make([]byte, length)
-	if _, err := io.ReadFull(conn, packetBytes); err != nil {
-		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Failed to read login packet payload.")
-		conn.Close()
-		return
-	}
-
-	// Validate opcode.
-	if packetBytes[0] != protocol.OpcodeC2SLogin {
-		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Expected LOGIN packet as first message.")
-		conn.Close()
-		return
-	}
-
-	// Payload format: [UsernameLen uint8][Username UTF-8 bytes]
-	payload := packetBytes[1:]
-	if len(payload) < 1 {
-		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Login packet too short.")
-		conn.Close()
-		return
+// parseAuthPayload extracts username and password from a binary auth packet payload.
+// Format: [UsernameLen uint8][Username UTF-8][PasswordLen uint8][Password UTF-8]
+// Returns empty packetAuth and false on any parse error.
+func parseAuthPayload(payload []byte) (packetAuth, bool) {
+	if len(payload) < 2 {
+		return packetAuth{}, false
 	}
 
 	usernameLen := int(payload[0])
 	if usernameLen == 0 || usernameLen > len(payload)-1 {
-		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid username length in login packet.")
-		conn.Close()
-		return
+		return packetAuth{}, false
+	}
+	pos := 1 + usernameLen
+
+	if pos >= len(payload) {
+		return packetAuth{}, false
+	}
+	passwordLen := int(payload[pos])
+	pos++
+	if passwordLen == 0 || pos+passwordLen > len(payload) {
+		return packetAuth{}, false
 	}
 
 	username := models.SanitizeUsername(string(payload[1 : 1+usernameLen]))
-	if !models.ValidateUsername(username) {
-		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Username must be 3-16 alphanumeric characters.")
+	password := string(payload[pos : pos+passwordLen])
+
+	return packetAuth{username: username, password: password}, true
+}
+
+// processLogin handles client authentication (LOGIN or REGISTER).
+// The first packet MUST be opcode 10 (LOGIN) or 11 (REGISTER).
+func processLogin(conn net.Conn) {
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	var length uint16
+	if err := binary.Read(conn, binary.BigEndian, &length); err != nil {
+		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Failed to read auth packet length.")
+		conn.Close()
+		return
+	}
+	if length == 0 || length > 256 {
+		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid auth packet length.")
 		conn.Close()
 		return
 	}
 
-	// Create or load the player entity using the validated username.
-	playerEntity, err := models.CreatePlayerEntity(conn, username)
-	if err != nil {
-		fmt.Println("[CONNECT] Error registering character in DB:", err)
-		protocol.SendErrorPacket(conn, protocol.ErrCodeDatabaseError, "Temporary server database issue. Please try again later.")
+	packetBytes := make([]byte, length)
+	if _, err := io.ReadFull(conn, packetBytes); err != nil {
+		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Failed to read auth packet payload.")
 		conn.Close()
 		return
 	}
 
-	// Reset read deadline to infinity for the persistent client loop.
-	_ = conn.SetReadDeadline(time.Time{})
+	opcode := packetBytes[0]
+	payload := packetBytes[1:]
 
-	// Single snapshot lookup — covers name + spawn position in one call.
-	snap, ok := ecs.GlobalRegistry.GetSnapshot(playerEntity)
-	if !ok {
+	switch opcode {
+
+	case protocol.OpcodeC2SLogin: // LOGIN
+		auth, ok := parseAuthPayload(payload)
+		if !ok {
+			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid LOGIN packet payload.")
+			conn.Close()
+			return
+		}
+		if !models.ValidateUsername(auth.username) {
+			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Username must be 3-16 alphanumeric characters.")
+			conn.Close()
+			return
+		}
+		if !models.ValidatePassword(auth.password) {
+			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Password must be at least 6 characters.")
+			conn.Close()
+			return
+		}
+
+		// Look up stored credentials.
+		_, storedHash, found := models.LookupCredentials(auth.username)
+		if !found {
+			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Account does not exist. Please register first.")
+			conn.Close()
+			return
+		}
+		if !models.CheckPasswordHash(auth.password, storedHash) {
+			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid username or password.")
+			conn.Close()
+			return
+		}
+
+		// Auth passed — create ECS entity from saved DB state.
+		playerEntity, err := models.CreatePlayerEntity(conn, auth.username)
+		if err != nil {
+			fmt.Println("[CONNECT] Error loading character from DB:", err)
+			protocol.SendErrorPacket(conn, protocol.ErrCodeDatabaseError, "Failed to load character data. Please try again.")
+			conn.Close()
+			return
+		}
+
+		_ = conn.SetReadDeadline(time.Time{})
+
+		snap, ok := ecs.GlobalRegistry.GetSnapshot(playerEntity)
+		if !ok {
+			conn.Close()
+			return
+		}
+
+		fmt.Printf("[CONNECT] %s (entity %d)\n", snap.Meta.Name, playerEntity)
+		systems.BroadcastSystem(
+			[]byte(fmt.Sprintf("Player %s has logged into the game!\r\n", snap.Meta.Name)),
+		)
+		go handleClient(conn, playerEntity, snap)
+
+	case protocol.OpcodeC2SRegister: // REGISTER
+		auth, ok := parseAuthPayload(payload)
+		if !ok {
+			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid REGISTER packet payload.")
+			conn.Close()
+			return
+		}
+		if !models.ValidateUsername(auth.username) {
+			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Username must be 3-16 alphanumeric characters.")
+			conn.Close()
+			return
+		}
+		if !models.ValidatePassword(auth.password) {
+			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Password must be at least 6 characters.")
+			conn.Close()
+			return
+		}
+
+		hashed, err := models.HashPassword(auth.password)
+		if err != nil {
+			fmt.Println("[REGISTER] bcrypt hash error:", err)
+			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Server error. Please try again.")
+			conn.Close()
+			return
+		}
+
+		err = models.RegisterNewAccount(auth.username, hashed)
+		if err != nil {
+			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Username already exists.")
+			conn.Close()
+			return
+		}
+
+		// Send success text response and close — client must now LOGIN.
+		protocol.SendErrorPacket(conn, 0, "Account registered successfully! Please log in.")
 		conn.Close()
-		return
+
+	default:
+		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Expected LOGIN or REGISTER packet as first message.")
+		conn.Close()
 	}
-
-	fmt.Printf("[CONNECT] %s (entity %d)\n", snap.Meta.Name, playerEntity)
-	systems.BroadcastSystem(
-		[]byte(fmt.Sprintf("Player %s has logged into the game!\r\n", snap.Meta.Name)),
-	)
-
-	go handleClient(conn, playerEntity, snap)
 }
 
 func main() {

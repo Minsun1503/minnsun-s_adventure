@@ -6,6 +6,7 @@ USE minnsun_adventure;
 CREATE TABLE IF NOT EXISTS characters (
     id BIGINT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL DEFAULT '',
     UNIQUE KEY idx_char_name (name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

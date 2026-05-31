@@ -43,6 +43,7 @@ func InitializeDatabase(dsn string) {
 	CREATE TABLE IF NOT EXISTS characters (
 		id BIGINT PRIMARY KEY,
 		name VARCHAR(255),
+		password_hash VARCHAR(255) NOT NULL DEFAULT '',
 		UNIQUE KEY idx_char_name (name)
 	);`
 
@@ -82,6 +83,14 @@ func InitializeDatabase(dsn string) {
 	_, err = DBEngine.Exec(createInventoryTable)
 	if err != nil {
 		panic(fmt.Sprintf("Schema Compilation Error (inventory): %v", err))
+	}
+
+	// Ensure password_hash column exists for pre-existing installations.
+	_, err = DBEngine.Exec("ALTER TABLE characters ADD COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT ''")
+	if err != nil {
+		// Column already exists is a non-fatal error — MySQL silently rejects, but
+		// we don't care about the error text.
+		_ = err
 	}
 
 	fmt.Println("[DATABASE] Relational system matrices initialized and ready.")
