@@ -28,13 +28,22 @@ func tickWorld() {
 		case "monster":
 			processMonster(snap)
 		}
-		return true // always full scan; early-exit only if you add a sleep gate
+		return true
 	})
 
+	// Only run AI ticks when at least one player is online.
+	// MAP SLEEP TRICK: zero players → no AI computation at all.
 	if !hasPlayers {
-		// MAP SLEEP TRICK: no players → skip heavy logic next tick
-		// (you can set a flag here to gate UpdateWorldEntitiesSystem)
+		return
 	}
+
+	// Tick every monster's AI state machine.
+	// RangeAI is separate from RangeSnapshots to avoid a second
+	// metadata scan — AI and snapshot passes are decoupled by design.
+	ecs.GlobalRegistry.RangeAI(func(id ecs.Entity, _ ecs.AIComponent) bool {
+		tickAI(id)
+		return true
+	})
 }
 
 func processMonster(snap ecs.EntitySnapshot) {

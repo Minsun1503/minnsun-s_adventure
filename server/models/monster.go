@@ -5,100 +5,134 @@ import (
 	"fmt"
 	"os"
 	"server/ecs"
+	"server/systems"
+	"sync"
 )
 
-// Global tracker to ensure every spawned creature gets a distinct row anchor
-var nextMonsterInstanceID = 1000
-
-// MonsterTemplate defines the raw template data loaded from configuration.
+// MonsterTemplate defines the static read-only data loaded from JSON config.
+// Templates are never registered as ECS entities — they live in templateStore
+// and are copied into live instances via SpawnMonsterFromTemplate.
 type MonsterTemplate struct {
-	ID   uint64 `json:"id"`
-	Name string `json:"name"`
-	HP   int    `json:"hp"`
-	Dam  int    `json:"damage"`
+	ID             int     `json:"id"`
+	Name           string  `json:"name"`
+	HP             int     `json:"hp"`
+	Dam            int     `json:"damage"`
+	SpawnX         int     `json:"spawn_x"`
+	SpawnZ         int     `json:"spawn_z"`
+	RoamRadius     int     `json:"roam_radius"`
+	AggroRadius    float64 `json:"aggro_radius"`
+	AttackCooldown int     `json:"attack_cooldown"`
 }
 
-// CreateMonsterEntity registers a monster template as an Entity in ECS.
+// templateStore is the in-memory registry for static monster templates.
+// Keyed by template ID from JSON. Separate from ECS to avoid ID collisions
+// between template IDs (1, 2, 3...) and live entity IDs (atomic counter).
+var (
+	templateStore   = make(map[int]MonsterTemplate)
+	templateStoreMu sync.RWMutex
+)
+
+// LoadMonster reads monster templates from a JSON file and populates
+// the in-memory templateStore. Call once at server boot before any spawns.
 //
 // Parameters:
-//   - m: The raw MonsterTemplate data.
+//   - filePath: path to the JSON configuration file.
 //
-// Returns:
-//   - The newly registered ecs.Entity ID.
-func CreateMonsterEntity(m MonsterTemplate) ecs.Entity {
-	entityID := ecs.Entity(m.ID)
-
-	ecs.GlobalRegistry.SetMetadata(entityID, ecs.MetadataComponent{Name: m.Name, Type: "monster_template"})
-	ecs.GlobalRegistry.SetStats(entityID, ecs.StatsComponent{HP: m.HP, Dam: m.Dam})
-
-	return entityID
-}
-
-// SpawnMonsterFromTemplate instantiates a live monster on the map using a registered monster template.
-// It retrieves the template's properties from the ECS registry, generates a unique instance ID,
-// and attaches the corresponding components (Position, Metadata, Stats) to the new live entity.
-//
-// Parameters:
-//   - templateID: The unique ID identifying the static monster template.
-//   - spawnX: The initial X coordinate where the monster instance will spawn.
-//   - spawnZ: The initial Z coordinate where the monster instance will spawn.
-//
-// Returns:
-//   - The registered live monster instance ecs.Entity ID.
-//   - An error if the specified templateID is not found in the ECS registry.
-func SpawnMonsterFromTemplate(templateID int, spawnX int, spawnZ int) (ecs.Entity, error) {
-	// Look up the static read-only JSON profile registered in ecs.GlobalRegistry
-	templateEntity := ecs.Entity(templateID)
-	templateMeta, metaOk := ecs.GlobalRegistry.GetMetadata(templateEntity)
-	templateStats, statsOk := ecs.GlobalRegistry.GetStats(templateEntity)
-
-	if !metaOk || !statsOk {
-		return 0, fmt.Errorf("failed to spawn: template ID %d not found", templateID)
-	}
-
-	// 1. Generate the unique Entity ID atomically using Registry
-	entityID := ecs.GlobalRegistry.NewEntity()
-
-	// 2. Populate columns using Registry helper tools with inline values
-	ecs.GlobalRegistry.SetMetadata(entityID, ecs.MetadataComponent{
-		Name: templateMeta.Name,
-		Type: "monster",
-	})
-
-	ecs.GlobalRegistry.SetPosition(entityID, ecs.PositionComponent{
-		X: spawnX,
-		Z: spawnZ,
-	})
-
-	ecs.GlobalRegistry.SetStats(entityID, ecs.StatsComponent{
-		HP:  templateStats.HP, // Unique current HP instance tracking
-		Dam: templateStats.Dam,
-	})
-
-	fmt.Printf("[ECS ENGINE] Row entry %d (%s) initialized at X:%d, Z:%d\n",
-		entityID, templateMeta.Name, spawnX, spawnZ)
-
-	return entityID, nil
-}
-
-// LoadMonster loads the list of template monsters from a pre-formatted JSON file.
-//
-// Parameters:
-//   - filePath: The relative or absolute path to the JSON configuration file.
-//
-// Returns:
-//   - A slice of MonsterTemplate if loaded successfully, or an error.
+// Returns error if the file cannot be read or parsed.
 func LoadMonster(filePath string) ([]MonsterTemplate, error) {
 	fileBytes, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read json file: %v", err)
+		return nil, fmt.Errorf("failed to read monster config: %w", err)
 	}
 
-	var temporaryList []MonsterTemplate
-	err = json.Unmarshal(fileBytes, &temporaryList)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse json data: %v", err)
+	var list []MonsterTemplate
+	if err := json.Unmarshal(fileBytes, &list); err != nil {
+		return nil, fmt.Errorf("failed to parse monster config: %w", err)
 	}
 
-	return temporaryList, nil
+	// Populate the template store for SpawnMonsterFromTemplate lookups.
+	templateStoreMu.Lock()
+	for _, t := range list {
+		templateStore[t.ID] = t
+	}
+	templateStoreMu.Unlock()
+
+	return list, nil
+}
+
+// GetTemplate returns a MonsterTemplate by its JSON ID.
+// Returns false if the template has not been loaded.
+func GetTemplate(templateID int) (MonsterTemplate, bool) {
+	templateStoreMu.RLock()
+	defer templateStoreMu.RUnlock()
+	t, ok := templateStore[templateID]
+	return t, ok
+}
+
+// SpawnMonsterFromTemplate instantiates a live monster entity from a loaded template.
+// The template provides base stats and AI configuration; spawn coordinates
+// can override the template's default spawn point for scripted placement.
+//
+// Parameters:
+//   - templateID: JSON template ID to copy stats from.
+//   - spawnX, spawnZ: world coordinates for this instance.
+//
+// Returns the new ecs.Entity ID, or an error if the template is not found.
+func SpawnMonsterFromTemplate(templateID, spawnX, spawnZ int) (ecs.Entity, error) {
+	t, ok := GetTemplate(templateID)
+	if !ok {
+		return 0, fmt.Errorf("template ID %d not found — did you call LoadMonster?", templateID)
+	}
+
+	// Generate a unique entity ID from the atomic counter.
+	// This is guaranteed not to collide with template IDs because
+	// templates never enter the ECS registry.
+	id := ecs.GlobalRegistry.NewEntity()
+
+	ecs.GlobalRegistry.SetMetadata(id, ecs.MetadataComponent{
+		Name: t.Name,
+		Type: "monster",
+	})
+
+	spawnPos := ecs.PositionComponent{X: spawnX, Z: spawnZ}
+	ecs.GlobalRegistry.SetPosition(id, spawnPos)
+
+	ecs.GlobalRegistry.SetStats(id, ecs.StatsComponent{
+		HP:  t.HP,
+		Dam: t.Dam,
+	})
+
+	// Register in spatial grid before the first AI tick fires.
+	systems.GlobalSpatialGrid.UpdateEntityPosition(id, spawnPos)
+
+	// Derive leash radius from aggro radius — always 2× so monsters
+	// don't instantly give up but also don't chase indefinitely.
+	leashRadius := t.AggroRadius * 2.0
+
+	ecs.GlobalRegistry.SetAI(id, ecs.AIComponent{
+		State:          ecs.AIStateIdle,
+		SpawnX:         spawnX,
+		SpawnZ:         spawnZ,
+		SpawnRadius:    t.RoamRadius,
+		AggroRadius:    t.AggroRadius,
+		LeashRadius:    leashRadius,
+		MeleeRange:     2.0, // melee is always 2 units; could be a template field later
+		AttackCooldown: t.AttackCooldown,
+		IdleDuration:   8, // 2 sec idle before roaming; same for all monsters for now
+	})
+
+	fmt.Printf("[SPAWN] %s (entity %d) at (%d, %d) | HP:%d ATK:%d aggro:%.0f leash:%.0f\n",
+		t.Name, id, spawnX, spawnZ, t.HP, t.Dam, t.AggroRadius, leashRadius)
+
+	return id, nil
+}
+
+// SpawnFromDefaultPosition spawns a monster at its template-defined default coordinates.
+// Convenience wrapper used during server boot when no override is needed.
+func SpawnFromDefaultPosition(templateID int) (ecs.Entity, error) {
+	t, ok := GetTemplate(templateID)
+	if !ok {
+		return 0, fmt.Errorf("template ID %d not found", templateID)
+	}
+	return SpawnMonsterFromTemplate(templateID, t.SpawnX, t.SpawnZ)
 }

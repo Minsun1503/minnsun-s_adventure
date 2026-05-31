@@ -13,15 +13,22 @@ import (
 )
 
 func main() {
-	monsters, err := models.LoadMonster("data/monster_templates.json")
+	templates, err := models.LoadMonster("data/monster_templates.json")
 	if err != nil {
 		fmt.Println("CRITICAL SERVER BOOT ERROR:", err)
 		return
 	}
-	for _, t := range monsters {
-		models.CreateMonsterEntity(t)
+	fmt.Printf("[BOOT] Loaded %d monster templates.\n", len(templates))
+
+	spawned := 0
+	for _, t := range templates {
+		if _, err := models.SpawnFromDefaultPosition(t.ID); err != nil {
+			fmt.Printf("[BOOT] Failed to spawn template %d (%s): %v\n", t.ID, t.Name, err)
+			continue
+		}
+		spawned++
 	}
-	fmt.Printf("[BOOT] Registered %d monster templates into ECS.\n", len(monsters))
+	fmt.Printf("[BOOT] Spawned %d live monster instances into ECS.\n", spawned)
 
 	lis, err := net.Listen("tcp", ":1503")
 	if err != nil {
@@ -69,11 +76,11 @@ func main() {
 func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapshot) {
 	// Deferred cleanup: broadcast logout, remove from ECS, close socket.
 	defer func() {
-		// Re-fetch name in case it was mutated during the session (e.g. rename system).
 		name := snap.Meta.Name
 		if live, ok := ecs.GlobalRegistry.GetMetadata(playerEntity); ok {
 			name = live.Name
 		}
+		systems.GlobalSpatialGrid.RemoveEntity(playerEntity) // ← NEW
 		ecs.GlobalRegistry.RemoveEntity(playerEntity)
 		models.ActivePlayers.Delete(conn.RemoteAddr().String())
 		systems.BroadcastSystem(
@@ -110,27 +117,23 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 func handleCommand(conn net.Conn, playerEntity ecs.Entity, message string) {
 	fmt.Printf("[CMD] %s: %q\n", conn.RemoteAddr(), message)
 
-	parts := strings.Fields(message) // Fields splits on any whitespace, handles extra spaces
+	parts := strings.Fields(message)
 	if len(parts) == 0 {
 		return
 	}
 
-	switch parts[0] {
+	switch strings.ToUpper(parts[0]) { // ToUpper một lần ở đây — tất cả case đều uppercase
 
-	case "m", "move":
-		if len(parts) != 3 {
-			systems.SendNoticeSystem(playerEntity, []byte("Usage: m <x> <z>\r\n"))
-			return
+	case "M", "MOVE":
+		// Delegate hoàn toàn sang HandlePlayerMovementSystem.
+		// Không parse tọa độ ở đây nữa — đó là trách nhiệm của movement system.
+		errMsg, ok := systems.HandlePlayerMovementSystem(playerEntity, message)
+		if !ok {
+			systems.SendNoticeSystem(playerEntity, []byte(errMsg))
 		}
-		xVal, errX := strconv.Atoi(parts[1])
-		zVal, errZ := strconv.Atoi(parts[2])
-		if errX != nil || errZ != nil {
-			systems.SendNoticeSystem(playerEntity, []byte("Coordinates must be integers.\r\n"))
-			return
-		}
-		systems.MovementSystem(playerEntity, xVal, zVal)
+		// ok == true: MovementSystem đã tự broadcast, không cần làm gì thêm.
 
-	case "info":
+	case "INFO":
 		if len(parts) != 2 {
 			systems.SendNoticeSystem(playerEntity, []byte("Usage: info <entity_id>\r\n"))
 			return
@@ -147,12 +150,46 @@ func handleCommand(conn net.Conn, playerEntity ecs.Entity, message string) {
 		}
 		systems.SendNoticeSystem(playerEntity, []byte(text))
 
-	case "quit":
+	case "ATTACK", "ATK":
+		// Syntax: attack <entity_id>
+		if len(parts) != 2 {
+			systems.SendNoticeSystem(playerEntity, []byte("Usage: attack <entity_id>\r\n"))
+			return
+		}
+		id, err := strconv.Atoi(parts[1])
+		if err != nil {
+			systems.SendNoticeSystem(playerEntity, []byte("Entity ID must be a number.\r\n"))
+			return
+		}
+
+		result, errMsg := systems.AttackSystem(playerEntity, ecs.Entity(id))
+		if errMsg != "" {
+			// Attack rejected before landing — notify attacker only.
+			systems.SendNoticeSystem(playerEntity, []byte(errMsg))
+			return
+		}
+
+		// Attack landed — AttackSystem already broadcast the outcome.
+		// Send a personal confirmation to the attacker with full detail.
+		if result.Killed {
+			systems.SendNoticeSystem(playerEntity,
+				[]byte(fmt.Sprintf("You killed %s!\r\n", result.TargetName)),
+			)
+		} else {
+			systems.SendNoticeSystem(playerEntity,
+				[]byte(fmt.Sprintf(
+					"You hit %s for %d damage. %s has %d HP remaining.\r\n",
+					result.TargetName, result.Damage,
+					result.TargetName, result.TargetHP,
+				)),
+			)
+		}
+
+	case "QUIT":
 		fmt.Printf("[QUIT] %s requested disconnect.\n", conn.RemoteAddr())
-		conn.Close() // triggers scan.Scan() to return false → handleClient cleans up
+		conn.Close()
 
 	default:
-		// Normal chat — echo back, could be routed to a ChatSystem later.
 		conn.Write([]byte("Server echo: " + message + "\r\n"))
 	}
 }

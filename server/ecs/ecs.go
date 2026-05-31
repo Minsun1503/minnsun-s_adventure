@@ -41,6 +41,7 @@ type Registry struct {
 	conns     state.TypedSyncMap[Entity, ConnectionComponent]
 	metadata  state.TypedSyncMap[Entity, MetadataComponent] // inline value, no pointer
 	stats     state.TypedSyncMap[Entity, StatsComponent]    // inline value, no pointer
+	ai        state.TypedSyncMap[Entity, AIComponent]       // inline value, no pointer
 }
 
 var GlobalRegistry = &Registry{}
@@ -52,16 +53,18 @@ func (r *Registry) NewEntity() Entity {
 
 // RemoveEntity deletes all components in parallel using a WaitGroup.
 // Previous: 5 sequential lock acquisitions.
-// Now: 4 concurrent sync.Map deletes.
+// Now: 5 concurrent sync.Map deletes.
 func (r *Registry) RemoveEntity(id Entity) {
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(5)
 	go func() { r.positions.Delete(id); wg.Done() }()
 	go func() { r.conns.Delete(id); wg.Done() }()
 	go func() { r.metadata.Delete(id); wg.Done() }()
 	go func() { r.stats.Delete(id); wg.Done() }()
+	go func() { r.ai.Delete(id); wg.Done() }()
 	wg.Wait()
 }
+
 
 func (r *Registry) SetPosition(id Entity, comp PositionComponent) { // no pointer param
 	r.positions.Set(id, comp)

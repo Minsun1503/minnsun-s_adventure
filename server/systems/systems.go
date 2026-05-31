@@ -56,40 +56,34 @@ func writeConn(c net.Conn, data []byte) {
 	c.Write(data) //nolint:errcheck — disconnect handled by read-side goroutine
 }
 
-// MovementSystem validates and commits a position update for an entity,
-// then notifies all OTHER connected clients (sender excluded).
-//
-// Parameters:
-//   - entity: The entity ID to move.
-//   - x, z:  New coordinates.
-func MovementSystem(entity ecs.Entity, x, z int) {
-	// SECURITY GUARDRAIL: hard map boundary (100×100)
+// MovementSystem validates and commits a position update.
+// Returns true if the move was accepted and broadcast was sent.
+// Returns false if boundary check failed (notice already sent to player).
+func MovementSystem(entity ecs.Entity, x, z int) bool {
 	if x < 0 || x > 100 || z < 0 || z > 100 {
 		SendNoticeSystem(entity, []byte("Movement rejected! Out of bounds.\r\n"))
-		return
+		return false
 	}
-
 	registry := ecs.GlobalRegistry
-
 	pos, ok := registry.GetPosition(entity)
 	if !ok {
-		return
+		return false
 	}
-
 	pos.X = x
 	pos.Z = z
-	registry.SetPosition(entity, pos) // inline value — must commit explicitly
+	registry.SetPosition(entity, pos)
+
+	// ← NEW: sync spatial grid after confirmed ECS position write
+	GlobalSpatialGrid.UpdateEntityPosition(entity, pos)
 
 	meta, metaOk := registry.GetMetadata(entity)
 	if !metaOk {
-		return
+		return false
 	}
-
-	// Build the broadcast payload once, reuse across all connections.
 	msg := fmt.Sprintf("Player %s moved to X=%d Z=%d\r\n", meta.Name, x, z)
 	BroadcastExcept(entity, []byte(msg))
-
 	fmt.Printf("[MOVEMENT] %s → (%d, %d)\n", meta.Name, x, z)
+	return true
 }
 
 // GetInfoSystem retrieves formatted combat stats for a target entity.

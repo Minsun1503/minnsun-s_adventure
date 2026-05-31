@@ -13,12 +13,16 @@
   - Thiết lập và khởi chạy **Game Loop (Heartbeat)** chu kỳ 250ms chạy nền dưới dạng goroutine được đóng gói sạch sẽ trong file [gameloop.go](file:///c:/Minnsun's Adventure/server/systems/gameloop.go) thuộc package `systems`, tích hợp kiểm tra tối ưu hóa tắt/bật tính toán AI dựa trên việc quét tìm thực thể người chơi thực tế thông qua các Component của ECS.
   - Thiết lập file `.gitignore` chung để hỗ trợ cả dự án Go (bỏ file thực thi `.exe`, `.msi`, v.v.) và dự án Unity Client tại `client/Minnsun's Adventure` (bỏ các thư mục tạm thời `Library/`, `Temp/`, `Obj/`, `Logs/`, `UserSettings/`, các file IDE tự sinh như `.csproj`, `.sln`, `.slnx` mà vẫn bảo tồn đầy đủ các assets và file `.meta`).
   - Thực hiện dọn dẹp bộ nhớ đệm index của git (`git rm -r --cached`) và đưa các assets Unity hợp lệ vào khu vực staging.
+  - Tích hợp `AIComponent` vào ECS Registry: Thêm trường `ai` kiểu `state.TypedSyncMap[Entity, AIComponent]` vào struct `Registry` trong [ecs.go](file:///c:/Minnsun's Adventure/server/ecs/ecs.go) và thực hiện xóa dọn dẹp AIComponent khi giải phóng Entity trong `RemoveEntity`.
+  - Khắc phục lỗi biên dịch `MonsterTemplate` bằng cách tách biệt rõ ràng việc đăng ký static template (`CreateMonsterEntity` sử dụng ID tĩnh) và sinh thực thể quái vật sống (`SpawnMonsterFromTemplate` khởi tạo tọa độ thực tế, đăng ký vào spatial grid và kích hoạt AIComponent).
+  - Tự động sinh (spawn) 5 thực thể quái vật sống (Slime, Wild Boar, Sea King Proto) từ template tại các tọa độ khởi tạo khác nhau khi Server khởi động thành công.
 
 ## 2. Những "đặc sản" logic vừa tìm thấy (Discovered Logic Specialties)
 - Server sử dụng giao thức TCP thô ở cổng `:1503`.
 - Dự án sử dụng Go 1.26.3, hỗ trợ đầy đủ Go Generics.
 - Sử dụng mô hình ECS tách biệt tuyệt đối giữa Dữ liệu (Components) và Logic (Systems). Các thực thể chỉ tương tác qua ID kiểu `ecs.Entity` (chuỗi địa chỉ cho người chơi, hoặc ID quái vật).
 - Cấu trúc thư mục Client Unity nằm dưới thư mục `client/Minnsun's Adventure` và chứa các file mã nguồn/asset cần thiết phải được theo dõi bởi Git, trong khi thư mục `Library/` chứa hàng ngàn file cache sinh ra bởi Unity.
+- Các thực thể AI quái vật sẽ tự động chuyển đổi trạng thái (Idle -> Roaming -> Chasing -> Attacking -> Returning) phụ thuộc vào khoảng cách người chơi thông qua `ProximitySystem` và `SpatialGrid`.
 
 ## 3. Những việc còn dang dở (Pending tasks)
 - Tự chạy và kiểm thử kiểm soát đa kết nối Client trong môi trường ECS mới.
