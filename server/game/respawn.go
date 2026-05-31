@@ -66,6 +66,8 @@ func (rs *RespawnScheduler) RunRespawnSystem() {
 			}
 			// Register in the spatial grid so AI systems can find it.
 			if pos, ok := ecs.GlobalRegistry.GetPosition(id); ok {
+				pos.MapID = ev.MapID // Set the correct MapID (since SpawnMonsterFromTemplate defaults to 1)
+				ecs.GlobalRegistry.SetPosition(id, pos)
 				world.GlobalSpatialGrid.UpdateEntityPosition(id, pos)
 			}
 			fmt.Printf("[RESPAWN] Spawned %s (entity %d) at (%d,%d)\n",
