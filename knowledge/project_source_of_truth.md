@@ -99,7 +99,11 @@
   - Thêm hàm `loadSavedPlayerState(name)` trong [player.go](file:///c:/Minnsun's Adventure/server/models/player.go) để truy vấn MySQL lấy vị trí (X, Z, MapID), chỉ số (HP, MaxHP, Dam), trang bị (Weapon, Armor) và balo (Inventory) của người chơi cũ bằng `name`.
   - Thay đổi logic `CreatePlayerEntity` để tự động khôi phục dữ liệu đã lưu vào Registry ECS thay vì gán các chỉ số mặc định của nhân vật mới tinh.
   - Sử dụng cơ chế Transaction (`tx`) và xóa bản ghi cũ trước khi chèn ID thực thể mới (`DELETE` -> `INSERT`) nhằm đồng bộ ID thực thể dạng động trong RAM với MySQL.
-
+- **Hệ thống tự động hồi sinh quái vật (Automated Monster Respawn Scheduler)**:
+  - Tạo tệp [`respawn.go`](file:///c:/Minnsun's Adventure/server/game/respawn.go) quản lý hàng đợi hồi sinh quái vật `GlobalRespawnManager` một cách an toàn luồng (Mutex).
+  - Tích hợp hàm `RunRespawnSystem()` vào nhịp game loop heartbeat 250ms định kỳ tại [`gameloop.go`](file:///c:/Minnsun's Adventure/server/systems/gameloop.go). Khi thời gian chờ kết thúc, hệ thống gọi `models.SpawnMonsterFromTemplate` để tái tạo thực thể quái vật và tự động cập nhật vị trí lên Spatial Grid.
+  - Bổ sung hàm `GetTemplateByName` tại [`monster.go`](file:///c:/Minnsun's Adventure/server/models/monster.go) để tra cứu ID mẫu quái vật dựa trên Metadata Name.
+  - Cấu hình DeathSystem trong [`combat.go`](file:///c:/Minnsun's Adventure/server/game/combat.go) để tự động đăng ký sự kiện hồi sinh trễ 15 giây khi quái vật bị tiêu diệt.
 
 ## 2. Những "đặc sản" logic vừa tìm thấy (Discovered Logic Specialties)
 - Server sử dụng giao thức TCP thô ở cổng `:1503`.
