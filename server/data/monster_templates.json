@@ -8,7 +8,8 @@
         "spawn_z": 40,
         "roam_radius": 12,
         "aggro_radius": 8,
-        "attack_cooldown": 4
+        "attack_cooldown": 4,
+        "xp_reward": 150
     },
     {
         "id": 2,
@@ -19,7 +20,8 @@
         "spawn_z": 20,
         "roam_radius": 20,
         "aggro_radius": 12,
-        "attack_cooldown": 3
+        "attack_cooldown": 3,
+        "xp_reward": 50
     },
     {
         "id": 3,
@@ -30,6 +32,7 @@
         "spawn_z": 80,
         "roam_radius": 8,
         "aggro_radius": 6,
-        "attack_cooldown": 6
+        "attack_cooldown": 6,
+        "xp_reward": 300
     }
 ]

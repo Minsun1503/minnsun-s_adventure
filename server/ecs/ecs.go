@@ -29,13 +29,32 @@ type MetadataComponent struct {
 }
 
 type StatsComponent struct {
+	Level int
+	XP    uint64
 	HP    int
 	MaxHP int
+	MP    int
+	MaxMP int
 	Dam   int
 }
 
 type ItemTemplateComponent struct {
 	TemplateID uint64
+}
+
+// PartyComponent represents a player party/team entity.
+// The entity owning this component is the party itself (not a player).
+// MemberIDs tracks all current members in insertion order.
+// PartyMemberComponent on each member carries a back-reference to this party entity.
+type PartyComponent struct {
+	LeaderID  Entity
+	TeamName  string
+	MemberIDs []Entity
+}
+
+// PartyMemberComponent is attached to each player who belongs to a party.
+type PartyMemberComponent struct {
+	PartyID Entity
 }
 
 // Registry uses sync.Map per component type.
@@ -52,6 +71,9 @@ type Registry struct {
 	lifetimes     state.TypedSyncMap[Entity, LifetimeComponent]
 	itemTemplates state.TypedSyncMap[Entity, ItemTemplateComponent]
 	equipment     state.TypedSyncMap[Entity, EquipmentComponent]
+	parties       state.TypedSyncMap[Entity, PartyComponent]
+	partyMembers  state.TypedSyncMap[Entity, PartyMemberComponent]
+	effects       state.TypedSyncMap[Entity, EffectsComponent]
 }
 
 var GlobalRegistry = &Registry{}
@@ -66,7 +88,7 @@ func (r *Registry) NewEntity() Entity {
 // Now: 9 concurrent sync.Map deletes.
 func (r *Registry) RemoveEntity(id Entity) {
 	var wg sync.WaitGroup
-	wg.Add(9)
+	wg.Add(12)
 	go func() { r.positions.Delete(id); wg.Done() }()
 	go func() { r.conns.Delete(id); wg.Done() }()
 	go func() { r.metadata.Delete(id); wg.Done() }()
@@ -76,7 +98,22 @@ func (r *Registry) RemoveEntity(id Entity) {
 	go func() { r.lifetimes.Delete(id); wg.Done() }()
 	go func() { r.itemTemplates.Delete(id); wg.Done() }()
 	go func() { r.equipment.Delete(id); wg.Done() }()
+	go func() { r.parties.Delete(id); wg.Done() }()
+	go func() { r.partyMembers.Delete(id); wg.Done() }()
+	go func() { r.effects.Delete(id); wg.Done() }()
 	wg.Wait()
+}
+
+func (r *Registry) SetEffects(id Entity, comp EffectsComponent) {
+	r.effects.Set(id, comp)
+}
+
+func (r *Registry) GetEffects(id Entity) (EffectsComponent, bool) {
+	return r.effects.Get(id)
+}
+
+func (r *Registry) DeleteEffects(id Entity) {
+	r.effects.Delete(id)
 }
 
 func (r *Registry) SetLifetime(id Entity, comp LifetimeComponent) {
@@ -133,6 +170,37 @@ func (r *Registry) SetStats(id Entity, comp StatsComponent) {
 
 func (r *Registry) GetStats(id Entity) (StatsComponent, bool) {
 	return r.stats.Get(id)
+}
+
+// ─── Party Component helpers ─────────────────────────────────────────────
+
+func (r *Registry) SetParty(id Entity, comp PartyComponent) {
+	r.parties.Set(id, comp)
+}
+
+func (r *Registry) GetParty(id Entity) (PartyComponent, bool) {
+	return r.parties.Get(id)
+}
+
+func (r *Registry) DeleteParty(id Entity) {
+	r.parties.Delete(id)
+}
+
+func (r *Registry) SetPartyMember(id Entity, comp PartyMemberComponent) {
+	r.partyMembers.Set(id, comp)
+}
+
+func (r *Registry) GetPartyMember(id Entity) (PartyMemberComponent, bool) {
+	return r.partyMembers.Get(id)
+}
+
+func (r *Registry) DeletePartyMember(id Entity) {
+	r.partyMembers.Delete(id)
+}
+
+// RangePartyMembers iterates all entities that have a PartyMemberComponent.
+func (r *Registry) RangePartyMembers(f func(id Entity, pm PartyMemberComponent) bool) {
+	r.partyMembers.Range(f)
 }
 
 // GetAllEntities collects all entities that have at least a MetadataComponent.

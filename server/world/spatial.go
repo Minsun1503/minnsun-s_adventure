@@ -86,9 +86,10 @@ func (g *SpatialGrid) UpdateEntityPosition(id ecs.Entity, pos ecs.PositionCompon
 	if existed && oldChunk == newChunk {
 		// Same chunk: only update the position entry, no chunk reassignment needed.
 		g.chunkMu.Lock()
-		if g.chunks[newChunk] != nil {
-			g.chunks[newChunk][id] = entry
+		if g.chunks[newChunk] == nil {
+			g.chunks[newChunk] = make(map[ecs.Entity]ChunkEntry)
 		}
+		g.chunks[newChunk][id] = entry
 		g.chunkMu.Unlock()
 		return
 	}
@@ -222,9 +223,13 @@ func (g *SpatialGrid) GetEntityChunk(id ecs.Entity) (ChunkKey, bool) {
 // DebugStats returns a snapshot of grid occupancy for logging/monitoring.
 func (g *SpatialGrid) DebugStats() string {
 	g.chunkMu.RLock()
-	defer g.chunkMu.RUnlock()
+	chunkCount := len(g.chunks)
+	g.chunkMu.RUnlock()
+
 	g.indexMu.RLock()
-	defer g.indexMu.RUnlock()
+	entityCount := len(g.entityIndex)
+	g.indexMu.RUnlock()
+
 	return fmt.Sprintf("SpatialGrid: %d active chunks, %d indexed entities",
-		len(g.chunks), len(g.entityIndex))
+		chunkCount, entityCount)
 }

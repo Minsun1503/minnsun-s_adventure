@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"server/ecs"
 	"server/models"
+	"strings"
 	"time"
 )
 
@@ -31,7 +32,11 @@ func StartSaveWorkerEngine() {
 	}()
 }
 
-// QueuePlayerSave captures a fast inline memory snapshot and pushes it to the worker buffer thread
+// QueuePlayerSave captures a fast inline memory snapshot and pushes it to the worker buffer thread.
+//
+// NOTE: This snapshot is not atomic across all components.
+// A torn read (components from different game ticks) is acceptable
+// given the 250ms tick rate. The worst case is a 1-tick-stale save.
 func QueuePlayerSave(playerID ecs.Entity) {
 	meta, _ := ecs.GlobalRegistry.GetMetadata(playerID)
 	pos, _ := ecs.GlobalRegistry.GetPosition(playerID)
@@ -60,53 +65,83 @@ func QueuePlayerSave(playerID ecs.Entity) {
 		Equipment: eq,
 	}
 
-	// Non-blocking push down the channel tube! Lasts less than a microsecond.
+	// Non-blocking push down the channel tube!
 	select {
 	case SaveQueue <- snapshot:
 	default:
-		fmt.Printf("Alert: Save worker queue buffer full! Dropping save row payload for %s\n", meta.Name)
+		queueLen := len(SaveQueue)
+		fmt.Printf("[SAVE ALERT] Queue full (%d/1000)! DROP: entity %d (%s). DATA LOSS!\n",
+			queueLen, playerID, meta.Name)
 	}
 }
 
 func executeWriteToSQL(snap SaveSnapshot) {
+	const maxRetries = 3
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err = tryWrite(snap)
+		if err == nil {
+			fmt.Printf("DB Persisted: Safe-write operation completed for entity row #%d (%s).\n", snap.EntityID, snap.Name)
+			return
+		}
+		// Log failure and sleep with backoff for retry
+		fmt.Printf("[SAVE] Attempt %d failed for %s: %v\n", attempt+1, snap.Name, err)
+		time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
+	}
+	fmt.Printf("Error: [SAVE] Failed after %d retries for %s: %v\n", maxRetries, snap.Name, err)
+}
+
+func tryWrite(snap SaveSnapshot) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	// Begin transactional pipeline block with context timeout
 	tx, err := models.DBEngine.BeginTx(ctx, nil)
 	if err != nil {
-		fmt.Printf("Error: DB Transaction Fail: %v\n", err)
-		return
+		return err
 	}
 	defer tx.Rollback()
 
 	// 1. Upsert character dynamic stats and equipment records
-	dynamicUpsert := `INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, weapon_id, armor_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	dynamicUpsert := `INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, level, xp, weapon_id, armor_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 			map_id=VALUES(map_id), x=VALUES(x), z=VALUES(z), hp=VALUES(hp), max_hp=VALUES(max_hp), damage=VALUES(damage),
-			weapon_id=VALUES(weapon_id), armor_id=VALUES(armor_id);`
+			level=VALUES(level), xp=VALUES(xp), weapon_id=VALUES(weapon_id), armor_id=VALUES(armor_id);`
 
-	_, err = tx.ExecContext(ctx, dynamicUpsert, snap.EntityID, snap.Pos.MapID, snap.Pos.X, snap.Pos.Z, snap.Stats.HP, snap.Stats.MaxHP, snap.Stats.Dam, snap.Equipment.WeaponID, snap.Equipment.ArmorID)
+	_, err = tx.ExecContext(ctx, dynamicUpsert, snap.EntityID, snap.Pos.MapID, snap.Pos.X, snap.Pos.Z, snap.Stats.HP, snap.Stats.MaxHP, snap.Stats.Dam, snap.Stats.Level, snap.Stats.XP, snap.Equipment.WeaponID, snap.Equipment.ArmorID)
 	if err != nil {
-		fmt.Printf("Error: Failed SQL dynamic write: %v\n", err)
-		return
+		return err
 	}
 
-	// 2. Sync inventory bag matrices
-	for itemID, qty := range snap.Inventory {
-		invUpsert := `INSERT INTO character_inventory (character_id, item_template_id, quantity)
-			VALUES (?, ?, ?)
-			ON DUPLICATE KEY UPDATE quantity=VALUES(quantity);`
-		_, err = tx.ExecContext(ctx, invUpsert, snap.EntityID, itemID, qty)
-		if err != nil {
-			fmt.Printf("Error: Failed SQL inventory write: %v\n", err)
-			return
+	// 2. Sync inventory bag matrices via Batch Upsert
+	if len(snap.Inventory) > 0 {
+		query, args := buildBatchInventoryUpsert(snap.EntityID, snap.Inventory)
+		if query != "" {
+			_, err = tx.ExecContext(ctx, query, args...)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
-	// Commit data to disk sequentially
-	if err := tx.Commit(); err == nil {
-		fmt.Printf("DB Persisted: Safe-write operation completed for entity row #%d (%s).\n", snap.EntityID, snap.Name)
+	return tx.Commit()
+}
+
+func buildBatchInventoryUpsert(entityID ecs.Entity, inv map[uint64]int) (string, []any) {
+	if len(inv) == 0 {
+		return "", nil
 	}
+	query := `INSERT INTO character_inventory (character_id, item_template_id, quantity)
+		VALUES `
+	args := make([]any, 0, len(inv)*3)
+	placeholders := make([]string, 0, len(inv))
+
+	for itemID, qty := range inv {
+		placeholders = append(placeholders, "(?, ?, ?)")
+		args = append(args, entityID, itemID, qty)
+	}
+	query += strings.Join(placeholders, ",") +
+		` ON DUPLICATE KEY UPDATE quantity=VALUES(quantity)`
+	return query, args
 }

@@ -38,7 +38,12 @@ func (t *TypedSyncMap[K, V]) Get(key K) (V, bool) {
 		var zero V
 		return zero, false
 	}
-	return v.(V), true
+	val, ok2 := v.(V)
+	if !ok2 {
+		var zero V
+		return zero, false
+	}
+	return val, true
 }
 
 // Delete removes the key and its associated value from the map.

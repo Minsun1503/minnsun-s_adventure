@@ -195,7 +195,13 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 			targetMeta.Name, killerMeta.Name)
 	}
 	targetPos, _ := registry.GetPosition(targetID)
-	protocol.BroadcastToMap(targetPos.MapID, killMsg)
+
+	// If the killer is in a party, notify the whole party instead of just the map.
+	if partyID := GetPlayerPartyID(killerID); partyID != 0 {
+		BroadcastToParty(partyID, killMsg)
+	} else {
+		protocol.BroadcastToMap(targetPos.MapID, killMsg)
+	}
 
 	// ← NEW: remove từ spatial grid trước khi ECS cleanup
 	world.GlobalSpatialGrid.RemoveEntity(targetID)
@@ -214,6 +220,26 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 			GlobalRespawnManager.ScheduleMonsterRespawn(
 				t.ID, targetPos.MapID, spawnX, spawnZ, 15*time.Second,
 			)
+
+			// Distribute XP if killer was a player
+			if killerMeta.Type == "player" {
+				xpBounty := t.XPReward
+				if xpBounty > 0 {
+					if partyID := GetPlayerPartyID(killerID); partyID != 0 {
+						if party, exists := registry.GetParty(partyID); exists && len(party.MemberIDs) > 0 {
+							share := xpBounty / uint64(len(party.MemberIDs))
+							if share == 0 {
+								share = 1
+							}
+							for _, memberID := range party.MemberIDs {
+								AddExperienceSystem(memberID, share)
+							}
+						}
+					} else {
+						AddExperienceSystem(killerID, xpBounty)
+					}
+				}
+			}
 		}
 		registry.RemoveEntity(targetID)
 	}

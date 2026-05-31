@@ -196,6 +196,7 @@ func main() {
 	game.InitializeItemRegistry()
 	game.InitializeLootTables()
 	world.InitializeCollisionMaps()
+	models.InitializeSkillRegistry()
 
 	models.InitializeDatabase("root:root@tcp(127.0.0.1:3306)/?parseTime=true")
 	db.StartSaveWorkerEngine()
@@ -263,6 +264,8 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		if live, ok := ecs.GlobalRegistry.GetMetadata(playerEntity); ok {
 			name = live.Name
 		}
+		game.GlobalTradeRegistry.CancelTradeSession(playerEntity)
+		game.RemovePlayerFromParty(playerEntity)
 		db.QueuePlayerSave(playerEntity)
 		world.GlobalSpatialGrid.RemoveEntity(playerEntity)
 		ecs.GlobalRegistry.RemoveEntity(playerEntity)
@@ -410,6 +413,81 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 		} else {
 			systems.SendNoticeSystem(playerEntity, []byte(feedback))
 		}
+
+	case protocol.OpcodeC2SPartyCreate: // PARTY CREATE
+		if len(payload) < 1 {
+			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid PARTY CREATE payload.\r\n"))
+			return
+		}
+		teamNameLen := int(payload[0])
+		if teamNameLen == 0 || teamNameLen > len(payload)-1 {
+			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid team name length.\r\n"))
+			return
+		}
+		teamName := string(payload[1 : 1+teamNameLen])
+		response := game.CreatePartySystem(playerEntity, teamName)
+		systems.SendNoticeSystem(playerEntity, []byte(response))
+
+	case protocol.OpcodeC2SPartyInvite: // PARTY INVITE
+		if len(payload) != 8 {
+			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid PARTY INVITE payload length. Expected 8 bytes.\r\n"))
+			return
+		}
+		targetID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
+		response, _ := game.SendPartyInviteSystem(playerEntity, targetID)
+		systems.SendNoticeSystem(playerEntity, []byte(response))
+
+	case protocol.OpcodeC2SPartyJoin: // PARTY JOIN
+		if len(payload) != 8 {
+			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid PARTY JOIN payload length. Expected 8 bytes.\r\n"))
+			return
+		}
+		partyID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
+		response, _ := game.AcceptPartyInviteSystem(playerEntity, partyID)
+		systems.SendNoticeSystem(playerEntity, []byte(response))
+
+	case protocol.OpcodeC2STradeInit: // TRADE INIT
+		if len(payload) != 8 {
+			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid TRADE INIT payload length. Expected 8 bytes.\r\n"))
+			return
+		}
+		targetID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
+		response, _ := game.GlobalTradeRegistry.InitializeTradeSession(playerEntity, targetID)
+		systems.SendNoticeSystem(playerEntity, []byte(response))
+
+	case protocol.OpcodeC2STradeOffer: // TRADE OFFER
+		if len(payload) != 12 {
+			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid TRADE OFFER payload length. Expected 12 bytes.\r\n"))
+			return
+		}
+		itemID := binary.BigEndian.Uint64(payload[0:8])
+		qty := int(int32(binary.BigEndian.Uint32(payload[8:12])))
+		response, _ := game.GlobalTradeRegistry.OfferItemToTrade(playerEntity, itemID, qty)
+		systems.SendNoticeSystem(playerEntity, []byte(response))
+
+	case protocol.OpcodeC2STradeConfirm: // TRADE CONFIRM
+		response, _ := game.GlobalTradeRegistry.LockTradeStage(playerEntity)
+		if response != "" {
+			systems.SendNoticeSystem(playerEntity, []byte(response))
+		}
+
+	case protocol.OpcodeC2STradeCancel: // TRADE CANCEL
+		response, _ := game.GlobalTradeRegistry.CancelTradeSession(playerEntity)
+		systems.SendNoticeSystem(playerEntity, []byte(response))
+
+	case protocol.OpcodeC2SSkillCast: // SKILL CAST
+		if len(payload) != 16 {
+			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid SKILL CAST payload length. Expected 16 bytes.\r\n"))
+			return
+		}
+		skillID := binary.BigEndian.Uint64(payload[0:8])
+		targetID := ecs.Entity(binary.BigEndian.Uint64(payload[8:16]))
+		response, _ := game.HandleSkillCastingSystem(playerEntity, skillID, targetID)
+		systems.SendNoticeSystem(playerEntity, []byte(response))
+
+	case protocol.OpcodeC2SChat: // CHAT
+		msg := string(payload)
+		game.RouteChatMessage(playerEntity, msg)
 
 	default:
 		systems.SendNoticeSystem(playerEntity, []byte(fmt.Sprintf("Error: Unknown opcode %d\r\n", opcode)))

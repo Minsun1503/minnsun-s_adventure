@@ -56,6 +56,10 @@ func InitializeDatabase(dsn string) {
 		hp INT,
 		max_hp INT,
 		damage INT,
+		level INT NOT NULL DEFAULT 1,
+		xp BIGINT UNSIGNED NOT NULL DEFAULT 0,
+		mp INT NOT NULL DEFAULT 100,
+		max_mp INT NOT NULL DEFAULT 100,
 		weapon_id BIGINT,
 		armor_id BIGINT,
 		FOREIGN KEY (character_id) REFERENCES characters (id) ON DELETE CASCADE
@@ -88,10 +92,14 @@ func InitializeDatabase(dsn string) {
 	// Ensure password_hash column exists for pre-existing installations.
 	_, err = DBEngine.Exec("ALTER TABLE characters ADD COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT ''")
 	if err != nil {
-		// Column already exists is a non-fatal error — MySQL silently rejects, but
-		// we don't care about the error text.
 		_ = err
 	}
+
+	// Ensure level and xp columns exist for pre-existing installations.
+	_, _ = DBEngine.Exec("ALTER TABLE character_states ADD COLUMN level INT NOT NULL DEFAULT 1")
+	_, _ = DBEngine.Exec("ALTER TABLE character_states ADD COLUMN xp BIGINT UNSIGNED NOT NULL DEFAULT 0")
+	_, _ = DBEngine.Exec("ALTER TABLE character_states ADD COLUMN mp INT NOT NULL DEFAULT 100")
+	_, _ = DBEngine.Exec("ALTER TABLE character_states ADD COLUMN max_mp INT NOT NULL DEFAULT 100")
 
 	fmt.Println("[DATABASE] Relational system matrices initialized and ready.")
 }

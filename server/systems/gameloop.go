@@ -38,6 +38,12 @@ func tickWorld() {
 	// Process monster respawn queue
 	game.GlobalRespawnManager.RunRespawnSystem()
 
+	// Purge expired party invitations to prevent memory leaks.
+	game.GlobalInviteCache.PurgeExpired()
+
+	// Process active status effects, buffs, and DoTs
+	game.RunStatusEffectsSystem()
+
 	// Only run AI ticks when at least one player is online.
 	// MAP SLEEP TRICK: zero players → no AI computation at all.
 	if !hasPlayers {

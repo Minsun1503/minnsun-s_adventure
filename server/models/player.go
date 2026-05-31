@@ -91,13 +91,14 @@ func loadSavedPlayerState(name string) *savedPlayerData {
 	}
 
 	// Step 2: Load dynamic state (position, stats, equipment).
-	var mapID, x, z, hp, maxHP, damage int
+	var mapID, x, z, hp, maxHP, damage, level int
+	var xp uint64
 	var weaponID, armorID uint64
 	err = DBEngine.QueryRowContext(ctx,
-		`SELECT map_id, x, z, hp, max_hp, damage, weapon_id, armor_id
+		`SELECT map_id, x, z, hp, max_hp, damage, level, xp, weapon_id, armor_id
 		 FROM character_states WHERE character_id = ?`,
 		oldCharID,
-	).Scan(&mapID, &x, &z, &hp, &maxHP, &damage, &weaponID, &armorID)
+	).Scan(&mapID, &x, &z, &hp, &maxHP, &damage, &level, &xp, &weaponID, &armorID)
 	if err != nil && err != sql.ErrNoRows {
 		fmt.Printf("[LOAD] State lookup error for %s (id %d): %v\n", name, oldCharID, err)
 	}
@@ -119,12 +120,12 @@ func loadSavedPlayerState(name string) *savedPlayerData {
 		}
 	}
 
-	fmt.Printf("[LOAD] Recovered state for %s (old id %d): map=%d pos=(%d,%d) hp=%d/%d atk=%d weapon=%d armor=%d items=%d\n",
-		name, oldCharID, mapID, x, z, hp, maxHP, damage, weaponID, armorID, len(inventory))
+	fmt.Printf("[LOAD] Recovered state for %s (old id %d): map=%d pos=(%d,%d) hp=%d/%d lvl=%d xp=%d atk=%d weapon=%d armor=%d items=%d\n",
+		name, oldCharID, mapID, x, z, hp, maxHP, level, xp, damage, weaponID, armorID, len(inventory))
 
 	return &savedPlayerData{
 		Pos:          ecs.PositionComponent{MapID: mapID, X: x, Z: z},
-		Stats:        ecs.StatsComponent{HP: hp, MaxHP: maxHP, Dam: damage},
+		Stats:        ecs.StatsComponent{Level: level, XP: xp, HP: hp, MaxHP: maxHP, Dam: damage},
 		Equipment:    ecs.EquipmentComponent{WeaponID: weaponID, ArmorID: armorID},
 		Inventory:    inventory,
 		PasswordHash: storedHash,
@@ -194,8 +195,8 @@ func RegisterNewAccount(username, passwordHash string) error {
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, weapon_id, armor_id)
-		 VALUES (?, 1, 0, 0, 100, 100, 15, 0, 0)`,
+		`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, level, xp, weapon_id, armor_id)
+		 VALUES (?, 1, 0, 0, 100, 100, 15, 1, 0, 0, 0)`,
 		entityID,
 	); err != nil {
 		return fmt.Errorf("DB insert default character_states failed: %w", err)
@@ -264,11 +265,12 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 		// Insert or restore dynamic state.
 		if saved != nil {
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, weapon_id, armor_id)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, level, xp, weapon_id, armor_id)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				entityID,
 				saved.Pos.MapID, saved.Pos.X, saved.Pos.Z,
 				saved.Stats.HP, saved.Stats.MaxHP, saved.Stats.Dam,
+				saved.Stats.Level, saved.Stats.XP,
 				saved.Equipment.WeaponID, saved.Equipment.ArmorID,
 			); err != nil {
 				return 0, fmt.Errorf("DB insert character_states failed: %w", err)
@@ -285,8 +287,8 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 		} else {
 			// Brand new player — insert default state.
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, weapon_id, armor_id)
-				 VALUES (?, 1, 0, 0, 100, 100, 15, 0, 0)`,
+				`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, level, xp, weapon_id, armor_id)
+				 VALUES (?, 1, 0, 0, 100, 100, 15, 1, 0, 0, 0)`,
 				entityID,
 			); err != nil {
 				return 0, fmt.Errorf("DB insert default character_states failed: %w", err)
@@ -311,7 +313,7 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 		}
 	} else {
 		ecs.GlobalRegistry.SetPosition(entityID, ecs.PositionComponent{MapID: 1, X: 0, Z: 0})
-		ecs.GlobalRegistry.SetStats(entityID, ecs.StatsComponent{HP: 100, MaxHP: 100, Dam: 15})
+		ecs.GlobalRegistry.SetStats(entityID, ecs.StatsComponent{Level: 1, XP: 0, HP: 100, MaxHP: 100, Dam: 15})
 		ecs.GlobalRegistry.SetEquipment(entityID, ecs.EquipmentComponent{WeaponID: 0, ArmorID: 0})
 	}
 

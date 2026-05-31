@@ -21,6 +21,7 @@ type MonsterTemplate struct {
 	RoamRadius     int     `json:"roam_radius"`
 	AggroRadius    float64 `json:"aggro_radius"`
 	AttackCooldown int     `json:"attack_cooldown"`
+	XPReward       uint64  `json:"xp_reward"`
 }
 
 // templateStore is the in-memory registry for static monster templates.

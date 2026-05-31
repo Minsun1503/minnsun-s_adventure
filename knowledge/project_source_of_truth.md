@@ -99,7 +99,6 @@
   - Thêm hàm `loadSavedPlayerState(name)` trong [player.go](file:///c:/Minnsun's Adventure/server/models/player.go) để truy vấn MySQL lấy vị trí (X, Z, MapID), chỉ số (HP, MaxHP, Dam), trang bị (Weapon, Armor) và balo (Inventory) của người chơi cũ bằng `name`.
   - Thay đổi logic `CreatePlayerEntity` để tự động khôi phục dữ liệu đã lưu vào Registry ECS thay vì gán các chỉ số mặc định của nhân vật mới tinh.
   - Sử dụng cơ chế Transaction (`tx`) và xóa bản ghi cũ trước khi chèn ID thực thể mới (`DELETE` -> `INSERT`) nhằm đồng bộ ID thực thể dạng động trong RAM với MySQL.
-  - Sử dụng cơ chế Transaction (`tx`) và xóa bản ghi cũ trước khi chèn ID thực thể mới (`DELETE` -> `INSERT`) nhằm đồng bộ ID thực thể dạng động trong RAM với MySQL.
 - **Hệ thống Đăng ký & Đăng nhập bảo mật có Mật khẩu (Password Authentication & Registration System)**:
   - Tích hợp thư viện bảo mật `golang.org/x/crypto/bcrypt` để mã hóa mật khẩu một cách an toàn (cost 10).
   - Khai báo opcode C2S mới `OpcodeC2SLogin = 10` và `OpcodeC2SRegister = 11` tại [`opcodes.go`](file:///c:/Minnsun's Adventure/server/protocol/opcodes.go). Cả hai gói tin cùng cấu trúc payload nhị phân: `[UserLen uint8][Username string][PassLen uint8][Password string]`.
@@ -112,6 +111,45 @@
   - Tích hợp hàm `RunRespawnSystem()` vào nhịp game loop heartbeat 250ms định kỳ tại [`gameloop.go`](file:///c:/Minnsun's Adventure/server/systems/gameloop.go). Khi thời gian chờ kết thúc, hệ thống gọi `models.SpawnMonsterFromTemplate` để tái tạo thực thể quái vật và tự động cập nhật vị trí lên Spatial Grid.
   - Bổ sung hàm `GetTemplateByName` tại [`monster.go`](file:///c:/Minnsun's Adventure/server/models/monster.go) để tra cứu ID mẫu quái vật dựa trên Metadata Name.
   - Cấu hình DeathSystem trong [`combat.go`](file:///c:/Minnsun's Adventure/server/game/combat.go) để tự động đăng ký sự kiện hồi sinh trễ 15 giây khi quái vật bị tiêu diệt.
+- **Hệ thống Tổ đội ECS và Kênh Sự kiện Chia sẻ (ECS Player Party System and Shared Event Channels)**:
+  - Khai báo cấu trúc `PartyComponent` (dành cho thực thể tổ đội ảo) và `PartyMemberComponent` (đính kèm vào thực thể người chơi) tại [`ecs.go`](file:///c:/Minnsun's Adventure/server/ecs/ecs.go).
+  - Cập nhật hàm giải phóng thực thể `RemoveEntity` trong Registry để dọn dẹp các component tổ đội song song nhằm tránh rò rỉ bộ nhớ (tăng WaitGroup lên **11 luồng**).
+  - Xây dựng các hàm xử lý logic tổ đội tại [`party.go`](file:///c:/Minnsun's Adventure/server/game/party.go) bao gồm `CreatePartySystem` để khởi tạo tổ đội và gán đội trưởng, `BroadcastToParty` để phát gói tin text tới tất cả thành viên trực thuộc, và `GetPlayerPartyID` để lấy Party ID của người chơi.
+  - Đăng ký opcode C2S mới `OpcodeC2SPartyCreate = 12` với payload dạng `[TeamNameLen uint8][TeamName string]` tại [`opcodes.go`](file:///c:/Minnsun's Adventure/server/protocol/opcodes.go).
+  - Tích hợp trường hợp xử lý gói tin Opcode 12 nhị phân vào hàm `handleBinaryPacket` trong [`server.go`](file:///c:/Minnsun's Adventure/server/server.go) để cho phép người chơi tạo tổ đội.
+  - Cập nhật logic `DeathSystem` tại [`combat.go`](file:///c:/Minnsun's Adventure/server/game/combat.go) để kiểm tra nếu kẻ tiêu diệt quái vật thuộc một tổ đội thì phát thông báo chiến thắng (`[COMBAT]`) đến toàn bộ thành viên tổ đội thay vì phát rộng rãi ra toàn bản đồ.
+- **Hệ thống Giao dịch Trực tiếp Bảo mật hai pha (Peer-to-Peer Secure Trading System)**:
+  - Thiết lập cấu trúc `TradeOffer` và `TradeSession` điều hành phiên giao dịch độc lập tại [`trade.go`](file:///c:/Minnsun's Adventure/server/game/trade.go).
+  - Áp dụng kỹ thuật khóa hai pha: Phase 1 xác nhận khóa trạng thái giao dịch (`LockTradeStage`) và Phase 2 hoán đổi vật phẩm nguyên tử (`ExecuteAtomicTradeSwap`) qua Copy-Modify-Overwrite an toàn luồng, loại bỏ nguy cơ trùng lặp (dupe) đồ.
+  - Đăng ký bốn opcode C2S giao dịch mới tại [`opcodes.go`](file:///c:/Minnsun's Adventure/server/protocol/opcodes.go): `OpcodeC2STradeInit (15)`, `OpcodeC2STradeOffer (16)`, `OpcodeC2STradeConfirm (17)`, và `OpcodeC2STradeCancel (18)`.
+  - Định tuyến các gói tin nhị phân giao dịch trực tiếp trong `handleBinaryPacket` tại [`server.go`](file:///c:/Minnsun's Adventure/server/server.go).
+  - Tích hợp tự động hủy phiên giao dịch an toàn khi người chơi ngắt kết nối đột ngột (`CancelTradeSession`) trong defer block của `handleClient`.
+- **Hệ thống Điểm kinh nghiệm (XP) và Thăng cấp Nhân vật (Character XP and Level-Up Progression System)**:
+  - Nâng cấp cấu trúc `StatsComponent` tại [`ecs.go`](file:///c:/Minnsun's Adventure/server/ecs/ecs.go) để theo dõi cấp độ (`Level`) và điểm kinh nghiệm (`XP`).
+  - Thiết lập công thức tính toán ngưỡng thăng cấp lũy thừa bậc $1.8$: $\text{Required XP} = 100 \times L^{1.8}$ và các logic cộng chỉ số thuộc tính cơ bản (+25 MaxHP, +3 Dam) khi thăng cấp tại tệp mới [`progression.go`](file:///c:/Minnsun's Adventure/server/game/progression.go).
+  - Tích hợp lưu trữ và tự động phục hồi chỉ số cấp độ/kinh nghiệm khi khởi động lại Server vào bảng `character_states` của MySQL tại [`player.go`](file:///c:/Minnsun's Adventure/server/models/player.go), [`db.go`](file:///c:/Minnsun's Adventure/server/models/db.go), và [`save_engine.go`](file:///c:/Minnsun's Adventure/server/db/save_engine.go).
+  - Nâng cấp `MonsterTemplate` để hỗ trợ lưu trữ chỉ số điểm thưởng kinh nghiệm (`XPReward`) trong tệp cấu hình JSON `data/monster_templates.json`.
+  - Phân bổ tự động điểm thưởng kinh nghiệm sau khi tiêu diệt quái vật thành công trực tiếp trong `DeathSystem` tại [`combat.go`](file:///c:/Minnsun's Adventure/server/game/combat.go), hỗ trợ chia đều điểm kinh nghiệm cho các thành viên tổ đội online nếu người chơi thuộc một tổ đội.
+- **Hệ thống Kỹ năng/Phép thuật và Cổng xác thực tài nguyên (Skill/Spell Casting System and Resource Validation Gates)**:
+  - Mở rộng cấu trúc `StatsComponent` trong [`ecs.go`](file:///c:/Minnsun's Adventure/server/ecs/ecs.go) để hỗ trợ chỉ số năng lượng `MP` và `MaxMP`.
+  - Thiết lập thực thể mẫu kỹ năng `SkillTemplate` cùng cơ chế đăng ký và khởi tạo chiêu thức (Fireball tiêu tốn 20 MP gây 2.5x sát thương, Thunderclap tiêu tốn 35 MP gây 4x sát thương) tại tệp mới [`skills.go`](file:///c:/Minnsun's Adventure/server/models/skills.go).
+  - Cập nhật cơ sở dữ liệu MySQL (bảng `character_states`) để tự động lưu trữ, nâng cấp cấp độ (`MaxMP += 10` mỗi cấp và hồi phục đầy `MP`) và phục hồi năng lượng phép thuật cho nhân vật.
+  - Xây dựng hệ thống kích hoạt phép thuật [`skills.go`](file:///c:/Minnsun's Adventure/server/game/skills.go) thực hiện tuần tự 3 chặng kiểm tra tài nguyên (Mana Gate Check), khấu trừ năng lượng (Atomic Cost Deduction) và nhân sát thương theo tỷ lệ (Multiplier Damage Projection). Hỗ trợ kiểm soát tầm đánh phép thuật dưới 6.0 đơn vị không gian.
+  - Đăng ký opcode C2S nhị phân mới `OpcodeC2SSkillCast = 19` với payload `[SkillID uint64 BE][TargetEntityID uint64 BE]` và xử lý tại [`server.go`](file:///c:/Minnsun's Adventure/server/server.go).
+- **Hệ thống Kênh Trò chuyện Phân vùng & Toàn cầu (Global Chat Channel System & Map-Isolated Broadcast Channels)**:
+  - Xây dựng bộ điều hướng hội thoại [`chat.go`](file:///c:/Minnsun's Adventure/server/game/chat.go) hỗ trợ phân luồng 3 kênh trò chuyện độc lập: Kênh Bản đồ (`[MAP]`, mặc định fallback), Kênh Tổ đội (`[PARTY]`, bắt đầu bằng `/p ` hoặc `/party `), và Kênh Toàn cầu (`[GLOBAL]`, bắt đầu bằng `/g ` hoặc `/global `).
+  - Triển khai hàm `BroadcastToWorld` gửi gói tin trực tiếp tới tất cả thực thể đang hoạt động có đính kèm `ConnectionComponent`.
+  - Đăng ký opcode C2S nhị phân mới `OpcodeC2SChat = 20` với payload chứa chuỗi UTF-8 tin nhắn và tích hợp bộ xử lý trong `handleBinaryPacket` tại [`server.go`](file:///c:/Minnsun's Adventure/server/server.go).
+- **Hệ thống Hiệu ứng Trạng thái, Buff, và Tích tắc thời gian (Status Effects, Buffs, and Over-Time Tickers)**:
+  - Định nghĩa cấu trúc `ActiveEffect` (Type, Value, Duration, LastTickTime) và `EffectsComponent` lưu trữ danh sách hiệu ứng tạm thời tại [`effects_component.go`](file:///c:/Minnsun's Adventure/server/ecs/effects_component.go).
+  - Tích hợp `effects` component registry vào [`ecs.go`](file:///c:/Minnsun's Adventure/server/ecs/ecs.go) cùng các hàm helper (`SetEffects`, `GetEffects`, `DeleteEffects`) và dọn dẹp song song trong `RemoveEntity` (nâng WaitGroup lên **12 luồng**).
+  - Xây dựng luồng xử lý hiệu ứng [`effects_system.go`](file:///c:/Minnsun's Adventure/server/game/effects_system.go) trừ dần thời gian hiệu lực sau mỗi nhịp 250ms, tự động gọi `RecalculateActiveStats` khi các buff chỉ số (như `haste_buff`) hết hạn, và áp dụng sát thương rút máu định kỳ 1 giây (DoT downsampling) cho Poison/Burn, hỗ trợ xử lý tử vong của người chơi/quái vật do DoT gây ra.
+  - Tích hợp gọi hệ thống hiệu ứng `game.RunStatusEffectsSystem()` trực tiếp vào game loop heartbeat tại [`gameloop.go`](file:///c:/Minnsun's Adventure/server/systems/gameloop.go).
+- **Cải tiến & Khắc phục Lỗi Hiệu năng Lớp lõi (Core Performance Refactoring & Bug Fixes)**:
+  - Khắc phục lỗ hổng ép kiểu không an toàn (unsafe type assertion panic) trong hàm `Get` tại [`state.go`](file:///c:/Minnsun's Adventure/server/state/state.go) bằng comma-ok check.
+  - Khắc phục lỗi TOCTOU race (drop entry khi chunk bị thu hồi) và nguy cơ deadlock của double RLock trong [`spatial.go`](file:///c:/Minnsun's Adventure/server/world/spatial.go).
+  - Khắc phục rò rỉ bộ nhớ (backing array leak) của hàng đợi BFS và cấp phát rác trên Heap của các slice hướng di chuyển (`dirs`) tại [`pathfinding.go`](file:///c:/Minnsun's Adventure/server/world/pathfinding.go) thông qua cơ chế con trỏ head index và định nghĩa tĩnh phạm vi package-level.
+  - Khắc phục nút thắt ghi đĩa tuần tự và cảnh báo mất mát dữ liệu tại [`save_engine.go`](file:///c:/Minnsun's Adventure/server/db/save_engine.go) bằng cách triển khai cơ chế lô gói tin (Batch Upsert Inventory), ghi log cảnh báo khi hàng đợi đầy, và lặp lại thao tác ghi đĩa tự động (Transient Error Retries) lên đến 3 lần.
 
 ## 2. Những "đặc sản" logic vừa tìm thấy (Discovered Logic Specialties)
 - Server sử dụng giao thức TCP thô ở cổng `:1503`.

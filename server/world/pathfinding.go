@@ -14,6 +14,7 @@ type pathfindContext struct {
 	queue   []point
 	parent  map[point]point
 	visited map[point]bool
+	head    int // Track index of queue head to prevent slice re-slice memory leaks
 }
 
 // Global pool of pathfinding contexts
@@ -23,9 +24,25 @@ var contextPool = sync.Pool{
 			queue:   make([]point, 0, 400),
 			parent:  make(map[point]point, 400),
 			visited: make(map[point]bool, 400),
+			head:    0,
 		}
 	},
 }
+
+// 8-Directional movement vectors (includes diagonals) - package level to avoid heap escape
+var dirs = []point{
+	{x: 0, z: 1},   // North
+	{x: 1, z: 1},   // North-East
+	{x: 1, z: 0},   // East
+	{x: 1, z: -1},  // South-East
+	{x: 0, z: -1},  // South
+	{x: -1, z: -1}, // South-West
+	{x: -1, z: 0},  // West
+	{x: -1, z: 1},  // North-West
+}
+
+// Search limit to protect CPU tick rate (max 400 node expansions)
+const bfsMaxNodes = 400
 
 // FindPath executes a BFS search to find the next step (X, Z) towards the target position.
 // It avoids blocked tiles and uses a sync.Pool memory context to avoid heap allocations.
@@ -46,6 +63,7 @@ func FindPath(from, to ecs.PositionComponent) (int, int) {
 		clear(ctx.parent)
 		clear(ctx.visited)
 		ctx.queue = ctx.queue[:0]
+		ctx.head = 0 // Reset head pointer
 		contextPool.Put(ctx)
 	}()
 
@@ -53,28 +71,13 @@ func FindPath(from, to ecs.PositionComponent) (int, int) {
 	ctx.queue = append(ctx.queue, point{x: from.X, z: from.Z})
 	ctx.visited[point{x: from.X, z: from.Z}] = true
 
-	// 8-Directional movement vectors (includes diagonals)
-	dirs := []point{
-		{x: 0, z: 1},   // North
-		{x: 1, z: 1},   // North-East
-		{x: 1, z: 0},   // East
-		{x: 1, z: -1},  // South-East
-		{x: 0, z: -1},  // South
-		{x: -1, z: -1}, // South-West
-		{x: -1, z: 0},  // West
-		{x: -1, z: 1},  // North-West
-	}
-
 	found := false
 	var targetPt point
-
-	// Search limit to protect CPU tick rate (max 400 node expansions)
-	maxSearched := 400
 	searchedCount := 0
 
-	for len(ctx.queue) > 0 && searchedCount < maxSearched {
-		curr := ctx.queue[0]
-		ctx.queue = ctx.queue[1:]
+	for ctx.head < len(ctx.queue) && searchedCount < bfsMaxNodes {
+		curr := ctx.queue[ctx.head]
+		ctx.head++
 		searchedCount++
 
 		if curr.x == to.X && curr.z == to.Z {

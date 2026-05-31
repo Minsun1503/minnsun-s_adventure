@@ -19,17 +19,26 @@ package protocol
 // ─── Client → Server (C2S) Opcodes ──────────────────────────────────────────
 
 const (
-	OpcodeC2SMove     byte = 1  // Payload: [X int32 BE][Z int32 BE]
-	OpcodeC2SInv      byte = 2  // Payload: empty (request bag contents)
-	OpcodeC2SUse      byte = 3  // Payload: [ItemID uint64 BE]
-	OpcodeC2SWarp     byte = 4  // Payload: [MapID int32 BE][X int32 BE][Z int32 BE]
-	OpcodeC2SAttack   byte = 5  // Payload: [TargetEntityID uint64 BE]
-	OpcodeC2SInfo     byte = 6  // Payload: [TargetEntityID uint64 BE]
-	OpcodeC2SQuit     byte = 7  // Payload: empty (graceful disconnect)
-	OpcodeC2SPickup   byte = 8  // Payload: [GroundItemEntityID uint64 BE]
-	OpcodeC2SEquip    byte = 9  // Payload: [ItemTemplateID uint64 BE]
-	OpcodeC2SLogin    byte = 10 // Payload: [UsernameLen uint8][Username UTF-8][PasswordLen uint8][Password UTF-8]
-	OpcodeC2SRegister byte = 11 // Payload: same as LOGIN (auto-create account)
+	OpcodeC2SMove        byte = 1  // Payload: [X int32 BE][Z int32 BE]
+	OpcodeC2SInv         byte = 2  // Payload: empty (request bag contents)
+	OpcodeC2SUse         byte = 3  // Payload: [ItemID uint64 BE]
+	OpcodeC2SWarp        byte = 4  // Payload: [MapID int32 BE][X int32 BE][Z int32 BE]
+	OpcodeC2SAttack      byte = 5  // Payload: [TargetEntityID uint64 BE]
+	OpcodeC2SInfo        byte = 6  // Payload: [TargetEntityID uint64 BE]
+	OpcodeC2SQuit        byte = 7  // Payload: empty (graceful disconnect)
+	OpcodeC2SPickup      byte = 8  // Payload: [GroundItemEntityID uint64 BE]
+	OpcodeC2SEquip       byte = 9  // Payload: [ItemTemplateID uint64 BE]
+	OpcodeC2SLogin       byte = 10 // Payload: [UsernameLen uint8][Username UTF-8][PasswordLen uint8][Password UTF-8]
+	OpcodeC2SRegister    byte = 11 // Payload: same as LOGIN (auto-create account)
+	OpcodeC2SPartyCreate byte = 12 // Payload: [TeamNameLen uint8][TeamName UTF-8]
+	OpcodeC2SPartyInvite byte = 13 // Payload: [TargetPlayerID uint64 BE]
+	OpcodeC2SPartyJoin   byte = 14 // Payload: [PartyGroupID uint64 BE]
+	OpcodeC2STradeInit    byte = 15 // Payload: [TargetPlayerID uint64 BE]
+	OpcodeC2STradeOffer   byte = 16 // Payload: [ItemTemplateID uint64 BE][Quantity int32 BE]
+	OpcodeC2STradeConfirm byte = 17 // Payload: empty
+	OpcodeC2STradeCancel  byte = 18 // Payload: empty
+	OpcodeC2SSkillCast    byte = 19 // Payload: [SkillID uint64 BE][TargetEntityID uint64 BE]
+	OpcodeC2SChat         byte = 20 // Payload: [Message UTF-8 string]
 )
 
 // ─── Server → Client (S2C) Opcodes ──────────────────────────────────────────
