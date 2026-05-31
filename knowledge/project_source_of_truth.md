@@ -94,7 +94,12 @@
   - Di chuyển `save_engine.go` sang [`server/db`](file:///c:/Minnsun's Adventure/server/db) và đổi thành `package db`.
   - Di chuyển 11 file gameplay còn lại (`ai_roaming.go`, `combat.go`, `loot.go`, `item.go`, `item_usage.go`, `inventory_query.go`, `equipment.go`, `stat_engine.go`, `ground_item.go`, `pickup.go`, `movement.go`) sang [`server/game`](file:///c:/Minnsun's Adventure/server/game) và đổi thành `package game`.
   - Giữ lại `systems.go` và `gameloop.go` ở package `systems` làm bộ điều phối trung tâm.
-  - (Chú ý: Các lỗi biên dịch import chéo do di chuyển file sẽ được sửa ở bước tiếp theo bởi Cline).
+  - Hoàn tất cập nhật toàn bộ import chéo giữa các package và build/vet kiểm thử thành công.
+- **Khôi phục trạng thái nhân vật khi đăng nhập (MySQL Player Load)**:
+  - Thêm hàm `loadSavedPlayerState(name)` trong [player.go](file:///c:/Minnsun's Adventure/server/models/player.go) để truy vấn MySQL lấy vị trí (X, Z, MapID), chỉ số (HP, MaxHP, Dam), trang bị (Weapon, Armor) và balo (Inventory) của người chơi cũ bằng `name`.
+  - Thay đổi logic `CreatePlayerEntity` để tự động khôi phục dữ liệu đã lưu vào Registry ECS thay vì gán các chỉ số mặc định của nhân vật mới tinh.
+  - Sử dụng cơ chế Transaction (`tx`) và xóa bản ghi cũ trước khi chèn ID thực thể mới (`DELETE` -> `INSERT`) nhằm đồng bộ ID thực thể dạng động trong RAM với MySQL.
+
 
 ## 2. Những "đặc sản" logic vừa tìm thấy (Discovered Logic Specialties)
 - Server sử dụng giao thức TCP thô ở cổng `:1503`.
