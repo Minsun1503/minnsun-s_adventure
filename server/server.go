@@ -97,7 +97,7 @@ func handleClient(conn net.Conn, p *models.Player) {
 				}
 
 				if foundMonster != nil {
-					network.SendNoticeToPlayer(fmt.Sprintf("👾 %s Stats -> HP: %d, ATK: %d\r\n", foundMonster.Name, foundMonster.HP, foundMonster.Dam), conn)
+					network.SendNoticeToPlayer(fmt.Sprintf("%s Stats -> HP: %d, ATK: %d\r\n", foundMonster.Name, foundMonster.HP, foundMonster.Dam), conn)
 				} else {
 					network.SendNoticeToPlayer("Monster ID not found in database.\r\n", conn)
 				}
