@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"server/ecs"
+	"server/logger"
 	"sync"
 )
 
@@ -119,7 +120,7 @@ func SpawnMonsterFromTemplate(templateID, spawnX, spawnZ int) (ecs.Entity, error
 		IdleDuration:   8, // 2 sec idle before roaming; same for all monsters for now
 	})
 
-	fmt.Printf("[SPAWN] %s (entity %d) at (%d, %d) | HP:%d ATK:%d aggro:%.0f leash:%.0f\n",
+	logger.Info("[SPAWN] %s (entity %d) at (%d, %d) | HP:%d ATK:%d aggro:%.0f leash:%.0f",
 		t.Name, id, spawnX, spawnZ, t.HP, t.Dam, t.AggroRadius, leashRadius)
 
 	return id, nil

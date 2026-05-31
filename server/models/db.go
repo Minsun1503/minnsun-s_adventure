@@ -3,6 +3,7 @@ package models
 import (
 	"database/sql"
 	"fmt"
+	"server/logger"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -101,5 +102,5 @@ func InitializeDatabase(dsn string) {
 	_, _ = DBEngine.Exec("ALTER TABLE character_states ADD COLUMN mp INT NOT NULL DEFAULT 100")
 	_, _ = DBEngine.Exec("ALTER TABLE character_states ADD COLUMN max_mp INT NOT NULL DEFAULT 100")
 
-	fmt.Println("[DATABASE] Relational system matrices initialized and ready.")
+	logger.Info("[DATABASE] Relational system matrices initialized and ready.")
 }

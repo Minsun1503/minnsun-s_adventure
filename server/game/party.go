@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"server/ecs"
+	"server/logger"
 )
 
 const maxPartySize = 4
@@ -28,7 +29,7 @@ func CreatePartySystem(leaderID ecs.Entity, teamName string) string {
 		PartyID: partyID,
 	})
 
-	fmt.Printf("[PARTY] Party '%s' created by entity %d (party entity %d)\n", teamName, leaderID, partyID)
+	logger.Info("[PARTY] Party '%s' created by entity %d (party entity %d)", teamName, leaderID, partyID)
 	return fmt.Sprintf("Party '%s' created! You are the leader.\r\n", teamName)
 }
 
@@ -114,14 +115,14 @@ func RemovePlayerFromParty(playerID ecs.Entity) {
 	// If roster is now empty, delete the party entity entirely.
 	if len(party.MemberIDs) == 0 {
 		registry.DeleteParty(partyID)
-		fmt.Printf("[PARTY] Party '%s' (entity %d) disbanded — no members remain.\n", party.TeamName, partyID)
+		logger.Info("[PARTY] Party '%s' (entity %d) disbanded — no members remain.", party.TeamName, partyID)
 		return
 	}
 
 	// If the leaving player was the leader, promote the next member.
 	if playerID == party.LeaderID {
 		party.LeaderID = party.MemberIDs[0]
-		fmt.Printf("[PARTY] Party '%s': leader left — %d promoted to leader.\n", party.TeamName, party.LeaderID)
+		logger.Info("[PARTY] Party '%s': leader left — %d promoted to leader.", party.TeamName, party.LeaderID)
 	}
 
 	registry.SetParty(partyID, party)

@@ -10,11 +10,29 @@ import (
 	"server/db"
 	"server/ecs"
 	"server/game"
+	"server/logger"
 	"server/models"
 	"server/protocol"
 	"server/systems"
 	"server/world"
 )
+
+// opcodeNameOf returns a human-readable name for a binary opcode byte.
+// Used by the network packet debug middleware in handleBinaryPacket.
+func opcodeNameOf(op byte) string {
+	names := map[byte]string{
+		1: "MOVE", 2: "INV", 3: "USE", 4: "WARP", 5: "ATTACK",
+		6: "INFO", 7: "QUIT", 8: "PICKUP", 9: "EQUIP",
+		10: "LOGIN", 11: "REGISTER", 12: "PARTY_CREATE",
+		13: "PARTY_INVITE", 14: "PARTY_JOIN",
+		15: "TRADE_INIT", 16: "TRADE_OFFER", 17: "TRADE_CONFIRM", 18: "TRADE_CANCEL",
+		19: "SKILL_CAST", 20: "CHAT",
+	}
+	if name, ok := names[op]; ok {
+		return name
+	}
+	return "UNKNOWN"
+}
 
 // LoginQueue is a buffered channel that holds incoming TCP connections waiting to log in.
 var LoginQueue = make(chan net.Conn, 1000)
@@ -23,7 +41,7 @@ var LoginQueue = make(chan net.Conn, 1000)
 func StartLoginWorkerPool(workerCount int) {
 	for i := 0; i < workerCount; i++ {
 		go func(workerID int) {
-			fmt.Printf("[BOOT] Connection login worker #%d active.\n", workerID)
+			logger.Info("[BOOT] Connection login worker #%d active.", workerID)
 			for conn := range LoginQueue {
 				processLogin(conn)
 			}
@@ -129,7 +147,7 @@ func processLogin(conn net.Conn) {
 		// Auth passed — create ECS entity from saved DB state.
 		playerEntity, err := models.CreatePlayerEntity(conn, auth.username)
 		if err != nil {
-			fmt.Println("[CONNECT] Error loading character from DB:", err)
+			logger.Error("[CONNECT] Error loading character from DB: %v", err)
 			protocol.SendErrorPacket(conn, protocol.ErrCodeDatabaseError, "Failed to load character data. Please try again.")
 			conn.Close()
 			return
@@ -143,7 +161,7 @@ func processLogin(conn net.Conn) {
 			return
 		}
 
-		fmt.Printf("[CONNECT] %s (entity %d)\n", snap.Meta.Name, playerEntity)
+		logger.Info("[CONNECT] %s (entity %d) from %s", snap.Meta.Name, playerEntity, conn.RemoteAddr())
 		systems.BroadcastSystem(
 			[]byte(fmt.Sprintf("Player %s has logged into the game!\r\n", snap.Meta.Name)),
 		)
@@ -169,7 +187,7 @@ func processLogin(conn net.Conn) {
 
 		hashed, err := models.HashPassword(auth.password)
 		if err != nil {
-			fmt.Println("[REGISTER] bcrypt hash error:", err)
+			logger.Error("[REGISTER] bcrypt hash error: %v", err)
 			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Server error. Please try again.")
 			conn.Close()
 			return
@@ -193,6 +211,8 @@ func processLogin(conn net.Conn) {
 }
 
 func main() {
+	logger.Init() // Must be first: reads data/config.json, starts async log worker
+
 	game.InitializeItemRegistry()
 	game.InitializeLootTables()
 	world.InitializeCollisionMaps()
@@ -203,16 +223,16 @@ func main() {
 
 	templates, err := models.LoadMonster("data/monster_templates.json")
 	if err != nil {
-		fmt.Println("CRITICAL SERVER BOOT ERROR:", err)
+		logger.Error("CRITICAL SERVER BOOT ERROR: %v", err)
 		return
 	}
-	fmt.Printf("[BOOT] Loaded %d monster templates.\n", len(templates))
+	logger.Info("[BOOT] Loaded %d monster templates.", len(templates))
 
 	spawned := 0
 	for _, t := range templates {
 		id, err := models.SpawnFromDefaultPosition(t.ID)
 		if err != nil {
-			fmt.Printf("[BOOT] Failed to spawn template %d (%s): %v\n", t.ID, t.Name, err)
+			logger.Warn("[BOOT] Failed to spawn template %d (%s): %v", t.ID, t.Name, err)
 			continue
 		}
 		if pos, ok := ecs.GlobalRegistry.GetPosition(id); ok {
@@ -220,15 +240,15 @@ func main() {
 		}
 		spawned++
 	}
-	fmt.Printf("[BOOT] Spawned %d live monster instances into ECS.\n", spawned)
+	logger.Info("[BOOT] Spawned %d live monster instances into ECS.", spawned)
 
 	lis, err := net.Listen("tcp", ":1503")
 	if err != nil {
-		fmt.Println("[BOOT] Failed to bind port:", err)
+		logger.Error("[BOOT] Failed to bind port: %v", err)
 		return
 	}
 	defer lis.Close()
-	fmt.Println("[BOOT] Server listening on", lis.Addr())
+	logger.Info("[BOOT] Server listening on %s", lis.Addr())
 
 	systems.StartGameLoop()
 	StartLoginWorkerPool(4) // Start 4 connection login workers to process db queue
@@ -236,7 +256,7 @@ func main() {
 	for {
 		conn, err := lis.Accept()
 		if err != nil {
-			fmt.Println("[ACCEPT] Error:", err)
+			logger.Error("[ACCEPT] Error: %v", err)
 			return
 		}
 
@@ -244,6 +264,7 @@ func main() {
 		case LoginQueue <- conn:
 		default:
 			// Queue full! Tell the client and drop connection cleanly.
+			logger.Warn("[ACCEPT] Login queue full — dropping connection from %s", conn.RemoteAddr())
 			protocol.SendErrorPacket(conn, protocol.ErrCodeServerFull, "Server login queue is full. Please try again later.")
 			conn.Close()
 		}
@@ -270,6 +291,7 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		world.GlobalSpatialGrid.RemoveEntity(playerEntity)
 		ecs.GlobalRegistry.RemoveEntity(playerEntity)
 		models.ActivePlayers.Delete(conn.RemoteAddr().String())
+		logger.Info("[DISCONNECT] %s (%s)", name, conn.RemoteAddr())
 		systems.BroadcastSystem(
 			[]byte(fmt.Sprintf("Player %s has logged out the game!\r\n", name)),
 		)
@@ -303,7 +325,6 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 
 		handleBinaryPacket(conn, playerEntity, opcode, payload)
 	}
-	fmt.Printf("[DISCONNECT] %s (%s)\n", snap.Meta.Name, conn.RemoteAddr())
 }
 
 // handleBinaryPacket parses and dispatches a single binary packet from a player.
@@ -314,7 +335,9 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 //   - opcode:       Operation code byte.
 //   - payload:      Raw packet payload bytes.
 func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, payload []byte) {
-	fmt.Printf("[CMD] %s: Opcode %d, Payload len %d\n", conn.RemoteAddr(), opcode, len(payload))
+	// Network packet trace middleware: only active when debug=true in config.json
+	logger.Debug("[NET RX] Conn: %s | Opcode: %d (%s) | Payload: %d bytes | Hex: [% X]",
+		conn.RemoteAddr(), opcode, opcodeNameOf(opcode), len(payload), payload)
 
 	switch opcode {
 	case protocol.OpcodeC2SMove: // MOVE
@@ -388,7 +411,7 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 			systems.SendNoticeSystem(playerEntity, []byte("Error: QUIT packet payload must be empty.\r\n"))
 			return
 		}
-		fmt.Printf("[QUIT] %s requested disconnect.\n", conn.RemoteAddr())
+		logger.Info("[QUIT] %s requested graceful disconnect.", conn.RemoteAddr())
 		conn.Close()
 
 	case protocol.OpcodeC2SPickup: // PICKUP
@@ -490,6 +513,7 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 		game.RouteChatMessage(playerEntity, msg)
 
 	default:
+		logger.Warn("[NET] Unknown opcode %d from %s", opcode, conn.RemoteAddr())
 		systems.SendNoticeSystem(playerEntity, []byte(fmt.Sprintf("Error: Unknown opcode %d\r\n", opcode)))
 	}
 }

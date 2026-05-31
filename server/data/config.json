@@ -1,0 +1,5 @@
+{
+  "debug": false,
+  "log_dir": "logs",
+  "log_max_mb": 10
+}

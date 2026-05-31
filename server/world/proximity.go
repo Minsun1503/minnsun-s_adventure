@@ -1,8 +1,8 @@
 package world
 
 import (
-	"fmt"
 	"server/ecs"
+	"server/logger"
 )
 
 // ProximityResult holds a nearby entity with its resolved components.
@@ -99,11 +99,11 @@ func NearbyEntitiesSystem(monsterID ecs.Entity, aggroRadius float64) {
 		return
 	}
 
-	fmt.Printf("[AGGRO] %s detects %d player(s) within %.0f units\n",
+	logger.Debug("[AGGRO] %s detects %d player(s) within %.0f units",
 		meta.Name, len(nearby), aggroRadius)
 
 	for _, p := range nearby {
-		fmt.Printf("  → %s at (%d, %d) HP:%d\n",
+		logger.Debug("  → %s at (%d, %d) HP:%d",
 			p.Meta.Name, p.Pos.X, p.Pos.Z, p.Stats.HP)
 	}
 }

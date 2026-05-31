@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"server/ecs"
+	"server/logger"
 	"server/protocol"
 	"server/world"
 	"time"
@@ -76,6 +77,6 @@ func MovementSystem(entity ecs.Entity, x, z int) bool {
 	}
 	msg := fmt.Sprintf("Player %s moved to position: X=%d, Z=%d\r\n", meta.Name, x, z)
 	protocol.BroadcastToMap(pos.MapID, msg)
-	fmt.Printf("[MOVEMENT] %s → (%d, %d) on Map %d\n", meta.Name, x, z, pos.MapID)
+	logger.Debug("[MOVEMENT] %s → (%d, %d) on Map %d", meta.Name, x, z, pos.MapID)
 	return true
 }

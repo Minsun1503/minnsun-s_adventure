@@ -2,8 +2,8 @@ package db
 
 import (
 	"context"
-	"fmt"
 	"server/ecs"
+	"server/logger"
 	"server/models"
 	"strings"
 	"time"
@@ -25,7 +25,7 @@ var SaveQueue = make(chan SaveSnapshot, 1000)
 // StartSaveWorkerEngine spins up the background worker channel monitor loop
 func StartSaveWorkerEngine() {
 	go func() {
-		fmt.Println("[PERSISTENCE] Asynchronous DB Save Worker thread active.")
+		logger.Info("[PERSISTENCE] Asynchronous DB Save Worker thread active.")
 		for snapshot := range SaveQueue {
 			executeWriteToSQL(snapshot)
 		}
@@ -70,7 +70,7 @@ func QueuePlayerSave(playerID ecs.Entity) {
 	case SaveQueue <- snapshot:
 	default:
 		queueLen := len(SaveQueue)
-		fmt.Printf("[SAVE ALERT] Queue full (%d/1000)! DROP: entity %d (%s). DATA LOSS!\n",
+		logger.Warn("[SAVE ALERT] Queue full (%d/1000)! DROP: entity %d (%s). DATA LOSS!",
 			queueLen, playerID, meta.Name)
 	}
 }
@@ -79,16 +79,21 @@ func executeWriteToSQL(snap SaveSnapshot) {
 	const maxRetries = 3
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
+		start := time.Now()
 		err = tryWrite(snap)
+		elapsed := time.Since(start)
 		if err == nil {
-			fmt.Printf("DB Persisted: Safe-write operation completed for entity row #%d (%s).\n", snap.EntityID, snap.Name)
+			logger.Info("[DB SAVE] Persisted entity #%d (%s) in %v.", snap.EntityID, snap.Name, elapsed)
+			if elapsed > 100*time.Millisecond {
+				logger.Warn("[PERF] DB write slow for %s: %v (budget: 100ms)", snap.Name, elapsed)
+			}
 			return
 		}
 		// Log failure and sleep with backoff for retry
-		fmt.Printf("[SAVE] Attempt %d failed for %s: %v\n", attempt+1, snap.Name, err)
+		logger.Warn("[SAVE] Attempt %d failed for %s: %v", attempt+1, snap.Name, err)
 		time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
 	}
-	fmt.Printf("Error: [SAVE] Failed after %d retries for %s: %v\n", maxRetries, snap.Name, err)
+	logger.Error("[SAVE] Failed after %d retries for %s: %v", maxRetries, snap.Name, err)
 }
 
 func tryWrite(snap SaveSnapshot) error {

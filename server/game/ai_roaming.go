@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"server/ecs"
+	"server/logger"
 	"server/world"
 )
 
@@ -261,5 +262,5 @@ func logStateChange(id ecs.Entity, from, to ecs.AIState) {
 	if ok {
 		name = meta.Name
 	}
-	fmt.Printf("[AI] %s: %s → %s\n", name, from, to)
+	logger.Debug("[AI] %s: %s → %s", name, from, to)
 }

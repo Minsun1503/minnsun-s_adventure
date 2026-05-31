@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"server/ecs"
+	"server/logger"
 	"server/models"
 	"server/protocol"
 	"server/world"
@@ -261,6 +262,6 @@ func broadcastHit(r CombatResult) {
 	}
 	attackerPos, _ := ecs.GlobalRegistry.GetPosition(r.AttackerID)
 	protocol.BroadcastToMap(attackerPos.MapID, msg)
-	fmt.Printf("[HIT] %s → %s | dmg=%d hp_left=%d\n",
+	logger.Debug("[HIT] %s → %s | dmg=%d hp_left=%d",
 		r.AttackerName, r.TargetName, r.Damage, r.TargetHP)
 }

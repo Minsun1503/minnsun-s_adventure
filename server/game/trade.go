@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"server/ecs"
+	"server/logger"
 	"sync"
 )
 
@@ -81,7 +82,7 @@ func (tr *TradeSystemRegistry) InitializeTradeSession(playerA, playerB ecs.Entit
 	alertMsg := fmt.Sprintf("[TRADE] Player %s has opened a trade session with you!\r\n", inviterName)
 	SendNoticeSystem(playerB, []byte(alertMsg))
 
-	fmt.Printf("[TRADE] Session %d created between %d (%s) and %d (%s)\n", sessionID, playerA, inviterName, playerB, targetName)
+	logger.Info("[TRADE] Session %d created between %d (%s) and %d (%s)", sessionID, playerA, inviterName, playerB, targetName)
 	return fmt.Sprintf("Trade session opened with %s.\r\n", targetName), true
 }
 

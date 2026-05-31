@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"server/ecs"
+	"server/logger"
 	"server/state"
 	"strings"
 	"time"
@@ -86,7 +87,7 @@ func loadSavedPlayerState(name string) *savedPlayerData {
 		return nil // New player — no saved state
 	}
 	if err != nil {
-		fmt.Printf("[LOAD] DB lookup error for %s: %v\n", name, err)
+		logger.Error("[LOAD] DB lookup error for %s: %v", name, err)
 		return nil
 	}
 
@@ -100,7 +101,7 @@ func loadSavedPlayerState(name string) *savedPlayerData {
 		oldCharID,
 	).Scan(&mapID, &x, &z, &hp, &maxHP, &damage, &level, &xp, &weaponID, &armorID)
 	if err != nil && err != sql.ErrNoRows {
-		fmt.Printf("[LOAD] State lookup error for %s (id %d): %v\n", name, oldCharID, err)
+		logger.Error("[LOAD] State lookup error for %s (id %d): %v", name, oldCharID, err)
 	}
 
 	// Step 3: Load inventory items.
@@ -120,7 +121,7 @@ func loadSavedPlayerState(name string) *savedPlayerData {
 		}
 	}
 
-	fmt.Printf("[LOAD] Recovered state for %s (old id %d): map=%d pos=(%d,%d) hp=%d/%d lvl=%d xp=%d atk=%d weapon=%d armor=%d items=%d\n",
+	logger.Info("[LOAD] Recovered state for %s (old id %d): map=%d pos=(%d,%d) hp=%d/%d lvl=%d xp=%d atk=%d weapon=%d armor=%d items=%d",
 		name, oldCharID, mapID, x, z, hp, maxHP, level, xp, damage, weaponID, armorID, len(inventory))
 
 	return &savedPlayerData{
@@ -150,7 +151,7 @@ func LookupCredentials(username string) (uint64, string, bool) {
 		return 0, "", false
 	}
 	if err != nil {
-		fmt.Printf("[AUTH] DB lookup error for %s: %v\n", username, err)
+		logger.Error("[AUTH] DB lookup error for %s: %v", username, err)
 		return 0, "", false
 	}
 	return id, hash, true
@@ -206,7 +207,7 @@ func RegisterNewAccount(username, passwordHash string) error {
 		return fmt.Errorf("DB commit failed: %w", err)
 	}
 
-	fmt.Printf("[REGISTER] New account '%s' created (entity %d)\n", username, entityID)
+	logger.Info("[REGISTER] New account '%s' created (entity %d)", username, entityID)
 	return nil
 }
 

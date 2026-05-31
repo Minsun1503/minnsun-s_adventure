@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"server/ecs"
+	"server/logger"
 	"server/models"
 	"server/world"
 	"sync"
@@ -38,7 +39,7 @@ func (rs *RespawnScheduler) ScheduleMonsterRespawn(templateID, mapID, spawnX, sp
 		SpawnZ:     spawnZ,
 		RespawnAt:  time.Now().Add(delay),
 	})
-	fmt.Printf("[RESPAWN] Scheduled %s (template %d) at (%d,%d) in %v\n",
+	logger.Info("[RESPAWN] Scheduled %s (template %d) at (%d,%d) in %v",
 		monsterName(templateID), templateID, spawnX, spawnZ, delay)
 }
 
@@ -60,7 +61,7 @@ func (rs *RespawnScheduler) RunRespawnSystem() {
 			// Timer expired — spawn the monster.
 			id, err := models.SpawnMonsterFromTemplate(ev.TemplateID, ev.SpawnX, ev.SpawnZ)
 			if err != nil {
-				fmt.Printf("[RESPAWN] Failed to spawn template %d: %v\n", ev.TemplateID, err)
+				logger.Error("[RESPAWN] Failed to spawn template %d: %v", ev.TemplateID, err)
 				remaining = append(remaining, ev) // Keep in queue to retry next tick
 				continue
 			}
@@ -70,7 +71,7 @@ func (rs *RespawnScheduler) RunRespawnSystem() {
 				ecs.GlobalRegistry.SetPosition(id, pos)
 				world.GlobalSpatialGrid.UpdateEntityPosition(id, pos)
 			}
-			fmt.Printf("[RESPAWN] Spawned %s (entity %d) at (%d,%d)\n",
+			logger.Info("[RESPAWN] Spawned %s (entity %d) at (%d,%d)",
 				monsterName(ev.TemplateID), id, ev.SpawnX, ev.SpawnZ)
 		} else {
 			// Not yet — keep in the queue.

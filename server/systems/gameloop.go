@@ -1,18 +1,22 @@
 package systems
 
 import (
-	"fmt"
 	"server/ecs"
 	"server/game"
+	"server/logger"
 	"time"
 )
 
 func StartGameLoop() {
 	ticker := time.NewTicker(250 * time.Millisecond)
 	go func() {
-		fmt.Println("[ENGINE] Heartbeat game loop started at 4 ticks/sec.")
+		logger.Info("[ENGINE] Heartbeat game loop started at 4 ticks/sec.")
 		for range ticker.C {
+			start := time.Now()
 			tickWorld()
+			if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+				logger.Warn("[PERF] Game loop tick overran: %v (budget: 50ms)", elapsed)
+			}
 		}
 	}()
 }
@@ -59,11 +63,13 @@ func tickWorld() {
 	})
 }
 
+// processMonster logs active monster state at DEBUG level only.
+// In production (debug=false), this is a no-op.
 func processMonster(snap ecs.EntitySnapshot) {
 	if !snap.HasPos || !snap.HasStats {
 		return
 	}
-	fmt.Printf("[SYSTEM MONITOR] Active Instance ID: %d | Type: %s | Position: (%d, %d) | HP: %d\n",
+	logger.Debug("[MONITOR] ID: %d | %s | Pos: (%d, %d) | HP: %d",
 		snap.ID, snap.Meta.Name, snap.Pos.X, snap.Pos.Z, snap.Stats.HP)
 }
 

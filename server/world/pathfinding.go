@@ -2,7 +2,9 @@ package world
 
 import (
 	"server/ecs"
+	"server/logger"
 	"sync"
+	"time"
 )
 
 type point struct {
@@ -47,6 +49,14 @@ const bfsMaxNodes = 400
 // FindPath executes a BFS search to find the next step (X, Z) towards the target position.
 // It avoids blocked tiles and uses a sync.Pool memory context to avoid heap allocations.
 func FindPath(from, to ecs.PositionComponent) (int, int) {
+	start := time.Now()
+	defer func() {
+		if elapsed := time.Since(start); elapsed > 5*time.Millisecond {
+			logger.Warn("[PERF] BFS overran: from(%d,%d) → to(%d,%d): %v (budget: 5ms)",
+				from.X, from.Z, to.X, to.Z, elapsed)
+		}
+	}()
+
 	if from.X == to.X && from.Z == to.Z {
 		return from.X, from.Z
 	}
