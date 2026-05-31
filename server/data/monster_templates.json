@@ -1,0 +1,20 @@
+[
+    {
+        "id": 1,
+        "name": "Slime",
+        "hp": 50,
+        "damage": 5
+    },
+    {
+        "id": 2,
+        "name": "Wild Boar",
+        "hp": 120,
+        "damage": 12
+    },
+    {
+        "id": 3,
+        "name": "Sea King Proto",
+        "hp": 2000,
+        "damage": 150
+    }
+]
