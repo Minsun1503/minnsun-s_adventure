@@ -1,4 +1,4 @@
-package systems
+package world
 
 import (
 	"server/ecs"
@@ -36,7 +36,7 @@ func FindPath(from, to ecs.PositionComponent) (int, int) {
 
 	// If the target tile itself is blocked, pathfinding is impossible. Fallback immediately.
 	if IsTileBlocked(from.MapID, to.X, to.Z) {
-		return stepToward(from, to)
+		return StepToward(from, to)
 	}
 
 	// Acquire context from the pool
@@ -120,5 +120,25 @@ func FindPath(from, to ecs.PositionComponent) (int, int) {
 	}
 
 	// Fallback to standard straight step if path is blocked or target unreachable
-	return stepToward(from, to)
+	return StepToward(from, to)
+}
+
+// StepToward returns a position one unit closer to the target.
+// Moves on the axis with the larger delta first (Chebyshev step).
+func StepToward(from, to ecs.PositionComponent) (int, int) {
+	nx, nz := from.X, from.Z
+
+	if from.X < to.X {
+		nx++
+	} else if from.X > to.X {
+		nx--
+	}
+
+	if from.Z < to.Z {
+		nz++
+	} else if from.Z > to.Z {
+		nz--
+	}
+
+	return nx, nz
 }

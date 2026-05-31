@@ -6,9 +6,13 @@ import (
 	"io"
 	"net"
 
+	"server/db"
 	"server/ecs"
+	"server/game"
 	"server/models"
+	"server/protocol"
 	"server/systems"
+	"server/world"
 )
 
 // LoginQueue is a buffered channel that holds incoming TCP connections waiting to log in.
@@ -31,7 +35,7 @@ func processLogin(conn net.Conn) {
 	playerEntity, err := models.CreatePlayerEntity(conn)
 	if err != nil {
 		fmt.Println("[CONNECT] Error registering character in DB:", err)
-		systems.SendErrorPacket(conn, systems.ErrCodeDatabaseError, "Temporary server database issue. Please try again later.")
+		protocol.SendErrorPacket(conn, protocol.ErrCodeDatabaseError, "Temporary server database issue. Please try again later.")
 		conn.Close()
 		return
 	}
@@ -53,12 +57,12 @@ func processLogin(conn net.Conn) {
 }
 
 func main() {
-	systems.InitializeItemRegistry()
-	systems.InitializeLootTables()
-	systems.InitializeCollisionMaps()
+	game.InitializeItemRegistry()
+	game.InitializeLootTables()
+	world.InitializeCollisionMaps()
 
 	models.InitializeDatabase("root:root@tcp(127.0.0.1:3306)/?parseTime=true")
-	systems.StartSaveWorkerEngine()
+	db.StartSaveWorkerEngine()
 
 	templates, err := models.LoadMonster("data/monster_templates.json")
 	if err != nil {
@@ -75,7 +79,7 @@ func main() {
 			continue
 		}
 		if pos, ok := ecs.GlobalRegistry.GetPosition(id); ok {
-			systems.GlobalSpatialGrid.UpdateEntityPosition(id, pos)
+			world.GlobalSpatialGrid.UpdateEntityPosition(id, pos)
 		}
 		spawned++
 	}
@@ -103,7 +107,7 @@ func main() {
 		case LoginQueue <- conn:
 		default:
 			// Queue full! Tell the client and drop connection cleanly.
-			systems.SendErrorPacket(conn, systems.ErrCodeServerFull, "Server login queue is full. Please try again later.")
+			protocol.SendErrorPacket(conn, protocol.ErrCodeServerFull, "Server login queue is full. Please try again later.")
 			conn.Close()
 		}
 	}
@@ -123,8 +127,8 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		if live, ok := ecs.GlobalRegistry.GetMetadata(playerEntity); ok {
 			name = live.Name
 		}
-		systems.QueuePlayerSave(playerEntity)
-		systems.GlobalSpatialGrid.RemoveEntity(playerEntity)
+		db.QueuePlayerSave(playerEntity)
+		world.GlobalSpatialGrid.RemoveEntity(playerEntity)
 		ecs.GlobalRegistry.RemoveEntity(playerEntity)
 		models.ActivePlayers.Delete(conn.RemoteAddr().String())
 		systems.BroadcastSystem(
@@ -174,40 +178,40 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 	fmt.Printf("[CMD] %s: Opcode %d, Payload len %d\n", conn.RemoteAddr(), opcode, len(payload))
 
 	switch opcode {
-	case systems.OpcodeC2SMove: // MOVE
-		errMsg, ok := systems.HandlePlayerMovementSystem(playerEntity, payload)
+	case protocol.OpcodeC2SMove: // MOVE
+		errMsg, ok := game.HandlePlayerMovementSystem(playerEntity, payload)
 		if !ok {
 			systems.SendNoticeSystem(playerEntity, []byte(errMsg))
 		}
 
-	case systems.OpcodeC2SInv: // INV
+	case protocol.OpcodeC2SInv: // INV
 		if len(payload) != 0 {
 			systems.SendNoticeSystem(playerEntity, []byte("Error: INV packet payload must be empty.\r\n"))
 			return
 		}
-		inventoryTextPacket := systems.RunInventoryQuerySystem(playerEntity)
+		inventoryTextPacket := game.RunInventoryQuerySystem(playerEntity)
 		conn.Write([]byte(inventoryTextPacket))
 
-	case systems.OpcodeC2SUse: // USE
-		noticePacket, success := systems.HandleItemUsageSystem(playerEntity, payload)
+	case protocol.OpcodeC2SUse: // USE
+		noticePacket, success := game.HandleItemUsageSystem(playerEntity, payload)
 		if success {
 			systems.BroadcastSystem([]byte(noticePacket))
 		} else {
 			systems.SendNoticeSystem(playerEntity, []byte(noticePacket))
 		}
 
-	case systems.OpcodeC2SWarp: // WARP
-		systemFeedback, _ := systems.HandleWarpSystem(playerEntity, payload)
+	case protocol.OpcodeC2SWarp: // WARP
+		systemFeedback, _ := world.HandleWarpSystem(playerEntity, payload)
 		systems.SendNoticeSystem(playerEntity, []byte(systemFeedback))
 
-	case systems.OpcodeC2SAttack: // ATTACK
+	case protocol.OpcodeC2SAttack: // ATTACK
 		if len(payload) != 8 {
 			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid ATTACK payload length. Expected 8 bytes.\r\n"))
 			return
 		}
 		targetID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
 
-		result, errMsg := systems.AttackSystem(playerEntity, targetID)
+		result, errMsg := game.AttackSystem(playerEntity, targetID)
 		if errMsg != "" {
 			systems.SendNoticeSystem(playerEntity, []byte(errMsg))
 			return
@@ -227,7 +231,7 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 			)
 		}
 
-	case systems.OpcodeC2SInfo: // INFO
+	case protocol.OpcodeC2SInfo: // INFO
 		if len(payload) != 8 {
 			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid INFO payload length. Expected 8 bytes.\r\n"))
 			return
@@ -240,7 +244,7 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 		}
 		systems.SendNoticeSystem(playerEntity, []byte(text))
 
-	case systems.OpcodeC2SQuit: // QUIT
+	case protocol.OpcodeC2SQuit: // QUIT
 		if len(payload) != 0 {
 			systems.SendNoticeSystem(playerEntity, []byte("Error: QUIT packet payload must be empty.\r\n"))
 			return
@@ -248,25 +252,25 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 		fmt.Printf("[QUIT] %s requested disconnect.\n", conn.RemoteAddr())
 		conn.Close()
 
-	case systems.OpcodeC2SPickup: // PICKUP
+	case protocol.OpcodeC2SPickup: // PICKUP
 		if len(payload) != 8 {
 			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid PICKUP payload length. Expected 8 bytes.\r\n"))
 			return
 		}
 		itemEntityID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
-		personalFeedback, _ := systems.HandleItemPickupSystem(playerEntity, itemEntityID)
+		personalFeedback, _ := game.HandleItemPickupSystem(playerEntity, itemEntityID)
 		systems.SendNoticeSystem(playerEntity, []byte(personalFeedback))
 
-	case systems.OpcodeC2SEquip: // EQUIP
+	case protocol.OpcodeC2SEquip: // EQUIP
 		if len(payload) != 8 {
 			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid EQUIP payload length. Expected 8 bytes.\r\n"))
 			return
 		}
 		itemID := binary.BigEndian.Uint64(payload[0:8])
-		feedback, success := systems.HandleEquipmentSystem(playerEntity, itemID)
+		feedback, success := game.HandleEquipmentSystem(playerEntity, itemID)
 		if success {
 			pos, _ := ecs.GlobalRegistry.GetPosition(playerEntity)
-			systems.BroadcastToMap(pos.MapID, feedback)
+			protocol.BroadcastToMap(pos.MapID, feedback)
 		} else {
 			systems.SendNoticeSystem(playerEntity, []byte(feedback))
 		}

@@ -1,4 +1,4 @@
-package systems
+package world
 
 // Max map scale dimensions matching grid constraints
 const MapWidth = 101

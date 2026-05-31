@@ -1,4 +1,4 @@
-package systems
+package world
 
 import (
 	"fmt"
@@ -21,9 +21,9 @@ type ChunkKey struct {
 	Z     int
 }
 
-// chunkEntry holds an entity and its precise world position inside the chunk.
+// ChunkEntry holds an entity and its precise world position inside the chunk.
 // Storing position here avoids a second ECS lookup during proximity filtering.
-type chunkEntry struct {
+type ChunkEntry struct {
 	ID  ecs.Entity
 	Pos ecs.PositionComponent
 }
@@ -40,7 +40,7 @@ type chunkEntry struct {
 // don't block each other, and index lookups don't block chunk scans.
 type SpatialGrid struct {
 	chunkMu sync.RWMutex
-	chunks  map[ChunkKey]map[ecs.Entity]chunkEntry
+	chunks  map[ChunkKey]map[ecs.Entity]ChunkEntry
 
 	indexMu     sync.RWMutex
 	entityIndex map[ecs.Entity]ChunkKey // reverse lookup: entity → its current chunk
@@ -51,7 +51,7 @@ var GlobalSpatialGrid = newSpatialGrid()
 
 func newSpatialGrid() *SpatialGrid {
 	return &SpatialGrid{
-		chunks:      make(map[ChunkKey]map[ecs.Entity]chunkEntry),
+		chunks:      make(map[ChunkKey]map[ecs.Entity]ChunkEntry),
 		entityIndex: make(map[ecs.Entity]ChunkKey),
 	}
 }
@@ -76,7 +76,7 @@ func worldToChunk(pos ecs.PositionComponent) ChunkKey {
 //  3. New chunk (crossed boundary): remove from old chunk, insert into new.
 func (g *SpatialGrid) UpdateEntityPosition(id ecs.Entity, pos ecs.PositionComponent) {
 	newChunk := worldToChunk(pos)
-	entry := chunkEntry{ID: id, Pos: pos}
+	entry := ChunkEntry{ID: id, Pos: pos}
 
 	// Read current chunk under read lock first (fast path: same-chunk update).
 	g.indexMu.RLock()
@@ -104,7 +104,7 @@ func (g *SpatialGrid) UpdateEntityPosition(id ecs.Entity, pos ecs.PositionCompon
 	}
 	// Insert into new chunk bucket.
 	if g.chunks[newChunk] == nil {
-		g.chunks[newChunk] = make(map[ecs.Entity]chunkEntry)
+		g.chunks[newChunk] = make(map[ecs.Entity]ChunkEntry)
 	}
 	g.chunks[newChunk][id] = entry
 	g.chunkMu.Unlock()
@@ -157,13 +157,13 @@ func (g *SpatialGrid) QueryRadius(
 	origin ecs.PositionComponent,
 	worldRadius float64,
 	excludeID ecs.Entity,
-) []chunkEntry {
+) []ChunkEntry {
 	// Determine which chunk range to scan.
 	chunkRadius := int(math.Ceil(worldRadius / chunkSize))
 	originChunk := worldToChunk(origin)
 
 	radiusSq := worldRadius * worldRadius
-	results := make([]chunkEntry, 0, 16) // pre-alloc; 16 is a reasonable nearby-entity count
+	results := make([]ChunkEntry, 0, 16) // pre-alloc; 16 is a reasonable nearby-entity count
 
 	g.chunkMu.RLock()
 	defer g.chunkMu.RUnlock()
@@ -195,9 +195,9 @@ func (g *SpatialGrid) QueryRadius(
 // QueryChunk returns all entities in the exact chunk containing pos.
 // Cheaper than QueryRadius when you only need same-cell occupants
 // (e.g. standing on the same tile triggers a pickup).
-func (g *SpatialGrid) QueryChunk(pos ecs.PositionComponent, excludeID ecs.Entity) []chunkEntry {
+func (g *SpatialGrid) QueryChunk(pos ecs.PositionComponent, excludeID ecs.Entity) []ChunkEntry {
 	key := worldToChunk(pos)
-	results := make([]chunkEntry, 0, 8)
+	results := make([]ChunkEntry, 0, 8)
 
 	g.chunkMu.RLock()
 	defer g.chunkMu.RUnlock()

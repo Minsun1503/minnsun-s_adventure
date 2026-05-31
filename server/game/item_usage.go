@@ -1,4 +1,4 @@
-package systems
+package game
 
 import (
 	"encoding/binary"

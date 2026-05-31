@@ -1,9 +1,11 @@
-package systems
+package game
 
 import (
 	"fmt"
 	"math/rand"
 	"server/ecs"
+	"server/protocol"
+	"server/world"
 )
 
 // CombatResult is returned by AttackSystem to handleCommand.
@@ -63,7 +65,7 @@ func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
 	}
 
 	// ← NEW: range check using spatial system
-	if !IsInRange(attackerID, targetID, meleeRange) {
+	if !world.IsInRange(attackerID, targetID, meleeRange) {
 		targetMeta, _ := ecs.GlobalRegistry.GetMetadata(targetID)
 		return CombatResult{}, fmt.Sprintf(
 			"%s is out of melee range (%.0f units).\r\n", targetMeta.Name, meleeRange,
@@ -191,10 +193,10 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 			targetMeta.Name, killerMeta.Name)
 	}
 	targetPos, _ := registry.GetPosition(targetID)
-	BroadcastToMap(targetPos.MapID, killMsg)
+	protocol.BroadcastToMap(targetPos.MapID, killMsg)
 
 	// ← NEW: remove từ spatial grid trước khi ECS cleanup
-	GlobalSpatialGrid.RemoveEntity(targetID)
+	world.GlobalSpatialGrid.RemoveEntity(targetID)
 
 	if targetMeta.Type == "player" {
 		conn, ok := registry.GetConnection(targetID)
@@ -221,7 +223,7 @@ func broadcastHit(r CombatResult) {
 		)
 	}
 	attackerPos, _ := ecs.GlobalRegistry.GetPosition(r.AttackerID)
-	BroadcastToMap(attackerPos.MapID, msg)
+	protocol.BroadcastToMap(attackerPos.MapID, msg)
 	fmt.Printf("[HIT] %s → %s | dmg=%d hp_left=%d\n",
 		r.AttackerName, r.TargetName, r.Damage, r.TargetHP)
 }

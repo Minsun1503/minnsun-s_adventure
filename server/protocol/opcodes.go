@@ -1,4 +1,4 @@
-package systems
+package protocol
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Centralized Opcode Registry

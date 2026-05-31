@@ -1,9 +1,10 @@
-package systems
+package world
 
 import (
 	"encoding/binary"
 	"fmt"
 	"server/ecs"
+	"server/protocol"
 )
 
 // HandleWarpSystem parses a binary payload containing MapID, X, and Z coordinates,
@@ -46,7 +47,7 @@ func ExecuteMapTransfer(playerID ecs.Entity, targetMapID int, targetX int, targe
 	// Phase 1: THE MAP EXIT
 	// Alert all witnesses on the OLD map that this entity has vanished
 	exitNotice := fmt.Sprintf("[PORTAL]: Player %s vanished into a warping rift!\r\n", meta.Name)
-	BroadcastToMap(oldPos.MapID, exitNotice)
+	protocol.BroadcastToMap(oldPos.MapID, exitNotice)
 
 	// Phase 2: THE COORDINATE MIGRATION
 	// Modify our local structure copy and overwrite the database column lock-free
@@ -63,7 +64,7 @@ func ExecuteMapTransfer(playerID ecs.Entity, targetMapID int, targetX int, targe
 	// Alert all witnesses on the NEW map that this entity has materialized
 	entranceNotice := fmt.Sprintf("[PORTAL]: Player %s materialized out of a warping rift at X:%d, Z:%d!\r\n",
 		meta.Name, targetX, targetZ)
-	BroadcastToMap(targetMapID, entranceNotice)
+	protocol.BroadcastToMap(targetMapID, entranceNotice)
 
 	successMsg := fmt.Sprintf("[WARP]: Successfully zoned from Map #%d to Map #%d! Position: (%d, %d)\r\n",
 		oldMapID, targetMapID, targetX, targetZ)

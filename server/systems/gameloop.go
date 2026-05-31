@@ -3,6 +3,7 @@ package systems
 import (
 	"fmt"
 	"server/ecs"
+	"server/game"
 	"time"
 )
 
@@ -32,7 +33,7 @@ func tickWorld() {
 	})
 
 	// Process floor items lifecycle expiration countdown
-	RunGroundItemDecaySystem()
+	game.RunGroundItemDecaySystem()
 
 	// Only run AI ticks when at least one player is online.
 	// MAP SLEEP TRICK: zero players → no AI computation at all.
@@ -44,7 +45,7 @@ func tickWorld() {
 	// RangeAI is separate from RangeSnapshots to avoid a second
 	// metadata scan — AI and snapshot passes are decoupled by design.
 	ecs.GlobalRegistry.RangeAI(func(id ecs.Entity, _ ecs.AIComponent) bool {
-		tickAI(id)
+		game.TickAI(id)
 		return true
 	})
 }
@@ -68,5 +69,5 @@ func UpdateWorldEntitiesSystem() {
 	})
 
 	// Process floor items lifecycle expiration countdown
-	RunGroundItemDecaySystem()
+	game.RunGroundItemDecaySystem()
 }

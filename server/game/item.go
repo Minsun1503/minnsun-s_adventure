@@ -1,4 +1,4 @@
-package systems
+package game
 
 // ItemTemplate defines the static, read-only stats for an item configuration.
 type ItemTemplate struct {

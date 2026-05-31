@@ -1,8 +1,10 @@
-package systems
+package game
 
 import (
 	"fmt"
 	"server/ecs"
+	"server/protocol"
+	"server/world"
 )
 
 // HandleItemPickupSystem processes a player's PICKUP command for a ground item entity.
@@ -17,7 +19,7 @@ func HandleItemPickupSystem(playerID ecs.Entity, itemEntityID ecs.Entity) (strin
 	// 2. SPATIAL PROXIMITY SECURITY GATE
 	// Items must be close enough to pick up. We use a range threshold of 5.0 units.
 	const pickupRange = 5.0
-	if !IsInRange(playerID, itemEntityID, pickupRange) {
+	if !world.IsInRange(playerID, itemEntityID, pickupRange) {
 		return "Pickup Denied: You are standing too far away from this item!\r\n", false
 	}
 
@@ -37,7 +39,7 @@ func HandleItemPickupSystem(playerID ecs.Entity, itemEntityID ecs.Entity) (strin
 	}
 
 	// Remove the item from both spatial grid and registry immediately to lock it to this routine
-	GlobalSpatialGrid.RemoveEntity(itemEntityID)
+	world.GlobalSpatialGrid.RemoveEntity(itemEntityID)
 	ecs.GlobalRegistry.RemoveEntity(itemEntityID)
 
 	// 4. COPY-MODIFY-OVERWRITE: Insert item token into player's inventory table row
@@ -51,11 +53,11 @@ func HandleItemPickupSystem(playerID ecs.Entity, itemEntityID ecs.Entity) (strin
 
 	// 5. LOCAL COMMUNICATION PACKET (No emojis)
 	playerMeta, _ := ecs.GlobalRegistry.GetMetadata(playerID)
-	successBroadcast := fmt.Sprintf("[LOOT]: Player %s picked up a %s from the floor.\r\n", 
+	successBroadcast := fmt.Sprintf("[LOOT]: Player %s picked up a %s from the floor.\r\n",
 		playerMeta.Name, itemMeta.Name)
-	
+
 	// Notify all local area map witnesses that the item has been picked up
-	BroadcastToMap(itemPos.MapID, successBroadcast)
+	protocol.BroadcastToMap(itemPos.MapID, successBroadcast)
 
 	personalFeedback := fmt.Sprintf("You successfully stowed %s in your backpack!\r\n", itemMeta.Name)
 	return personalFeedback, true

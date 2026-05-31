@@ -1,8 +1,10 @@
-package systems
+package game
 
 import (
 	"fmt"
 	"server/ecs"
+	"server/protocol"
+	"server/world"
 	"time"
 )
 
@@ -26,7 +28,7 @@ func SpawnItemOnGround(itemTemplateID uint64, mapID int, x int, z int) ecs.Entit
 		Z:     z,
 	}
 	ecs.GlobalRegistry.SetPosition(itemEntity, pos)
-	GlobalSpatialGrid.UpdateEntityPosition(itemEntity, pos)
+	world.GlobalSpatialGrid.UpdateEntityPosition(itemEntity, pos)
 
 	// 4. Populate metadata classification columns
 	ecs.GlobalRegistry.SetMetadata(itemEntity, ecs.MetadataComponent{
@@ -46,9 +48,9 @@ func SpawnItemOnGround(itemTemplateID uint64, mapID int, x int, z int) ecs.Entit
 	})
 
 	// 6. Broadcast packet notice to local area map witnesses only (no emojis)
-	notice := fmt.Sprintf("[DROP]: A %s dropped on the ground at position (%d, %d) [ID: %d]\r\n", 
+	notice := fmt.Sprintf("[DROP]: A %s dropped on the ground at position (%d, %d) [ID: %d]\r\n",
 		name, x, z, itemEntity)
-	BroadcastToMap(mapID, notice)
+	protocol.BroadcastToMap(mapID, notice)
 
 	return itemEntity
 }
@@ -72,13 +74,13 @@ func RunGroundItemDecaySystem() {
 			meta, metaOk := ecs.GlobalRegistry.GetMetadata(id)
 
 			if posOk && metaOk {
-				decayNotice := fmt.Sprintf("[DECAY]: The %s sitting at (%d, %d) faded away into dust.\r\n", 
+				decayNotice := fmt.Sprintf("[DECAY]: The %s sitting at (%d, %d) faded away into dust.\r\n",
 					meta.Name, pos.X, pos.Z)
-				BroadcastToMap(pos.MapID, decayNotice)
+				protocol.BroadcastToMap(pos.MapID, decayNotice)
 			}
 
 			// 3. PURGE TRANSACTION: Clean up spatial grid and parallel memory tables completely
-			GlobalSpatialGrid.RemoveEntity(id)
+			world.GlobalSpatialGrid.RemoveEntity(id)
 			ecs.GlobalRegistry.RemoveEntity(id)
 		}
 	}

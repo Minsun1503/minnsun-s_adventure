@@ -84,6 +84,17 @@
   - Các mã lỗi được định nghĩa sẵn: `ErrCodeServerFull (1)` — hàng đợi Login đầy, `ErrCodeDatabaseError (2)` — lỗi DB timeout/failure, `ErrCodeInternalError (3)` — lỗi nội bộ không mong đợi.
   - Hàm `SendErrorPacket(conn, errorCode, message)` ghi trực tiếp vào `net.Conn` thô (không cần entity ECS) vì tại thời điểm lỗi login, entity chưa tồn tại trong Registry.
   - Thay thế tất cả các lời gọi `conn.Write([]byte("Error: ..."))` text thô trong [server.go](file:///c:/Minnsun's Adventure/server/server.go) bằng `SendErrorPacket` nhị phân, giúp Unity Client parse `ErrorCode` để hiển thị popup lỗi chính xác thay vì chuỗi text thô.
+- **Tích hợp tập tin quy chuẩn Cline (.clinerules & Hướng dẫn ECS)**:
+  - Khởi tạo tập tin [`.clinerules`](file:///c:/Minnsun's Adventure/.clinerules) ở thư mục gốc chứa các quy tắc thiết kế ECS cao cấp, tối ưu hóa bộ nhớ, và cấu trúc gói tin nhị phân.
+  - Viết tài liệu [`ecs_guide_cline.md`](file:///c:/Minnsun's Adventure/knowledge/ecs_guide_cline.md) cung cấp hướng dẫn nghiệp vụ và luồng phát triển chuẩn hóa hệ thống cho các AI coding assistants.
+- **Tái cấu trúc và Phân nhóm Systems Phase 2 (17 files còn lại)**:
+  - Tạo 2 package mới: [`server/game`](file:///c:/Minnsun's Adventure/server/game) (Gameplay logic) và [`server/db`](file:///c:/Minnsun's Adventure/server/db) (Database persistence).
+  - Di chuyển `broadcast.go` sang [`server/protocol`](file:///c:/Minnsun's Adventure/server/protocol) và đổi thành `package protocol`.
+  - Di chuyển `gateway.go` và `proximity.go` sang [`server/world`](file:///c:/Minnsun's Adventure/server/world) và đổi thành `package world`.
+  - Di chuyển `save_engine.go` sang [`server/db`](file:///c:/Minnsun's Adventure/server/db) và đổi thành `package db`.
+  - Di chuyển 11 file gameplay còn lại (`ai_roaming.go`, `combat.go`, `loot.go`, `item.go`, `item_usage.go`, `inventory_query.go`, `equipment.go`, `stat_engine.go`, `ground_item.go`, `pickup.go`, `movement.go`) sang [`server/game`](file:///c:/Minnsun's Adventure/server/game) và đổi thành `package game`.
+  - Giữ lại `systems.go` và `gameloop.go` ở package `systems` làm bộ điều phối trung tâm.
+  - (Chú ý: Các lỗi biên dịch import chéo do di chuyển file sẽ được sửa ở bước tiếp theo bởi Cline).
 
 ## 2. Những "đặc sản" logic vừa tìm thấy (Discovered Logic Specialties)
 - Server sử dụng giao thức TCP thô ở cổng `:1503`.
