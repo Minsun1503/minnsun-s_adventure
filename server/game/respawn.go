@@ -61,6 +61,7 @@ func (rs *RespawnScheduler) RunRespawnSystem() {
 			id, err := models.SpawnMonsterFromTemplate(ev.TemplateID, ev.SpawnX, ev.SpawnZ)
 			if err != nil {
 				fmt.Printf("[RESPAWN] Failed to spawn template %d: %v\n", ev.TemplateID, err)
+				remaining = append(remaining, ev) // Keep in queue to retry next tick
 				continue
 			}
 			// Register in the spatial grid so AI systems can find it.

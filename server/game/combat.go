@@ -206,11 +206,13 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 			conn.Conn.Close()
 		}
 	} else {
-		// Schedule monster respawn before purging the entity.
-		// Fetch the template ID by matching the monster's name.
 		if t, found := models.GetTemplateByName(targetMeta.Name); found {
+			spawnX, spawnZ := t.SpawnX, t.SpawnZ
+			if ai, hasAI := registry.GetAI(targetID); hasAI {
+				spawnX, spawnZ = ai.SpawnX, ai.SpawnZ
+			}
 			GlobalRespawnManager.ScheduleMonsterRespawn(
-				t.ID, targetPos.MapID, t.SpawnX, t.SpawnZ, 15*time.Second,
+				t.ID, targetPos.MapID, spawnX, spawnZ, 15*time.Second,
 			)
 		}
 		registry.RemoveEntity(targetID)
