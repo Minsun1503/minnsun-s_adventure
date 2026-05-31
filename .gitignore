@@ -1,0 +1,17 @@
+# Executables
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Installers / Large packages
+*.msi
+*.zip
+*.tar.gz
+
+# IDE/OS specific
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

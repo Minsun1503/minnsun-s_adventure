@@ -1,4 +1,4 @@
-package main
+package models
 
 import "net"
 
@@ -10,7 +10,7 @@ type Player struct {
 	Conn net.Conn
 }
 
-func NewPlayerBlueprint(conn net.Conn) *Player {
+func NewPlayer(conn net.Conn) *Player {
 	playerAddress := conn.RemoteAddr().String()
 
 	guestName := "Guest_" + playerAddress[len(playerAddress)-4:]
