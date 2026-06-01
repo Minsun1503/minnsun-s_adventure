@@ -181,3 +181,24 @@
 - Khôi phục (Load) dữ liệu người chơi từ DB khi họ đăng nhập (hiện tại người chơi kết nối luôn được khởi tạo dưới tên Guest mới với chỉ số mặc định, chưa được load ngược lại từ các bảng `character_states` và `character_inventory`).
 - Tự chạy và kiểm thử kiểm soát đa kết nối Client trong môi trường ECS mới.
 - Kết nối logic Client Unity với ECS Server thông qua TCP client.
+- save_engine.go — torn read
+go// QueuePlayerSave: comment tự thừa nhận
+// "A torn read (components from different game ticks) is acceptable"
+Acceptable cho vị trí/stats, không acceptable cho inventory. Nếu player trade xong, đồng thời disconnect, inventory snapshot có thể lấy pre-trade state từ một goroutine khác đang commit. Comment che giấu một race condition thực sự.
+- respawn.go — MapID hardcode
+go// SpawnMonsterFromTemplate:
+spawnPos := ecs.PositionComponent{MapID: 1, X: spawnX, Z: spawnZ}
+Rồi RunRespawnSystem phải patch lại:
+gopos.MapID = ev.MapID // "Set the correct MapID since SpawnMonsterFromTemplate defaults to 1"
+Đây là workaround cho một design flaw. SpawnMonsterFromTemplate nên nhận mapID làm parameter.
+- server.go — processLogin có một bug tinh vi
+gocase protocol.OpcodeC2SRegister:
+    // ...
+    protocol.SendErrorPacket(conn, 0, "Account registered successfully!")
+Dùng SendErrorPacket với errorCode = 0 để báo thành công. Client phải switch trên error code để phân biệt success/failure — fragile, và sai về mặt semantic.
+- party_invite.go — AcceptPartyInviteSystem race
+goif len(party.MemberIDs)+1 >= maxPartySize {  // check
+    // ... gap ở đây
+}
+AddMemberToParty(targetPartyID, playerID)  // write
+Giữa check và write, party có thể đã đầy do concurrent accept. Không có lock bao quanh toàn bộ operation.

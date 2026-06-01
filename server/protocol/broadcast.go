@@ -3,7 +3,7 @@ package protocol
 import (
 	"net"
 	"server/ecs"
-	"time"
+	"server/peakgo/netio"
 )
 
 // BroadcastToMap transits a network packet ONLY to player entities
@@ -34,8 +34,8 @@ func writeMapConn(c net.Conn, data []byte) {
 	if c == nil {
 		return
 	}
-	_ = c.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	if _, err := c.Write(data); err != nil {
+
+	if err := netio.WritePacket(c, data); err != nil {
 		c.Close()
 	}
 }

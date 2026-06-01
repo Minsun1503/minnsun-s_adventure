@@ -5,7 +5,7 @@ import (
 	"net"
 	"server/ecs"
 	"server/game"
-	"time"
+	"server/peakgo/netio"
 )
 
 // BroadcastSystem sends a raw byte payload to every entity with an active connection.
@@ -36,8 +36,8 @@ func writeConn(c net.Conn, data []byte) {
 	if c == nil {
 		return
 	}
-	_ = c.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	if _, err := c.Write(data); err != nil {
+
+	if err := netio.WritePacket(c, data); err != nil {
 		c.Close()
 	}
 }

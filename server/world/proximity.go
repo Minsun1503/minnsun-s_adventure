@@ -2,6 +2,7 @@ package world
 
 import (
 	"server/ecs"
+	"server/peakgo/gmath"
 	"server/peakgo/loggate"
 	"sync"
 )
@@ -114,9 +115,7 @@ func IsInRange(originID, targetID ecs.Entity, worldRadius float64) bool {
 		return false
 	}
 
-	dx := float64(originPos.X - targetPos.X)
-	dz := float64(originPos.Z - targetPos.Z)
-	return dx*dx+dz*dz <= worldRadius*worldRadius
+	return gmath.InRange(originPos.X, originPos.Z, targetPos.X, targetPos.Z, worldRadius)
 }
 
 // NearbyEntitiesSystem is the game-loop facing system.

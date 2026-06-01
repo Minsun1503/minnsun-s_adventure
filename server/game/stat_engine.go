@@ -7,14 +7,21 @@ import (
 // RecalculateActiveStats aggregates base attributes and equipment modifications
 // to update the final authoritative StatsComponent row inline.
 func RecalculateActiveStats(playerID ecs.Entity) {
-	// 1. Establish hardcoded default base stats for a level 1 player character
-	// Matching default initialization inside models/player.go: MaxHP: 100, Dam: 15
+	currentStats, hasStats := ecs.GlobalRegistry.GetStats(playerID)
+
 	baseMaxHP := 100
 	baseDamage := 15
 
+	if hasStats && currentStats.Level > 1 {
+		baseMaxHP = 100 + (currentStats.Level-1)*50
+		baseDamage = 15 + (currentStats.Level-1)*10
+	} else if !hasStats {
+		currentStats = ecs.StatsComponent{Level: 1, HP: baseMaxHP, MaxHP: baseMaxHP, Dam: baseDamage}
+	}
+
 	// 2. Fetch equipment component layout data columns
 	eq, hasEq := ecs.GlobalRegistry.GetEquipment(playerID)
-	
+
 	// If equipment row exists, accumulate bonus values from registries
 	if hasEq {
 		if weapon, exists := ItemRegistry[eq.WeaponID]; exists {
@@ -25,14 +32,7 @@ func RecalculateActiveStats(playerID ecs.Entity) {
 		}
 	}
 
-	// 3. COPY existing stats to preserve current dynamic health status tracking
-	currentStats, hasStats := ecs.GlobalRegistry.GetStats(playerID)
-	if !hasStats {
-		// If brand new, spawn fresh structure blocks
-		currentStats = ecs.StatsComponent{HP: baseMaxHP, MaxHP: baseMaxHP, Dam: baseDamage}
-	}
-
-	// 4. MODIFY: Overwrite upper limitations and active attributes safely
+	// 3. Overwrite upper limitations and active attributes safely
 	currentStats.MaxHP = baseMaxHP
 	currentStats.Dam = baseDamage
 
@@ -41,6 +41,6 @@ func RecalculateActiveStats(playerID ecs.Entity) {
 		currentStats.HP = currentStats.MaxHP
 	}
 
-	// 5. OVERWRITE: Force-push values back into your lock-free database columns
+	// 4. OVERWRITE: Force-push values back into your lock-free database columns
 	ecs.GlobalRegistry.SetStats(playerID, currentStats)
 }

@@ -7,9 +7,9 @@ import (
 	"server/peakgo/codec"
 	"server/peakgo/gmath"
 	"server/peakgo/loggate"
+	"server/peakgo/netio"
 	"server/protocol"
 	"server/world"
-	"time"
 )
 
 // HandlePlayerMovementSystem parses a binary payload containing target X and Z coordinates.
@@ -42,8 +42,8 @@ func writeConn(c net.Conn, data []byte) {
 	if c == nil {
 		return
 	}
-	_ = c.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	if _, err := c.Write(data); err != nil {
+
+	if err := netio.WritePacket(c, data); err != nil {
 		c.Close()
 	}
 }
