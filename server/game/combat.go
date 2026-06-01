@@ -2,10 +2,11 @@ package game
 
 import (
 	"fmt"
-	"math/rand"
 	"server/ecs"
-	"server/logger"
 	"server/models"
+	"server/peakgo/gmath"
+	"server/peakgo/loggate"
+	"server/peakgo/rng"
 	"server/protocol"
 	"server/world"
 	"time"
@@ -104,26 +105,16 @@ func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
 				targetPos, hasPos := registry.GetPosition(targetID)
 				if hasPos {
 					for _, itemID := range droppedItems {
-						// Scatter: generate a small random offset between -1 and +1 grid tiles
-						offsetX := rand.Intn(3) - 1 // yields -1, 0, or 1
-						offsetZ := rand.Intn(3) - 1 // yields -1, 0, or 1
+						// rng.Intn: pooled RNG — no mutex contention, 0 allocs.
+						offsetX := rng.Intn(3) - 1 // yields -1, 0, or 1
+						offsetZ := rng.Intn(3) - 1
 
-						dropX := targetPos.X + offsetX
-						dropZ := targetPos.Z + offsetZ
-
-						// Clamp to map boundaries (0-100)
-						if dropX < 0 {
-							dropX = 0
-						}
-						if dropX > 100 {
-							dropX = 100
-						}
-						if dropZ < 0 {
-							dropZ = 0
-						}
-						if dropZ > 100 {
-							dropZ = 100
-						}
+						// gmath.ClampPos: replaces 8 lines of manual if/else clamping.
+						dropX, dropZ := gmath.ClampPos(
+							targetPos.X+offsetX,
+							targetPos.Z+offsetZ,
+							0, 100,
+						)
 
 						SpawnItemOnGround(itemID, targetPos.MapID, dropX, dropZ)
 					}
@@ -263,6 +254,6 @@ func broadcastHit(r CombatResult) {
 	}
 	attackerPos, _ := ecs.GlobalRegistry.GetPosition(r.AttackerID)
 	protocol.BroadcastToMap(attackerPos.MapID, msg)
-	logger.Debug("[HIT] %s → %s | dmg=%d hp_left=%d",
+	loggate.Debugf("[HIT] %s → %s | dmg=%d hp_left=%d",
 		r.AttackerName, r.TargetName, r.Damage, r.TargetHP)
 }

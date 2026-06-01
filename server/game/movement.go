@@ -1,11 +1,12 @@
 package game
 
 import (
-	"encoding/binary"
 	"fmt"
 	"net"
 	"server/ecs"
-	"server/logger"
+	"server/peakgo/codec"
+	"server/peakgo/gmath"
+	"server/peakgo/loggate"
 	"server/protocol"
 	"server/world"
 	"time"
@@ -18,14 +19,13 @@ import (
 //   - (errorMsg, false) if parsing fails before reaching MovementSystem.
 //   - ("", true)        if MovementSystem was invoked.
 func HandlePlayerMovementSystem(playerID ecs.Entity, payload []byte) (string, bool) {
-	if len(payload) != 8 {
+	// codec.ReadMovePayload: typed hot-path decoder — validates length + decodes in one call.
+	p, ok := codec.ReadMovePayload(payload)
+	if !ok {
 		return "Error: Invalid movement payload length. Expected 8 bytes.\r\n", false
 	}
 
-	targetX := int(int32(binary.BigEndian.Uint32(payload[0:4])))
-	targetZ := int(int32(binary.BigEndian.Uint32(payload[4:8])))
-
-	MovementSystem(playerID, targetX, targetZ)
+	MovementSystem(playerID, p.X, p.Z)
 	return "", true
 }
 
@@ -50,7 +50,8 @@ func writeConn(c net.Conn, data []byte) {
 
 // MovementSystem validates and commits a position update.
 func MovementSystem(entity ecs.Entity, x, z int) bool {
-	if x < 0 || x > 100 || z < 0 || z > 100 {
+	// gmath.InBounds: single call replaces 4 comparisons (x<0||x>100||z<0||z>100).
+	if !gmath.InBounds(x, z, 0, 100) {
 		SendNoticeSystem(entity, []byte("Movement rejected! Out of bounds.\r\n"))
 		return false
 	}
@@ -77,6 +78,6 @@ func MovementSystem(entity ecs.Entity, x, z int) bool {
 	}
 	msg := fmt.Sprintf("Player %s moved to position: X=%d, Z=%d\r\n", meta.Name, x, z)
 	protocol.BroadcastToMap(pos.MapID, msg)
-	logger.Debug("[MOVEMENT] %s → (%d, %d) on Map %d", meta.Name, x, z, pos.MapID)
+	loggate.Debugf("[MOVEMENT] %s → (%d, %d) on Map %d", meta.Name, x, z, pos.MapID)
 	return true
 }

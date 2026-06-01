@@ -2,9 +2,10 @@ package game
 
 import (
 	"fmt"
-	"math/rand"
 	"server/ecs"
-	"server/logger"
+	"server/peakgo/gmath"
+	"server/peakgo/loggate"
+	"server/peakgo/rng"
 	"server/world"
 )
 
@@ -109,14 +110,14 @@ func tickChasing(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 		return ai
 	}
 
-	if distanceSq(myPos, targetPos) > ai.LeashRadius*ai.LeashRadius {
+	if gmath.DistanceSq(myPos.X, myPos.Z, targetPos.X, targetPos.Z) > ai.LeashRadius*ai.LeashRadius {
 		ai.TargetID = 0
 		ai.State = ecs.AIStateReturning
 		logStateChange(id, ecs.AIStateChasing, ecs.AIStateReturning)
 		return ai
 	}
 
-	if distanceSq(myPos, targetPos) <= ai.MeleeRange*ai.MeleeRange {
+	if gmath.DistanceSq(myPos.X, myPos.Z, targetPos.X, targetPos.Z) <= ai.MeleeRange*ai.MeleeRange {
 		ai.State = ecs.AIStateAttacking
 		logStateChange(id, ecs.AIStateChasing, ecs.AIStateAttacking)
 		return ai
@@ -142,7 +143,7 @@ func tickAttacking(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 		return ai
 	}
 
-	if distanceSq(myPos, targetPos) > ai.MeleeRange*ai.MeleeRange {
+	if gmath.DistanceSq(myPos.X, myPos.Z, targetPos.X, targetPos.Z) > ai.MeleeRange*ai.MeleeRange {
 		ai.State = ecs.AIStateChasing
 		logStateChange(id, ecs.AIStateAttacking, ecs.AIStateChasing)
 		return ai
@@ -177,7 +178,7 @@ func tickReturning(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 
 	spawnPos := ecs.PositionComponent{X: ai.SpawnX, Z: ai.SpawnZ}
 
-	if distanceSq(pos, spawnPos) <= 1 {
+	if gmath.DistanceSq(pos.X, pos.Z, ai.SpawnX, ai.SpawnZ) <= 1 {
 		ai.State = ecs.AIStateIdle
 		ai.IdleTick = 0
 		logStateChange(id, ecs.AIStateReturning, ecs.AIStateIdle)
@@ -204,9 +205,9 @@ func findNearestPlayer(monsterID ecs.Entity, aggroRadius float64) (ecs.Entity, b
 	}
 
 	nearest := players[0]
-	nearestDSq := distanceSqPos(myPos, players[0].Pos)
+	nearestDSq := gmath.DistanceSq(myPos.X, myPos.Z, players[0].Pos.X, players[0].Pos.Z)
 	for _, p := range players[1:] {
-		dsq := distanceSqPos(myPos, p.Pos)
+		dsq := gmath.DistanceSq(myPos.X, myPos.Z, p.Pos.X, p.Pos.Z)
 		if dsq < nearestDSq {
 			nearest = p
 			nearestDSq = dsq
@@ -219,8 +220,9 @@ func roamStep(pos ecs.PositionComponent, ai ecs.AIComponent) (int, int, bool) {
 	const attempts = 8
 
 	for i := 0; i < attempts; i++ {
-		dx := rand.Intn(5) - 2
-		dz := rand.Intn(5) - 2
+		// rng.Intn: pooled RNG, 0 allocs vs global rand mutex contention.
+		dx := rng.Intn(5) - 2 // [-2, +2]
+		dz := rng.Intn(5) - 2
 		if dx == 0 && dz == 0 {
 			continue
 		}
@@ -228,13 +230,13 @@ func roamStep(pos ecs.PositionComponent, ai ecs.AIComponent) (int, int, bool) {
 		nx := pos.X + dx
 		nz := pos.Z + dz
 
-		ddx := float64(nx - ai.SpawnX)
-		ddz := float64(nz - ai.SpawnZ)
-		if ddx*ddx+ddz*ddz > float64(ai.SpawnRadius*ai.SpawnRadius) {
+		// gmath.DistanceSq: no-sqrt spawn radius check.
+		if gmath.DistanceSq(nx, nz, ai.SpawnX, ai.SpawnZ) > float64(ai.SpawnRadius*ai.SpawnRadius) {
 			continue
 		}
 
-		if nx < 0 || nx > 100 || nz < 0 || nz > 100 {
+		// gmath.InBounds: single call replaces 4 comparisons.
+		if !gmath.InBounds(nx, nz, 0, 100) {
 			continue
 		}
 
@@ -247,24 +249,14 @@ func roamStep(pos ecs.PositionComponent, ai ecs.AIComponent) (int, int, bool) {
 	return 0, 0, false
 }
 
-func distanceSq(a, b ecs.PositionComponent) float64 {
-	dx := float64(a.X - b.X)
-	dz := float64(a.Z - b.Z)
-	return dx*dx + dz*dz
-}
-
-func distanceSqPos(a ecs.PositionComponent, b ecs.PositionComponent) float64 {
-	return distanceSq(a, b)
-}
+// distanceSq and distanceSqPos have been replaced by gmath.DistanceSq.
+// Kept as comment for history: func distanceSq(a, b ecs.PositionComponent) float64
 
 func logStateChange(id ecs.Entity, from, to ecs.AIState) {
-	if !logger.IsDebug() {
-		return
-	}
-	meta, ok := ecs.GlobalRegistry.GetMetadata(id)
+	// loggate.Debugf encapsulates the IsDebug() guard — 0 allocs in production.
 	name := fmt.Sprintf("entity_%d", id)
-	if ok {
+	if meta, ok := ecs.GlobalRegistry.GetMetadata(id); ok {
 		name = meta.Name
 	}
-	logger.Debug("[AI] %s: %s → %s", name, from, to)
+	loggate.Debugf("[AI] %s: %s → %s", name, from, to)
 }

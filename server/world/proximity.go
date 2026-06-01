@@ -2,7 +2,7 @@ package world
 
 import (
 	"server/ecs"
-	"server/logger"
+	"server/peakgo/loggate"
 	"sync"
 )
 
@@ -133,13 +133,12 @@ func NearbyEntitiesSystem(monsterID ecs.Entity, aggroRadius float64) {
 	}
 	defer FreeNearbyPlayers(nearby)
 
-	if logger.IsDebug() {
-		logger.Debug("[AGGRO] %s detects %d player(s) within %.0f units",
-			meta.Name, len(nearby), aggroRadius)
+	// loggate.Debugf: 0 allocs in production; full aggro trace in debug mode.
+	loggate.Debugf("[AGGRO] %s detects %d player(s) within %.0f units",
+		meta.Name, len(nearby), aggroRadius)
 
-		for _, p := range nearby {
-			logger.Debug("  → %s at (%d, %d) HP:%d",
-				p.Meta.Name, p.Pos.X, p.Pos.Z, p.Stats.HP)
-		}
+	for _, p := range nearby {
+		loggate.Debugf("  → %s at (%d, %d) HP:%d",
+			p.Meta.Name, p.Pos.X, p.Pos.Z, p.Stats.HP)
 	}
 }

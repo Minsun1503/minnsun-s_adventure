@@ -1,8 +1,7 @@
 package game
 
 import (
-	"math/rand"
-	"time"
+	"server/peakgo/rng"
 )
 
 // LootDropItem defines an item ID and its fractional probability chance.
@@ -27,9 +26,16 @@ func InitializeLootTables() {
 	}
 }
 
-// RollLoot evaluates a monster's drop table and returns a list of won item IDs
+// RollLoot evaluates a monster's drop table and returns a list of won item IDs.
+//
+// # Migration note
+//
+// Previously this function created rand.New(rand.NewSource(time.Now().UnixNano()))
+// on every call — a heap allocation per monster kill. Under high kill rates this
+// generated GC pressure.
+//
+// rng.Float64() draws from a pooled *rand.Rand: 0 allocs, no mutex contention.
 func RollLoot(monsterTemplateID uint64) []uint64 {
-	randGen := rand.New(rand.NewSource(time.Now().UnixNano()))
 	var rolledItems []uint64
 
 	table, exists := MonsterLootTables[monsterTemplateID]
@@ -38,8 +44,9 @@ func RollLoot(monsterTemplateID uint64) []uint64 {
 	}
 
 	for _, drop := range table {
-		// Roll a decimal between 0.0 and 1.0
-		if randGen.Float64() <= drop.DropChance {
+		// rng.Float64(): pooled RNG — replaces rand.New(rand.NewSource(...)).Float64()
+		// which allocated a new *rand.Rand on the heap every invocation.
+		if rng.Float64() <= drop.DropChance {
 			rolledItems = append(rolledItems, drop.ItemTemplateID)
 		}
 	}

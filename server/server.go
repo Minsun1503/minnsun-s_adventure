@@ -1,11 +1,8 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
-	"io"
 	"net"
-	"sync"
 	"time"
 
 	"server/db"
@@ -13,17 +10,17 @@ import (
 	"server/game"
 	"server/logger"
 	"server/models"
+	"server/peakgo/codec"
+	"server/peakgo/loggate"
+	"server/peakgo/netio"
 	"server/protocol"
 	"server/systems"
 	"server/world"
 )
 
-var packetBufferPool = sync.Pool{
-	New: func() any {
-		b := make([]byte, 1024)
-		return &b
-	},
-}
+// packetPool is the shared payload buffer pool for all client connections.
+// Exposed via netio.DefaultPool; defined here for documentation locality.
+var packetPool = netio.DefaultPool
 
 // opcodeNameOf returns a human-readable name for a binary opcode byte.
 // Used by the network packet debug middleware in handleBinaryPacket.
@@ -97,25 +94,28 @@ func parseAuthPayload(payload []byte) (packetAuth, bool) {
 func processLogin(conn net.Conn) {
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 
-	var lenBuf [2]byte
-	if _, err := io.ReadFull(conn, lenBuf[:]); err != nil {
+	// ReadHeader: zero-alloc, no reflection — see peakgo/netio.
+	length, err := netio.ReadHeader(conn)
+	if err != nil {
 		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Failed to read auth packet length.")
 		conn.Close()
 		return
 	}
-	length := binary.BigEndian.Uint16(lenBuf[:])
 	if length == 0 || length > 256 {
 		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid auth packet length.")
 		conn.Close()
 		return
 	}
 
-	packetBytes := make([]byte, length)
-	if _, err := io.ReadFull(conn, packetBytes); err != nil {
+	// ReadPayload: pooled buffer — zero heap allocation on steady-state path.
+	pBuf, err := netio.ReadPayload(conn, packetPool, length)
+	if err != nil {
 		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Failed to read auth packet payload.")
 		conn.Close()
 		return
 	}
+	packetBytes := (*pBuf)[:length]
+	defer packetPool.Put(pBuf)
 
 	opcode := packetBytes[0]
 	payload := packetBytes[1:]
@@ -322,38 +322,29 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 	)
 	systems.SendNoticeSystem(playerEntity, []byte(spawnMsg))
 
-	var lenBuf [2]byte
 	for {
-		if _, err := io.ReadFull(conn, lenBuf[:]); err != nil {
-			break // Disconnected
+		// Zero-alloc header read: stack [2]byte + BigEndian.Uint16, no reflection.
+		length, err := netio.ReadHeader(conn)
+		if err != nil {
+			break // Disconnected or read error
 		}
-		length := binary.BigEndian.Uint16(lenBuf[:])
-
 		if length == 0 {
 			continue
 		}
 
-		pBuf := packetBufferPool.Get().(*[]byte)
-		buf := *pBuf
-		if int(length) > len(buf) {
-			buf = make([]byte, length)
-		} else {
-			buf = buf[:length]
-		}
-
-		if _, err := io.ReadFull(conn, buf); err != nil {
-			*pBuf = buf
-			packetBufferPool.Put(pBuf)
+		// Pooled payload read: no heap allocation on steady-state path.
+		pBuf, err := netio.ReadPayload(conn, packetPool, length)
+		if err != nil {
 			break // Disconnected or read error
 		}
 
-		opcode := buf[0]
+		buf := (*pBuf)[:length]
+		opcode := codec.ReadUint8(buf)
 		payload := buf[1:]
 
 		handleBinaryPacket(conn, playerEntity, opcode, payload)
 
-		*pBuf = buf
-		packetBufferPool.Put(pBuf)
+		packetPool.Put(pBuf)
 	}
 }
 
@@ -365,8 +356,9 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 //   - opcode:       Operation code byte.
 //   - payload:      Raw packet payload bytes.
 func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, payload []byte) {
-	// Network packet trace middleware: only active when debug=true in config.json
-	logger.Debug("[NET RX] Conn: %s | Opcode: %d (%s) | Payload: %d bytes | Hex: [% X]",
+	// Network packet trace middleware: only active when debug=true in config.json.
+	// loggate.Debugf gates on logger.IsDebug() before formatting — 0 allocs in production.
+	loggate.Debugf("[NET RX] Conn: %s | Opcode: %d (%s) | Payload: %d bytes | Hex: [% X]",
 		conn.RemoteAddr(), opcode, opcodeNameOf(opcode), len(payload), payload)
 
 	switch opcode {
@@ -397,11 +389,12 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 		systems.SendNoticeSystem(playerEntity, []byte(systemFeedback))
 
 	case protocol.OpcodeC2SAttack: // ATTACK
-		if len(payload) != 8 {
+		atk, ok := codec.ReadAttackPayload(payload)
+		if !ok {
 			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid ATTACK payload length. Expected 8 bytes.\r\n"))
 			return
 		}
-		targetID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
+		targetID := ecs.Entity(atk.TargetID)
 
 		result, errMsg := game.AttackSystem(playerEntity, targetID)
 		if errMsg != "" {
@@ -428,7 +421,7 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid INFO payload length. Expected 8 bytes.\r\n"))
 			return
 		}
-		targetID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
+		targetID := ecs.Entity(codec.ReadUint64(payload[0:8]))
 		text, err := systems.GetInfoSystem(targetID)
 		if err != nil {
 			systems.SendNoticeSystem(playerEntity, []byte("Entity not found.\r\n"))
@@ -449,7 +442,7 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid PICKUP payload length. Expected 8 bytes.\r\n"))
 			return
 		}
-		itemEntityID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
+		itemEntityID := ecs.Entity(codec.ReadUint64(payload[0:8]))
 		personalFeedback, _ := game.HandleItemPickupSystem(playerEntity, itemEntityID)
 		systems.SendNoticeSystem(playerEntity, []byte(personalFeedback))
 
@@ -458,7 +451,7 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid EQUIP payload length. Expected 8 bytes.\r\n"))
 			return
 		}
-		itemID := binary.BigEndian.Uint64(payload[0:8])
+		itemID := codec.ReadUint64(payload[0:8])
 		feedback, success := game.HandleEquipmentSystem(playerEntity, itemID)
 		if success {
 			pos, _ := ecs.GlobalRegistry.GetPosition(playerEntity)
@@ -486,7 +479,7 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid PARTY INVITE payload length. Expected 8 bytes.\r\n"))
 			return
 		}
-		targetID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
+		targetID := ecs.Entity(codec.ReadUint64(payload[0:8]))
 		response, _ := game.SendPartyInviteSystem(playerEntity, targetID)
 		systems.SendNoticeSystem(playerEntity, []byte(response))
 
@@ -495,7 +488,7 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid PARTY JOIN payload length. Expected 8 bytes.\r\n"))
 			return
 		}
-		partyID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
+		partyID := ecs.Entity(codec.ReadUint64(payload[0:8]))
 		response, _ := game.AcceptPartyInviteSystem(playerEntity, partyID)
 		systems.SendNoticeSystem(playerEntity, []byte(response))
 
@@ -504,7 +497,7 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid TRADE INIT payload length. Expected 8 bytes.\r\n"))
 			return
 		}
-		targetID := ecs.Entity(binary.BigEndian.Uint64(payload[0:8]))
+		targetID := ecs.Entity(codec.ReadUint64(payload[0:8]))
 		response, _ := game.GlobalTradeRegistry.InitializeTradeSession(playerEntity, targetID)
 		systems.SendNoticeSystem(playerEntity, []byte(response))
 
@@ -513,8 +506,8 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid TRADE OFFER payload length. Expected 12 bytes.\r\n"))
 			return
 		}
-		itemID := binary.BigEndian.Uint64(payload[0:8])
-		qty := int(int32(binary.BigEndian.Uint32(payload[8:12])))
+		itemID := codec.ReadUint64(payload[0:8])
+		qty := int(codec.ReadInt32(payload[8:12]))
 		response, _ := game.GlobalTradeRegistry.OfferItemToTrade(playerEntity, itemID, qty)
 		systems.SendNoticeSystem(playerEntity, []byte(response))
 
@@ -533,8 +526,8 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 			systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid SKILL CAST payload length. Expected 16 bytes.\r\n"))
 			return
 		}
-		skillID := binary.BigEndian.Uint64(payload[0:8])
-		targetID := ecs.Entity(binary.BigEndian.Uint64(payload[8:16]))
+		skillID := codec.ReadUint64(payload[0:8])
+		targetID := ecs.Entity(codec.ReadUint64(payload[8:16]))
 		response, _ := game.HandleSkillCastingSystem(playerEntity, skillID, targetID)
 		systems.SendNoticeSystem(playerEntity, []byte(response))
 
@@ -543,7 +536,7 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 		game.RouteChatMessage(playerEntity, msg)
 
 	default:
-		logger.Warn("[NET] Unknown opcode %d from %s", opcode, conn.RemoteAddr())
+		loggate.Warnf("[NET] Unknown opcode %d from %s", opcode, conn.RemoteAddr())
 		systems.SendNoticeSystem(playerEntity, []byte(fmt.Sprintf("Error: Unknown opcode %d\r\n", opcode)))
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"server/ecs"
 	"server/game"
 	"server/logger"
+	"server/peakgo/loggate"
 	"time"
 )
 
@@ -64,15 +65,13 @@ func tickWorld() {
 }
 
 // processMonster logs active monster state at DEBUG level only.
-// In production (debug=false), this is a no-op.
+// In production (debug=false), loggate.Debugf is a guaranteed no-op.
 func processMonster(snap ecs.EntitySnapshot) {
 	if !snap.HasPos || !snap.HasStats {
 		return
 	}
-	if logger.IsDebug() {
-		logger.Debug("[MONITOR] ID: %d | %s | Pos: (%d, %d) | HP: %d",
-			snap.ID, snap.Meta.Name, snap.Pos.X, snap.Pos.Z, snap.Stats.HP)
-	}
+	loggate.Debugf("[MONITOR] ID: %d | %s | Pos: (%d, %d) | HP: %d",
+		snap.ID, snap.Meta.Name, snap.Pos.X, snap.Pos.Z, snap.Stats.HP)
 }
 
 // UpdateWorldEntitiesSystem — kept for external callers, now zero double-lookup.
