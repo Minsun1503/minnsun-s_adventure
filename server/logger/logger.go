@@ -153,6 +153,11 @@ func SetDebugMode(enabled bool) {
 	debugMode.Store(enabled)
 }
 
+// IsDebug returns whether debug mode is currently active.
+func IsDebug() bool {
+	return debugMode.Load()
+}
+
 // ─── Internal ────────────────────────────────────────────────────────────────
 
 func push(lv level, format string, args ...any) {

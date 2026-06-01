@@ -9,12 +9,9 @@ import (
 
 // chunkSize defines how many world units fit in one spatial partition cell.
 // With a 100×100 map and chunkSize=20, we get a 5×5 grid of 25 chunks.
-// Tune this value: smaller = more chunks = faster proximity but more memory;
-// larger = fewer chunks = less memory but more entities per bucket.
 const chunkSize = 20
 
 // ChunkKey identifies a single spatial partition cell by its grid coordinates.
-// Derived from world position: ChunkKey{X: pos.X / chunkSize, Z: pos.Z / chunkSize}
 type ChunkKey struct {
 	MapID int
 	X     int
@@ -22,25 +19,42 @@ type ChunkKey struct {
 }
 
 // ChunkEntry holds an entity and its precise world position inside the chunk.
-// Storing position here avoids a second ECS lookup during proximity filtering.
 type ChunkEntry struct {
 	ID  ecs.Entity
 	Pos ecs.PositionComponent
 }
 
+// Memory pool for chunk bucket slices to completely avoid slice allocation churn during movement.
+var chunkSlicePool = sync.Pool{
+	New: func() any {
+		s := make([]ChunkEntry, 0, 8)
+		return &s
+	},
+}
+
+// Memory pool for QueryRadius outputs to avoid heap allocations in the game loop.
+var queryResultPool = sync.Pool{
+	New: func() any {
+		s := make([]ChunkEntry, 0, 16)
+		return &s
+	},
+}
+
+// FreeQueryCandidates recycles the slice returned by QueryRadius.
+func FreeQueryCandidates(s []ChunkEntry) {
+	if s == nil {
+		return
+	}
+	s = s[:0]
+	queryResultPool.Put(&s)
+}
+
 // SpatialGrid is the authoritative spatial partition registry.
-// It maintains a map of ChunkKey → set of entities in that chunk,
+// It maintains a map of ChunkKey → slice of entities in that chunk,
 // and a reverse map of Entity → current ChunkKey for O(1) move/remove.
-//
-// Two separate mutexes:
-//   - chunkMu: guards chunks (written on every move).
-//   - indexMu: guards entityIndex (written on every move/remove).
-//
-// Splitting the locks reduces contention: reads on different chunks
-// don't block each other, and index lookups don't block chunk scans.
 type SpatialGrid struct {
 	chunkMu sync.RWMutex
-	chunks  map[ChunkKey]map[ecs.Entity]ChunkEntry
+	chunks  map[ChunkKey][]ChunkEntry
 
 	indexMu     sync.RWMutex
 	entityIndex map[ecs.Entity]ChunkKey // reverse lookup: entity → its current chunk
@@ -51,7 +65,7 @@ var GlobalSpatialGrid = newSpatialGrid()
 
 func newSpatialGrid() *SpatialGrid {
 	return &SpatialGrid{
-		chunks:      make(map[ChunkKey]map[ecs.Entity]ChunkEntry),
+		chunks:      make(map[ChunkKey][]ChunkEntry),
 		entityIndex: make(map[ecs.Entity]ChunkKey),
 	}
 }
@@ -68,12 +82,8 @@ func worldToChunk(pos ecs.PositionComponent) ChunkKey {
 // --- Write operations ---
 
 // UpdateEntityPosition is the single write path for spatial data.
-// Called by MovementSystem after a confirmed ECS position update.
-//
-// It handles three cases transparently:
-//  1. New entity (not yet in grid): insert into correct chunk.
-//  2. Same chunk (didn't cross a boundary): update position in-place.
-//  3. New chunk (crossed boundary): remove from old chunk, insert into new.
+// It handles same-chunk updates in-place, and different-chunk movements
+// using swap-and-slice removals combined with pooled slice allocations.
 func (g *SpatialGrid) UpdateEntityPosition(id ecs.Entity, pos ecs.PositionComponent) {
 	newChunk := worldToChunk(pos)
 	entry := ChunkEntry{ID: id, Pos: pos}
@@ -84,30 +94,52 @@ func (g *SpatialGrid) UpdateEntityPosition(id ecs.Entity, pos ecs.PositionCompon
 	g.indexMu.RUnlock()
 
 	if existed && oldChunk == newChunk {
-		// Same chunk: only update the position entry, no chunk reassignment needed.
+		// Same chunk: only update the position entry in-place
 		g.chunkMu.Lock()
-		if g.chunks[newChunk] == nil {
-			g.chunks[newChunk] = make(map[ecs.Entity]ChunkEntry)
+		bucket := g.chunks[newChunk]
+		for i, e := range bucket {
+			if e.ID == id {
+				bucket[i].Pos = pos
+				break
+			}
 		}
-		g.chunks[newChunk][id] = entry
 		g.chunkMu.Unlock()
 		return
 	}
 
-	// Different chunk or new entity: full update under write lock.
+	// Different chunk or new entity: full update.
 	g.chunkMu.Lock()
 	if existed {
-		// Remove from old chunk bucket.
-		delete(g.chunks[oldChunk], id)
-		if len(g.chunks[oldChunk]) == 0 {
-			delete(g.chunks, oldChunk) // reclaim empty bucket
+		// Remove from old chunk bucket
+		oldBucket := g.chunks[oldChunk]
+		for i, e := range oldBucket {
+			if e.ID == id {
+				lastIdx := len(oldBucket) - 1
+				if i != lastIdx {
+					oldBucket[i] = oldBucket[lastIdx]
+				}
+				oldBucket = oldBucket[:lastIdx]
+				break
+			}
+		}
+		if len(oldBucket) == 0 {
+			delete(g.chunks, oldChunk)
+			oldBucket = oldBucket[:0]
+			chunkSlicePool.Put(&oldBucket)
+		} else {
+			g.chunks[oldChunk] = oldBucket
 		}
 	}
-	// Insert into new chunk bucket.
-	if g.chunks[newChunk] == nil {
-		g.chunks[newChunk] = make(map[ecs.Entity]ChunkEntry)
+
+	// Insert into new chunk bucket
+	newBucket, ok := g.chunks[newChunk]
+	if !ok {
+		pSlice := chunkSlicePool.Get().(*[]ChunkEntry)
+		newBucket = *pSlice
+		newBucket = newBucket[:0]
 	}
-	g.chunks[newChunk][id] = entry
+	newBucket = append(newBucket, entry)
+	g.chunks[newChunk] = newBucket
 	g.chunkMu.Unlock()
 
 	// Update reverse index.
@@ -117,7 +149,6 @@ func (g *SpatialGrid) UpdateEntityPosition(id ecs.Entity, pos ecs.PositionCompon
 }
 
 // RemoveEntity removes an entity from the spatial grid entirely.
-// Must be called by DeathSystem and disconnect cleanup before ECS RemoveEntity.
 func (g *SpatialGrid) RemoveEntity(id ecs.Entity) {
 	g.indexMu.RLock()
 	chunk, exists := g.entityIndex[id]
@@ -128,9 +159,23 @@ func (g *SpatialGrid) RemoveEntity(id ecs.Entity) {
 	}
 
 	g.chunkMu.Lock()
-	delete(g.chunks[chunk], id)
-	if len(g.chunks[chunk]) == 0 {
+	bucket := g.chunks[chunk]
+	for i, e := range bucket {
+		if e.ID == id {
+			lastIdx := len(bucket) - 1
+			if i != lastIdx {
+				bucket[i] = bucket[lastIdx]
+			}
+			bucket = bucket[:lastIdx]
+			break
+		}
+	}
+	if len(bucket) == 0 {
 		delete(g.chunks, chunk)
+		bucket = bucket[:0]
+		chunkSlicePool.Put(&bucket)
+	} else {
+		g.chunks[chunk] = bucket
 	}
 	g.chunkMu.Unlock()
 
@@ -142,29 +187,20 @@ func (g *SpatialGrid) RemoveEntity(id ecs.Entity) {
 // --- Query operations ---
 
 // QueryRadius returns all entities within worldRadius world units of origin.
-// It scans only the chunks that the radius circle can overlap — typically
-// 4–9 chunks for a radius smaller than 2×chunkSize.
-//
-// The result slice is allocated once with a capacity hint to avoid
-// repeated growing during append.
-//
-// Parameters:
-//   - origin:      world position of the querying entity.
-//   - worldRadius: search radius in world units.
-//   - excludeID:   entity to exclude from results (usually the querier itself).
-//
-// Returns a slice of entities within the radius, sorted by nothing (unordered).
+// Uses slice pooling to avoid allocating result slices on the heap.
 func (g *SpatialGrid) QueryRadius(
 	origin ecs.PositionComponent,
 	worldRadius float64,
 	excludeID ecs.Entity,
 ) []ChunkEntry {
-	// Determine which chunk range to scan.
 	chunkRadius := int(math.Ceil(worldRadius / chunkSize))
 	originChunk := worldToChunk(origin)
 
 	radiusSq := worldRadius * worldRadius
-	results := make([]ChunkEntry, 0, 16) // pre-alloc; 16 is a reasonable nearby-entity count
+
+	pSlice := queryResultPool.Get().(*[]ChunkEntry)
+	results := *pSlice
+	results = results[:0]
 
 	g.chunkMu.RLock()
 	defer g.chunkMu.RUnlock()
@@ -180,7 +216,6 @@ func (g *SpatialGrid) QueryRadius(
 				if entry.ID == excludeID {
 					continue
 				}
-				// Precise Euclidean check within the candidate chunks.
 				ddx := float64(entry.Pos.X - origin.X)
 				ddz := float64(entry.Pos.Z - origin.Z)
 				if ddx*ddx+ddz*ddz <= radiusSq {
@@ -194,8 +229,6 @@ func (g *SpatialGrid) QueryRadius(
 }
 
 // QueryChunk returns all entities in the exact chunk containing pos.
-// Cheaper than QueryRadius when you only need same-cell occupants
-// (e.g. standing on the same tile triggers a pickup).
 func (g *SpatialGrid) QueryChunk(pos ecs.PositionComponent, excludeID ecs.Entity) []ChunkEntry {
 	key := worldToChunk(pos)
 	results := make([]ChunkEntry, 0, 8)
@@ -212,7 +245,6 @@ func (g *SpatialGrid) QueryChunk(pos ecs.PositionComponent, excludeID ecs.Entity
 }
 
 // GetEntityChunk returns the current ChunkKey for an entity.
-// Used by systems that need to know where an entity is without a full position lookup.
 func (g *SpatialGrid) GetEntityChunk(id ecs.Entity) (ChunkKey, bool) {
 	g.indexMu.RLock()
 	defer g.indexMu.RUnlock()

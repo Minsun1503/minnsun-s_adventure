@@ -196,6 +196,7 @@ func findNearestPlayer(monsterID ecs.Entity, aggroRadius float64) (ecs.Entity, b
 	if len(players) == 0 {
 		return 0, false
 	}
+	defer world.FreeNearbyPlayers(players)
 
 	myPos, ok := ecs.GlobalRegistry.GetPosition(monsterID)
 	if !ok {
@@ -257,6 +258,9 @@ func distanceSqPos(a ecs.PositionComponent, b ecs.PositionComponent) float64 {
 }
 
 func logStateChange(id ecs.Entity, from, to ecs.AIState) {
+	if !logger.IsDebug() {
+		return
+	}
 	meta, ok := ecs.GlobalRegistry.GetMetadata(id)
 	name := fmt.Sprintf("entity_%d", id)
 	if ok {

@@ -69,8 +69,10 @@ func processMonster(snap ecs.EntitySnapshot) {
 	if !snap.HasPos || !snap.HasStats {
 		return
 	}
-	logger.Debug("[MONITOR] ID: %d | %s | Pos: (%d, %d) | HP: %d",
-		snap.ID, snap.Meta.Name, snap.Pos.X, snap.Pos.Z, snap.Stats.HP)
+	if logger.IsDebug() {
+		logger.Debug("[MONITOR] ID: %d | %s | Pos: (%d, %d) | HP: %d",
+			snap.ID, snap.Meta.Name, snap.Pos.X, snap.Pos.Z, snap.Stats.HP)
+	}
 }
 
 // UpdateWorldEntitiesSystem — kept for external callers, now zero double-lookup.

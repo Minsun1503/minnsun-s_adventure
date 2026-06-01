@@ -59,3 +59,42 @@ func TestRegistryInventoryRace(t *testing.T) {
 
 	wg.Wait()
 }
+
+func BenchmarkRegistryOperations(b *testing.B) {
+	registry := &Registry{}
+	var entities []Entity
+	for i := 0; i < 1000; i++ {
+		id := registry.NewEntity()
+		entities = append(entities, id)
+		registry.SetPosition(id, PositionComponent{MapID: 1, X: i, Z: i})
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		id := entities[i%1000]
+		// Get
+		pos, _ := registry.GetPosition(id)
+		// Modify
+		pos.X += 1
+		// Set
+		registry.SetPosition(id, pos)
+	}
+}
+
+func BenchmarkRegistryRange(b *testing.B) {
+	registry := &Registry{}
+	for i := 0; i < 1000; i++ {
+		id := registry.NewEntity()
+		registry.SetPosition(id, PositionComponent{MapID: 1, X: i, Z: i})
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var sum int
+		registry.positions.Range(func(id Entity, pos PositionComponent) bool {
+			sum += pos.X
+			return true
+		})
+	}
+}
+

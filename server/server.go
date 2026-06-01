@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"server/db"
@@ -16,6 +17,13 @@ import (
 	"server/systems"
 	"server/world"
 )
+
+var packetBufferPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 1024)
+		return &b
+	},
+}
 
 // opcodeNameOf returns a human-readable name for a binary opcode byte.
 // Used by the network packet debug middleware in handleBinaryPacket.
@@ -89,12 +97,13 @@ func parseAuthPayload(payload []byte) (packetAuth, bool) {
 func processLogin(conn net.Conn) {
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 
-	var length uint16
-	if err := binary.Read(conn, binary.BigEndian, &length); err != nil {
+	var lenBuf [2]byte
+	if _, err := io.ReadFull(conn, lenBuf[:]); err != nil {
 		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Failed to read auth packet length.")
 		conn.Close()
 		return
 	}
+	length := binary.BigEndian.Uint16(lenBuf[:])
 	if length == 0 || length > 256 {
 		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid auth packet length.")
 		conn.Close()
@@ -313,25 +322,38 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 	)
 	systems.SendNoticeSystem(playerEntity, []byte(spawnMsg))
 
+	var lenBuf [2]byte
 	for {
-		var length uint16
-		if err := binary.Read(conn, binary.BigEndian, &length); err != nil {
+		if _, err := io.ReadFull(conn, lenBuf[:]); err != nil {
 			break // Disconnected
 		}
+		length := binary.BigEndian.Uint16(lenBuf[:])
 
 		if length == 0 {
 			continue
 		}
 
-		packetBytes := make([]byte, length)
-		if _, err := io.ReadFull(conn, packetBytes); err != nil {
+		pBuf := packetBufferPool.Get().(*[]byte)
+		buf := *pBuf
+		if int(length) > len(buf) {
+			buf = make([]byte, length)
+		} else {
+			buf = buf[:length]
+		}
+
+		if _, err := io.ReadFull(conn, buf); err != nil {
+			*pBuf = buf
+			packetBufferPool.Put(pBuf)
 			break // Disconnected or read error
 		}
 
-		opcode := packetBytes[0]
-		payload := packetBytes[1:]
+		opcode := buf[0]
+		payload := buf[1:]
 
 		handleBinaryPacket(conn, playerEntity, opcode, payload)
+
+		*pBuf = buf
+		packetBufferPool.Put(pBuf)
 	}
 }
 
