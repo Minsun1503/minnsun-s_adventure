@@ -200,6 +200,10 @@ func (tr *TradeSystemRegistry) ExecuteAtomicTradeSwap(sessionID ecs.Entity) (str
 		return "Error: One or both player inventories are invalid. Trade aborted.\r\n", false
 	}
 
+	// Deep copy to prevent multi-thread data race conflicts
+	invA = invA.Clone()
+	invB = invB.Clone()
+
 	// Pre-transaction validation: Double check that both players still have the offered items
 	for itemID, qty := range session.OfferA.ItemIDs {
 		if invA.Items[itemID] < qty {

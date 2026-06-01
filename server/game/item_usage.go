@@ -45,7 +45,11 @@ func HandleItemUsageSystem(playerID ecs.Entity, payload []byte) (string, bool) {
 	}
 
 	// 5. MODIFY STEP: Deduct inventory quantity & calculate recovery numbers
+	inv = inv.Clone()
 	inv.Items[itemID]--
+	if inv.Items[itemID] <= 0 {
+		delete(inv.Items, itemID)
+	}
 
 	oldHP := stats.HP
 	stats.HP += itemTemplate.HealValue

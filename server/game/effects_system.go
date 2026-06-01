@@ -21,6 +21,8 @@ func RunStatusEffectsSystem() {
 			continue
 		}
 
+		effComp = effComp.Clone()
+
 		var activeRemaining []ecs.ActiveEffect
 		forceStatRecalc := false
 

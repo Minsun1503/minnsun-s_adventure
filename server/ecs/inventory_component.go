@@ -1,15 +1,22 @@
 package ecs
 
-// InventoryComponent stores items by tracking template IDs and counts.
-// By storing data as a flat map inside an inline struct, it fits perfectly
-// into your high-performance TypedSyncMap.
 type InventoryComponent struct {
 	Items map[uint64]int // Maps ItemTemplateID -> Quantity owned
 }
 
-// Helper methods on Registry for InventoryComponent:
+// Clone thực hiện DEEP COPY dữ liệu map bên trong.
+// Bắt buộc gọi trước khi chỉnh sửa linh kiện từ bất kỳ System nào.
+func (c InventoryComponent) Clone() InventoryComponent {
+	if c.Items == nil {
+		return InventoryComponent{Items: make(map[uint64]int)}
+	}
+	clone := make(map[uint64]int, len(c.Items))
+	for k, v := range c.Items {
+		clone[k] = v
+	}
+	return InventoryComponent{Items: clone}
+}
 
-// Add these helper methods inside your ecs.go file:
 func (r *Registry) SetInventory(id Entity, comp InventoryComponent) {
 	r.inventories.Set(id, comp)
 }

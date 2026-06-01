@@ -69,6 +69,7 @@ func AddMemberToParty(partyID, playerID ecs.Entity) {
 		return
 	}
 
+	party = party.Clone()
 	party.MemberIDs = append(party.MemberIDs, playerID)
 	registry.SetParty(partyID, party)
 
@@ -100,8 +101,10 @@ func RemovePlayerFromParty(playerID ecs.Entity) {
 		return
 	}
 
+	party = party.Clone()
+
 	// Remove the player from the member list.
-	newMembers := party.MemberIDs[:0]
+	var newMembers []ecs.Entity
 	for _, mid := range party.MemberIDs {
 		if mid != playerID {
 			newMembers = append(newMembers, mid)

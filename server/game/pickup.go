@@ -46,6 +46,8 @@ func HandleItemPickupSystem(playerID ecs.Entity, itemEntityID ecs.Entity) (strin
 	inv, hasInv := ecs.GlobalRegistry.GetInventory(playerID)
 	if !hasInv {
 		inv = ecs.InventoryComponent{Items: make(map[uint64]int)}
+	} else {
+		inv = inv.Clone()
 	}
 
 	inv.Items[resolvedTemplateID]++

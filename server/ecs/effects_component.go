@@ -14,3 +14,13 @@ type ActiveEffect struct {
 type EffectsComponent struct {
 	ActiveList []ActiveEffect
 }
+
+// Clone thực hiện DEEP COPY danh sách hiệu ứng bên trong.
+func (c EffectsComponent) Clone() EffectsComponent {
+	if c.ActiveList == nil {
+		return EffectsComponent{ActiveList: nil}
+	}
+	return EffectsComponent{
+		ActiveList: append([]ActiveEffect(nil), c.ActiveList...),
+	}
+}

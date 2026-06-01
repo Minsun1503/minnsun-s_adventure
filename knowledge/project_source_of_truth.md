@@ -145,13 +145,29 @@
   - Tích hợp `effects` component registry vào [`ecs.go`](file:///c:/Minnsun's Adventure/server/ecs/ecs.go) cùng các hàm helper (`SetEffects`, `GetEffects`, `DeleteEffects`) và dọn dẹp song song trong `RemoveEntity` (nâng WaitGroup lên **12 luồng**).
   - Xây dựng luồng xử lý hiệu ứng [`effects_system.go`](file:///c:/Minnsun's Adventure/server/game/effects_system.go) trừ dần thời gian hiệu lực sau mỗi nhịp 250ms, tự động gọi `RecalculateActiveStats` khi các buff chỉ số (như `haste_buff`) hết hạn, và áp dụng sát thương rút máu định kỳ 1 giây (DoT downsampling) cho Poison/Burn, hỗ trợ xử lý tử vong của người chơi/quái vật do DoT gây ra.
   - Tích hợp gọi hệ thống hiệu ứng `game.RunStatusEffectsSystem()` trực tiếp vào game loop heartbeat tại [`gameloop.go`](file:///c:/Minnsun's Adventure/server/systems/gameloop.go).
-- **Cải tiến & Khắc phục Lỗi Hiệu năng Lớp lõi (Core Performance Refactoring & Bug Fixes)**:
+- **Hệ thống Ghi Log Thống Nhất & Debug Toàn Diện (Unified Tracing & Logging Engine)**:
+  - Tạo package [`server/logger/`](file:///c:/Minnsun's Adventure/server/logger/) chứa 2 file cốt lõi:
+    - [`logger.go`](file:///c:/Minnsun's Adventure/server/logger/logger.go): Async channel-based logger (4096 slot buffer) với 4 cấp độ `DEBUG/INFO/WARN/ERROR`. Bật/tắt DebugMode qua [`server/data/config.json`](file:///c:/Minnsun's Adventure/server/data/config.json). Xuất log ra Console (màu ANSI) và File xoay vòng theo ngày + kích thước (10MB/file) dưới thư mục `logs/`. Worker goroutine đơn độc drain channel → tuyệt đối không block game loop.
+    - [`entity_tracer.go`](file:///c:/Minnsun's Adventure/server/logger/entity_tracer.go): Watch-list thread-safe để theo dõi bất kỳ Entity ID nào. Gọi `GlobalEntityTracer.Watch(id)` để đăng ký, sau đó mọi system gọi `TraceEvent(id, "HP_CHANGE", ...)` sẽ in chi tiết ra console khi DebugMode = true.
+  - Tích hợp **Network Packet Tracer** tại `handleBinaryPacket` trong [`server.go`](file:///c:/Minnsun's Adventure/server/server.go): Khi `debug=true`, mỗi gói tin nhị phân từ Client sẽ được in dạng Hex dump kèm tên Opcode (`[NET RX] Conn: ... | Opcode: 5 (ATTACK) | Hex: [...]`).
+  - Tích hợp **Performance Profiler** tại 3 điểm nghẽn nhạy cảm nhất: Game Loop (cảnh báo nếu tick > 50ms), BFS Pathfinding (cảnh báo nếu > 5ms), DB Write (cảnh báo nếu > 100ms).
+  - Thay thế hoàn toàn **30+ điểm** `fmt.Printf/Println` rải rác trong toàn source sang các lời gọi `logger.*` có phân cấp (`DEBUG` cho AI state, movement, combat detail; `INFO` cho connect/spawn/save; `WARN` cho queue full/retry; `ERROR` cho DB failure/boot error).
+  - Audit bằng `grep "fmt.Print" ./...` xác nhận **Zero fmt.Print còn sót lại** trên toàn codebase.
+
+
   - Khắc phục lỗ hổng ép kiểu không an toàn (unsafe type assertion panic) trong hàm `Get` tại [`state.go`](file:///c:/Minnsun's Adventure/server/state/state.go) bằng comma-ok check.
   - Khắc phục lỗi TOCTOU race (drop entry khi chunk bị thu hồi) và nguy cơ deadlock của double RLock trong [`spatial.go`](file:///c:/Minnsun's Adventure/server/world/spatial.go).
   - Khắc phục rò rỉ bộ nhớ (backing array leak) của hàng đợi BFS và cấp phát rác trên Heap của các slice hướng di chuyển (`dirs`) tại [`pathfinding.go`](file:///c:/Minnsun's Adventure/server/world/pathfinding.go) thông qua cơ chế con trỏ head index và định nghĩa tĩnh phạm vi package-level.
   - Khắc phục nút thắt ghi đĩa tuần tự và cảnh báo mất mát dữ liệu tại [`save_engine.go`](file:///c:/Minnsun's Adventure/server/db/save_engine.go) bằng cách triển khai cơ chế lô gói tin (Batch Upsert Inventory), ghi log cảnh báo khi hàng đợi đầy, và lặp lại thao tác ghi đĩa tự động (Transient Error Retries) lên đến 3 lần.
+  - **Nâng cấp Hệ Thống ECS & Phòng Chống Data Race**:
+    - Triển khai cơ chế Copy-on-Write (CoW) bằng cách thêm phương thức `.Clone()` cho các linh kiện có kiểu dữ liệu tham chiếu (Reference Types) bao gồm: `InventoryComponent` (sao chép bản đồ items), `PartyComponent` (sao chép mảng MemberIDs) và `EffectsComponent` (sao chép mảng ActiveList).
+    - Tối ưu hóa hiệu năng thu hồi thực thể bằng cách refactor hàm `RemoveEntity` trong [ecs.go](file:///c:/Minnsun's Adventure/server/ecs/ecs.go) từ song song 12 goroutines sang xóa tuần tự trực tiếp trên 12 component maps, loại bỏ triệt để chi phí context-switching vô ích.
+    - Dọn dẹp toàn bộ comment chỉ dẫn thừa, cũ và không còn đúng thực tế tại [ecs.go](file:///c:/Minnsun's Adventure/server/ecs/ecs.go), [registry_ai.go](file:///c:/Minnsun's Adventure/server/ecs/registry_ai.go), và [inventory_component.go](file:///c:/Minnsun's Adventure/server/ecs/inventory_component.go).
+    - Áp dụng gọi `.Clone()` trước mọi thay đổi trạng thái tham chiếu trong các systems: `trade.go` (giao dịch), `pickup.go` (nhặt đồ), `item_usage.go` (sử dụng vật phẩm, tự động delete item khi qty = 0), `party.go` (tổ đội), và `effects_system.go` (tác động hiệu ứng status).
+    - Thêm tệp kiểm thử tích hợp [registry_race_test.go](file:///c:/Minnsun's Adventure/server/ecs/registry_race_test.go) giả lập 100 goroutines đọc ghi đồng thời trên cùng thực thể và xác minh thành công không lỗi Data Race qua cờ `-race` của Go.
 
 ## 2. Những "đặc sản" logic vừa tìm thấy (Discovered Logic Specialties)
+- Cơ chế Thread-Safety của ECS dựa trên tính bất biến (Immutability) của Map/Slice trong Registry: Các luồng chỉ đọc trực tiếp, còn luồng ghi bắt buộc phải tạo bản sao mới qua `.Clone()`, thay đổi trên bản sao và ghi đè vào Registry. Điều này giúp loại bỏ hoàn toàn khóa locking thô trên Registry.
 - Server sử dụng giao thức TCP thô ở cổng `:1503`.
 - Dự án sử dụng Go 1.26.3, hỗ trợ đầy đủ Go Generics.
 - Sử dụng mô hình ECS tách biệt tuyệt đối giữa Dữ liệu (Components) và Logic (Systems). Các thực thể chỉ tương tác qua ID kiểu `ecs.Entity` (chuỗi địa chỉ cho người chơi, hoặc ID quái vật).

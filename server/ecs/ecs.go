@@ -3,7 +3,6 @@ package ecs
 import (
 	"net"
 	"server/state"
-	"sync"
 	"sync/atomic"
 )
 
@@ -52,6 +51,15 @@ type PartyComponent struct {
 	MemberIDs []Entity
 }
 
+// Clone thực hiện DEEP COPY danh sách thành viên tổ đội bên trong.
+func (c PartyComponent) Clone() PartyComponent {
+	return PartyComponent{
+		LeaderID:  c.LeaderID,
+		TeamName:  c.TeamName,
+		MemberIDs: append([]Entity(nil), c.MemberIDs...),
+	}
+}
+
 // PartyMemberComponent is attached to each player who belongs to a party.
 type PartyMemberComponent struct {
 	PartyID Entity
@@ -83,25 +91,26 @@ func (r *Registry) NewEntity() Entity {
 	return Entity(r.nextID.Add(1))
 }
 
-// RemoveEntity deletes all components in parallel using a WaitGroup.
-// Previous: 5 sequential lock acquisitions.
-// Now: 9 concurrent sync.Map deletes.
+// RemoveEntity deletes all components sequentially.
+// Sequential deletion is much faster on sync.Map due to avoiding Goroutine management overhead.
 func (r *Registry) RemoveEntity(id Entity) {
-	var wg sync.WaitGroup
-	wg.Add(12)
-	go func() { r.positions.Delete(id); wg.Done() }()
-	go func() { r.conns.Delete(id); wg.Done() }()
-	go func() { r.metadata.Delete(id); wg.Done() }()
-	go func() { r.stats.Delete(id); wg.Done() }()
-	go func() { r.ai.Delete(id); wg.Done() }()
-	go func() { r.inventories.Delete(id); wg.Done() }()
-	go func() { r.lifetimes.Delete(id); wg.Done() }()
-	go func() { r.itemTemplates.Delete(id); wg.Done() }()
-	go func() { r.equipment.Delete(id); wg.Done() }()
-	go func() { r.parties.Delete(id); wg.Done() }()
-	go func() { r.partyMembers.Delete(id); wg.Done() }()
-	go func() { r.effects.Delete(id); wg.Done() }()
-	wg.Wait()
+	r.positions.Delete(id)
+	r.conns.Delete(id)
+	r.metadata.Delete(id)
+	r.stats.Delete(id)
+	r.ai.Delete(id)
+	r.inventories.Delete(id)
+	r.lifetimes.Delete(id)
+	r.itemTemplates.Delete(id)
+	r.equipment.Delete(id)
+	r.parties.Delete(id)
+	r.partyMembers.Delete(id)
+	r.effects.Delete(id)
+}
+
+// RangeMetadata iterates all entities that have a MetadataComponent.
+func (r *Registry) RangeMetadata(f func(id Entity, meta MetadataComponent) bool) {
+	r.metadata.Range(f)
 }
 
 func (r *Registry) SetEffects(id Entity, comp EffectsComponent) {
