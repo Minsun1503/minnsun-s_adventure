@@ -113,6 +113,16 @@ func (r *Registry) RangeMetadata(f func(id Entity, meta MetadataComponent) bool)
 	r.metadata.Range(f)
 }
 
+// SetNextID sets the internal atomic entity ID counter.
+func (r *Registry) SetNextID(val uint64) {
+	r.nextID.Store(val)
+}
+
+// RangeEffects iterates all entities that have an EffectsComponent.
+func (r *Registry) RangeEffects(f func(id Entity, comp EffectsComponent) bool) {
+	r.effects.Range(f)
+}
+
 func (r *Registry) SetEffects(id Entity, comp EffectsComponent) {
 	r.effects.Set(id, comp)
 }

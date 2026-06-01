@@ -221,6 +221,14 @@ func main() {
 	models.InitializeDatabase("root:root@tcp(127.0.0.1:3306)/?parseTime=true")
 	db.StartSaveWorkerEngine()
 
+	// Initialize the ECS Entity ID counter to the maximum character ID in the DB to avoid session ID collisions.
+	var maxID uint64
+	if err := models.DBEngine.QueryRow("SELECT COALESCE(MAX(id), 0) FROM characters").Scan(&maxID); err == nil {
+		ecs.GlobalRegistry.SetNextID(maxID)
+	} else {
+		logger.Error("[BOOT] Failed to scan max character ID: %v", err)
+	}
+
 	templates, err := models.LoadMonster("data/monster_templates.json")
 	if err != nil {
 		logger.Error("CRITICAL SERVER BOOT ERROR: %v", err)

@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS character_states (
     damage INT NOT NULL DEFAULT 15,
     level INT NOT NULL DEFAULT 1,
     xp BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    mp INT NOT NULL DEFAULT 100,
+    max_mp INT NOT NULL DEFAULT 100,
     weapon_id BIGINT DEFAULT 0,
     armor_id BIGINT DEFAULT 0,
     CONSTRAINT fk_states_character FOREIGN KEY (character_id)

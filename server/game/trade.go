@@ -164,29 +164,28 @@ func (tr *TradeSystemRegistry) LockTradeStage(playerID ecs.Entity) (string, bool
 
 	myOffer.IsLocked = true
 	bothLocked := myOffer.IsLocked && opponentOffer.IsLocked
+
+	if bothLocked {
+		res, ok := tr.executeSwapLocked(sessionID)
+		tr.mu.Unlock()
+		return res, ok
+	}
+
 	tr.mu.Unlock()
 
 	// Notify opponent of lock
 	lockMsg := "[TRADE] Counterparty has locked their offer window.\r\n"
 	SendNoticeSystem(otherPlayer, []byte(lockMsg))
 
-	// Phase 2: If BOTH parties have locked their windows, execute the atomic final inventory swap loop
-	if bothLocked {
-		return tr.ExecuteAtomicTradeSwap(sessionID)
-	}
-
 	return "Offer window locked. Waiting for counterparty lock approval...\r\n", true
 }
 
-// ExecuteAtomicTradeSwap performs the double-backpack mutation using copy-modify-overwrite
-func (tr *TradeSystemRegistry) ExecuteAtomicTradeSwap(sessionID ecs.Entity) (string, bool) {
-	tr.mu.Lock()
+// executeSwapLocked performs the double-backpack mutation under the registry mutex lock.
+func (tr *TradeSystemRegistry) executeSwapLocked(sessionID ecs.Entity) (string, bool) {
 	session, exists := tr.sessions[sessionID]
 	if !exists {
-		tr.mu.Unlock()
 		return "Error: Trade session does not exist.\r\n", false
 	}
-	tr.mu.Unlock()
 
 	pA := session.OfferA.PlayerID
 	pB := session.OfferB.PlayerID
@@ -196,7 +195,7 @@ func (tr *TradeSystemRegistry) ExecuteAtomicTradeSwap(sessionID ecs.Entity) (str
 	invB, hasInvB := ecs.GlobalRegistry.GetInventory(pB)
 
 	if !hasInvA || !hasInvB {
-		tr.CancelTradeSession(pA)
+		tr.cancelTradeSessionLocked(pA)
 		return "Error: One or both player inventories are invalid. Trade aborted.\r\n", false
 	}
 
@@ -207,13 +206,13 @@ func (tr *TradeSystemRegistry) ExecuteAtomicTradeSwap(sessionID ecs.Entity) (str
 	// Pre-transaction validation: Double check that both players still have the offered items
 	for itemID, qty := range session.OfferA.ItemIDs {
 		if invA.Items[itemID] < qty {
-			tr.CancelTradeSession(pA)
+			tr.cancelTradeSessionLocked(pA)
 			return "Error: Player A has insufficient items to trade. Trade aborted.\r\n", false
 		}
 	}
 	for itemID, qty := range session.OfferB.ItemIDs {
 		if invB.Items[itemID] < qty {
-			tr.CancelTradeSession(pA)
+			tr.cancelTradeSessionLocked(pA)
 			return "Error: Player B has insufficient items to trade. Trade aborted.\r\n", false
 		}
 	}
@@ -253,11 +252,9 @@ func (tr *TradeSystemRegistry) ExecuteAtomicTradeSwap(sessionID ecs.Entity) (str
 	ecs.GlobalRegistry.SetInventory(pB, invB)
 
 	// PURGE TEMPORARY TRADE SESSION RECORDS
-	tr.mu.Lock()
 	delete(tr.bindings, pA)
 	delete(tr.bindings, pB)
 	delete(tr.sessions, sessionID)
-	tr.mu.Unlock()
 
 	// Notify player connection blocks
 	msg := "[TRADE] Trade complete! Items have been exchanged.\r\n"
@@ -267,11 +264,15 @@ func (tr *TradeSystemRegistry) ExecuteAtomicTradeSwap(sessionID ecs.Entity) (str
 	return "Trade completed successfully.\r\n", true
 }
 
-// CancelTradeSession disbands the active trade session for a player and notifies counterparties
-func (tr *TradeSystemRegistry) CancelTradeSession(playerID ecs.Entity) (string, bool) {
+// ExecuteAtomicTradeSwap performs the double-backpack mutation using copy-modify-overwrite
+func (tr *TradeSystemRegistry) ExecuteAtomicTradeSwap(sessionID ecs.Entity) (string, bool) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
+	return tr.executeSwapLocked(sessionID)
+}
 
+// cancelTradeSessionLocked is the lock-free internal helper for CancelTradeSession
+func (tr *TradeSystemRegistry) cancelTradeSessionLocked(playerID ecs.Entity) (string, bool) {
 	sessionID, exists := tr.bindings[playerID]
 	if !exists {
 		return "Error: You are not in an active trade session.\r\n", false
@@ -293,4 +294,11 @@ func (tr *TradeSystemRegistry) CancelTradeSession(playerID ecs.Entity) (string, 
 	}
 
 	return "Trade session cancelled successfully.\r\n", true
+}
+
+// CancelTradeSession disbands the active trade session for a player and notifies counterparties
+func (tr *TradeSystemRegistry) CancelTradeSession(playerID ecs.Entity) (string, bool) {
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	return tr.cancelTradeSessionLocked(playerID)
 }

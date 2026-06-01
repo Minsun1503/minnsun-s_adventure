@@ -181,6 +181,7 @@ func DamageSystem(targetID ecs.Entity, amount int) int {
 //
 // Parameters:
 //   - targetID:    entity that died.
+//   - killerID:    entity that killed the target (may be 0 for environmental/status effect deaths).
 //   - targetMeta:  pre-fetched metadata (entity is about to be removed).
 //   - killerMeta:  attacker's metadata for the kill broadcast message.
 func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.MetadataComponent) {

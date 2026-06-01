@@ -19,6 +19,7 @@ var ActivePlayers = &state.TypedSyncMap[string, ecs.Entity]{}
 
 // savedPlayerData holds loaded DB state for a returning player.
 type savedPlayerData struct {
+	CharacterID  uint64
 	Pos          ecs.PositionComponent
 	Stats        ecs.StatsComponent
 	Equipment    ecs.EquipmentComponent
@@ -94,12 +95,13 @@ func loadSavedPlayerState(name string) *savedPlayerData {
 	// Step 2: Load dynamic state (position, stats, equipment).
 	var mapID, x, z, hp, maxHP, damage, level int
 	var xp uint64
+	var mp, maxMP int
 	var weaponID, armorID uint64
 	err = DBEngine.QueryRowContext(ctx,
-		`SELECT map_id, x, z, hp, max_hp, damage, level, xp, weapon_id, armor_id
+		`SELECT map_id, x, z, hp, max_hp, damage, level, xp, mp, max_mp, weapon_id, armor_id
 		 FROM character_states WHERE character_id = ?`,
 		oldCharID,
-	).Scan(&mapID, &x, &z, &hp, &maxHP, &damage, &level, &xp, &weaponID, &armorID)
+	).Scan(&mapID, &x, &z, &hp, &maxHP, &damage, &level, &xp, &mp, &maxMP, &weaponID, &armorID)
 	if err != nil && err != sql.ErrNoRows {
 		logger.Error("[LOAD] State lookup error for %s (id %d): %v", name, oldCharID, err)
 	}
@@ -121,12 +123,13 @@ func loadSavedPlayerState(name string) *savedPlayerData {
 		}
 	}
 
-	logger.Info("[LOAD] Recovered state for %s (old id %d): map=%d pos=(%d,%d) hp=%d/%d lvl=%d xp=%d atk=%d weapon=%d armor=%d items=%d",
-		name, oldCharID, mapID, x, z, hp, maxHP, level, xp, damage, weaponID, armorID, len(inventory))
+	logger.Info("[LOAD] Recovered state for %s (old id %d): map=%d pos=(%d,%d) hp=%d/%d mp=%d/%d lvl=%d xp=%d atk=%d weapon=%d armor=%d items=%d",
+		name, oldCharID, mapID, x, z, hp, maxHP, mp, maxMP, level, xp, damage, weaponID, armorID, len(inventory))
 
 	return &savedPlayerData{
+		CharacterID:  oldCharID,
 		Pos:          ecs.PositionComponent{MapID: mapID, X: x, Z: z},
-		Stats:        ecs.StatsComponent{Level: level, XP: xp, HP: hp, MaxHP: maxHP, Dam: damage},
+		Stats:        ecs.StatsComponent{Level: level, XP: xp, HP: hp, MaxHP: maxHP, MP: mp, MaxMP: maxMP, Dam: damage},
 		Equipment:    ecs.EquipmentComponent{WeaponID: weaponID, ArmorID: armorID},
 		Inventory:    inventory,
 		PasswordHash: storedHash,
@@ -196,8 +199,8 @@ func RegisterNewAccount(username, passwordHash string) error {
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, level, xp, weapon_id, armor_id)
-		 VALUES (?, 1, 0, 0, 100, 100, 15, 1, 0, 0, 0)`,
+		`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, level, xp, mp, max_mp, weapon_id, armor_id)
+		 VALUES (?, 1, 0, 0, 100, 100, 15, 1, 0, 100, 100, 0, 0)`,
 		entityID,
 	); err != nil {
 		return fmt.Errorf("DB insert default character_states failed: %w", err)
@@ -229,11 +232,16 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 	// Phase 1: Load saved state if this username has been here before.
 	saved := loadSavedPlayerState(username)
 
-	// Phase 2: Generate a fresh entity ID for this session.
-	entityID := ecs.GlobalRegistry.NewEntity()
+	// Phase 2: Select/Generate entity ID.
+	var entityID ecs.Entity
+	if saved != nil {
+		entityID = ecs.Entity(saved.CharacterID)
+	} else {
+		entityID = ecs.GlobalRegistry.NewEntity()
+	}
 
-	// Phase 3: Persist to database.
-	if DBEngine != nil {
+	// Phase 3: Persist to database (only if brand new player).
+	if DBEngine != nil && saved == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
@@ -243,57 +251,24 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 		}
 		defer tx.Rollback()
 
-		// Delete old rows for this username (FK ON DELETE CASCADE cleans child tables).
-		if saved != nil {
-			if _, err := tx.ExecContext(ctx,
-				"DELETE FROM characters WHERE name = ?", username,
-			); err != nil {
-				return 0, fmt.Errorf("DB delete old character failed: %w", err)
-			}
-		}
-
-		// Insert the new character row, preserving the password hash.
-		passHash := ""
-		if saved != nil {
-			passHash = saved.PasswordHash
-		}
+		// NOTE: Phase 3 only runs for brand-new players who went through RegisterNewAccount first.
+		// At this point, saved == nil means loadSavedPlayerState found nothing — this is a
+		// first-ever login right after registration. The password_hash is already in the DB
+		// from RegisterNewAccount; we only need to insert the default character_states row.
+		// However, if we bypassed RegisterNewAccount, we insert the default row here with a blank hash.
 		if _, err := tx.ExecContext(ctx,
-			"INSERT INTO characters (id, name, password_hash) VALUES (?, ?, ?)", entityID, username, passHash,
+			"INSERT INTO characters (id, name, password_hash) VALUES (?, ?, ?)",
+			entityID, username, "",
 		); err != nil {
 			return 0, fmt.Errorf("DB insert character failed: %w", err)
 		}
 
-		// Insert or restore dynamic state.
-		if saved != nil {
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, level, xp, weapon_id, armor_id)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				entityID,
-				saved.Pos.MapID, saved.Pos.X, saved.Pos.Z,
-				saved.Stats.HP, saved.Stats.MaxHP, saved.Stats.Dam,
-				saved.Stats.Level, saved.Stats.XP,
-				saved.Equipment.WeaponID, saved.Equipment.ArmorID,
-			); err != nil {
-				return 0, fmt.Errorf("DB insert character_states failed: %w", err)
-			}
-
-			for itemID, qty := range saved.Inventory {
-				if _, err := tx.ExecContext(ctx,
-					"INSERT INTO character_inventory (character_id, item_template_id, quantity) VALUES (?, ?, ?)",
-					entityID, itemID, qty,
-				); err != nil {
-					return 0, fmt.Errorf("DB insert character_inventory failed: %w", err)
-				}
-			}
-		} else {
-			// Brand new player — insert default state.
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, level, xp, weapon_id, armor_id)
-				 VALUES (?, 1, 0, 0, 100, 100, 15, 1, 0, 0, 0)`,
-				entityID,
-			); err != nil {
-				return 0, fmt.Errorf("DB insert default character_states failed: %w", err)
-			}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, level, xp, mp, max_mp, weapon_id, armor_id)
+			 VALUES (?, 1, 0, 0, 100, 100, 15, 1, 0, 100, 100, 0, 0)`,
+			entityID,
+		); err != nil {
+			return 0, fmt.Errorf("DB insert default character_states failed: %w", err)
 		}
 
 		if err := tx.Commit(); err != nil {
@@ -314,7 +289,7 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 		}
 	} else {
 		ecs.GlobalRegistry.SetPosition(entityID, ecs.PositionComponent{MapID: 1, X: 0, Z: 0})
-		ecs.GlobalRegistry.SetStats(entityID, ecs.StatsComponent{Level: 1, XP: 0, HP: 100, MaxHP: 100, Dam: 15})
+		ecs.GlobalRegistry.SetStats(entityID, ecs.StatsComponent{Level: 1, XP: 0, HP: 100, MaxHP: 100, MP: 100, MaxMP: 100, Dam: 15})
 		ecs.GlobalRegistry.SetEquipment(entityID, ecs.EquipmentComponent{WeaponID: 0, ArmorID: 0})
 	}
 

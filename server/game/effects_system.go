@@ -3,22 +3,18 @@ package game
 import (
 	"fmt"
 	"server/ecs"
-	"server/models"
 	"server/protocol"
-	"server/world"
 	"time"
 )
 
 // RunStatusEffectsSystem iterates through all entities to tick down active buffs or process DoTs.
 func RunStatusEffectsSystem() {
-	allEntities := ecs.GlobalRegistry.GetAllEntities()
 	now := time.Now()
 	tickInterval := 250 * time.Millisecond
 
-	for _, id := range allEntities {
-		effComp, hasEffects := ecs.GlobalRegistry.GetEffects(id)
-		if !hasEffects || len(effComp.ActiveList) == 0 {
-			continue
+	ecs.GlobalRegistry.RangeEffects(func(id ecs.Entity, effComp ecs.EffectsComponent) bool {
+		if len(effComp.ActiveList) == 0 {
+			return true
 		}
 
 		effComp = effComp.Clone()
@@ -72,26 +68,7 @@ func RunStatusEffectsSystem() {
 								protocol.BroadcastToMap(pos.MapID, fmt.Sprintf("[DEATH] %s (#%d) succumbed to %s.\r\n", meta.Name, id, effect.Type))
 							}
 
-							// If monster, schedule respawn
-							if meta.Type == "monster" {
-								if t, found := models.GetTemplateByName(meta.Name); found {
-									spawnX, spawnZ := t.SpawnX, t.SpawnZ
-									if ai, hasAI := ecs.GlobalRegistry.GetAI(id); hasAI {
-										spawnX, spawnZ = ai.SpawnX, ai.SpawnZ
-									}
-									GlobalRespawnManager.ScheduleMonsterRespawn(
-										t.ID, pos.MapID, spawnX, spawnZ, 15*time.Second,
-									)
-								}
-								world.GlobalSpatialGrid.RemoveEntity(id)
-								ecs.GlobalRegistry.RemoveEntity(id)
-							} else if meta.Type == "player" {
-								// Trigger disconnection cleanups by closing connection
-								conn, ok := ecs.GlobalRegistry.GetConnection(id)
-								if ok && conn.Conn != nil {
-									conn.Conn.Close()
-								}
-							}
+							DeathSystem(id, 0, meta, ecs.MetadataComponent{Name: effect.Type, Type: "status_effect"})
 							continue // Stop processing an already erased row anchor
 						}
 					}
@@ -110,5 +87,7 @@ func RunStatusEffectsSystem() {
 		if forceStatRecalc && meta.Type == "player" {
 			RecalculateActiveStats(id)
 		}
-	}
+
+		return true
+	})
 }

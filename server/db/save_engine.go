@@ -108,13 +108,13 @@ func tryWrite(snap SaveSnapshot) error {
 	defer tx.Rollback()
 
 	// 1. Upsert character dynamic stats and equipment records
-	dynamicUpsert := `INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, level, xp, weapon_id, armor_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	dynamicUpsert := `INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, level, xp, mp, max_mp, weapon_id, armor_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 			map_id=VALUES(map_id), x=VALUES(x), z=VALUES(z), hp=VALUES(hp), max_hp=VALUES(max_hp), damage=VALUES(damage),
-			level=VALUES(level), xp=VALUES(xp), weapon_id=VALUES(weapon_id), armor_id=VALUES(armor_id);`
+			level=VALUES(level), xp=VALUES(xp), mp=VALUES(mp), max_mp=VALUES(max_mp), weapon_id=VALUES(weapon_id), armor_id=VALUES(armor_id);`
 
-	_, err = tx.ExecContext(ctx, dynamicUpsert, snap.EntityID, snap.Pos.MapID, snap.Pos.X, snap.Pos.Z, snap.Stats.HP, snap.Stats.MaxHP, snap.Stats.Dam, snap.Stats.Level, snap.Stats.XP, snap.Equipment.WeaponID, snap.Equipment.ArmorID)
+	_, err = tx.ExecContext(ctx, dynamicUpsert, snap.EntityID, snap.Pos.MapID, snap.Pos.X, snap.Pos.Z, snap.Stats.HP, snap.Stats.MaxHP, snap.Stats.Dam, snap.Stats.Level, snap.Stats.XP, snap.Stats.MP, snap.Stats.MaxMP, snap.Equipment.WeaponID, snap.Equipment.ArmorID)
 	if err != nil {
 		return err
 	}
