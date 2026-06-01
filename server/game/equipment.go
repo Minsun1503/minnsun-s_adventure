@@ -24,9 +24,10 @@ func HandleEquipmentSystem(playerID ecs.Entity, itemID uint64) (string, bool) {
 	eq, _ := ecs.GlobalRegistry.GetEquipment(playerID)
 
 	// 4. MODIFY: Assign the template ID to the matching slot channel
-	if item.SlotType == "weapon" {
+	switch item.SlotType {
+	case "weapon":
 		eq.WeaponID = itemID
-	} else if item.SlotType == "armor" {
+	case "armor":
 		eq.ArmorID = itemID
 	}
 
