@@ -96,27 +96,31 @@ func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
 		result.Killed = true
 		DeathSystem(targetID, attackerID, targetMeta, attackerMeta)
 
-		// Roll loot and spawn items on the ground if the killed target is a monster and attacker is a player
+		// Roll loot and spawn items on the ground if the killed target is a monster and attacker is a player.
 		if targetMeta.Type == "monster" && attackerMeta.Type == "player" {
-			monsterTemplateID := uint64(1) // Example fallback lookup
-			droppedItems := RollLoot(monsterTemplateID)
+			// Resolve the monster's template ID from its name so every monster
+			// rolls its own loot table instead of always falling back to template 1.
+			if tmpl, found := models.GetTemplateByName(targetMeta.Name); found {
+				monsterTemplateID := uint64(tmpl.ID)
+				droppedItems := RollLoot(monsterTemplateID)
 
-			if len(droppedItems) > 0 {
-				targetPos, hasPos := registry.GetPosition(targetID)
-				if hasPos {
-					for _, itemID := range droppedItems {
-						// rng.Intn: pooled RNG — no mutex contention, 0 allocs.
-						offsetX := rng.Intn(3) - 1 // yields -1, 0, or 1
-						offsetZ := rng.Intn(3) - 1
+				if len(droppedItems) > 0 {
+					targetPos, hasPos := registry.GetPosition(targetID)
+					if hasPos {
+						for _, itemID := range droppedItems {
+							// rng.Intn: pooled RNG — no mutex contention, 0 allocs.
+							offsetX := rng.Intn(3) - 1 // yields -1, 0, or 1
+							offsetZ := rng.Intn(3) - 1
 
-						// gmath.ClampPos: replaces 8 lines of manual if/else clamping.
-						dropX, dropZ := gmath.ClampPos(
-							targetPos.X+offsetX,
-							targetPos.Z+offsetZ,
-							0, 100,
-						)
+							// gmath.ClampPos: replaces 8 lines of manual if/else clamping.
+							dropX, dropZ := gmath.ClampPos(
+								targetPos.X+offsetX,
+								targetPos.Z+offsetZ,
+								0, 100,
+							)
 
-						SpawnItemOnGround(itemID, targetPos.MapID, dropX, dropZ)
+							SpawnItemOnGround(itemID, targetPos.MapID, dropX, dropZ)
+						}
 					}
 				}
 			}
