@@ -90,16 +90,6 @@ func encodeSuccessPayload(dst []byte, message string) {
 	copy(dst[2:], message)
 }
 
-func encodeSpawnEntityPayload(dst []byte, p SpawnPayload) {
-	codec.WriteUint64(dst[0:8], p.EntityID)
-	codec.WriteUint8(dst[8:9], p.Type)
-	codec.WriteInt32(dst[9:13], p.MapID)
-	codec.WriteInt32(dst[13:17], p.X)
-	codec.WriteInt32(dst[17:21], p.Z)
-	codec.WriteUint8(dst[21:22], uint8(len(p.Name)))
-	copy(dst[22:], p.Name)
-}
-
 func encodeDespawnEntityPayload(dst []byte, p DespawnPayload) {
 	codec.WriteUint64(dst[0:8], p.EntityID)
 }
@@ -108,26 +98,6 @@ func encodePositionSyncPayload(dst []byte, p PositionSyncPayload) {
 	codec.WriteUint64(dst[0:8], p.EntityID)
 	codec.WriteInt32(dst[8:12], p.X)
 	codec.WriteInt32(dst[12:16], p.Z)
-}
-
-func encodeStatsSyncPayload(dst []byte, p StatsSyncPayload) {
-	codec.WriteUint64(dst[0:8], p.EntityID)
-	codec.WriteInt32(dst[8:12], p.HP)
-	codec.WriteInt32(dst[12:16], p.MaxHP)
-	codec.WriteInt32(dst[16:20], p.MP)
-	codec.WriteInt32(dst[20:24], p.MaxMP)
-	codec.WriteInt32(dst[24:28], p.Dam)
-	codec.WriteInt32(dst[28:32], p.Level)
-}
-
-func encodeChatMessagePayload(dst []byte, p ChatPayload) {
-	codec.WriteUint8(dst[0:1], p.Channel)
-	codec.WriteUint8(dst[1:2], uint8(len(p.SenderName)))
-	copy(dst[2:], p.SenderName)
-	offset := 2 + len(p.SenderName)
-	codec.WriteUint16(dst[offset:offset+2], uint16(len(p.Message)))
-	offset += 2
-	copy(dst[offset:], p.Message)
 }
 
 // ─── S2C Typed Packet Builders & Writers ─────────────────────────────────────
@@ -197,9 +167,37 @@ type SpawnPayload struct {
 func BuildSpawnEntity(p SpawnPayload) []byte {
 	payloadLen := 22 + len(p.Name)
 	pkt := make([]byte, 3+payloadLen)
-	binary.BigEndian.PutUint16(pkt[0:2], uint16(1+payloadLen))
+	l := uint16(1 + payloadLen)
+	pkt[0] = byte(l >> 8)
+	pkt[1] = byte(l)
 	pkt[2] = OpcodeSpawnEntity
-	encodeSpawnEntityPayload(pkt[3:], p)
+	v := p.EntityID
+	pkt[3] = byte(v >> 56)
+	pkt[4] = byte(v >> 48)
+	pkt[5] = byte(v >> 40)
+	pkt[6] = byte(v >> 32)
+	pkt[7] = byte(v >> 24)
+	pkt[8] = byte(v >> 16)
+	pkt[9] = byte(v >> 8)
+	pkt[10] = byte(v)
+	pkt[11] = p.Type
+	v2 := uint32(p.MapID)
+	pkt[12] = byte(v2 >> 24)
+	pkt[13] = byte(v2 >> 16)
+	pkt[14] = byte(v2 >> 8)
+	pkt[15] = byte(v2)
+	v2 = uint32(p.X)
+	pkt[16] = byte(v2 >> 24)
+	pkt[17] = byte(v2 >> 16)
+	pkt[18] = byte(v2 >> 8)
+	pkt[19] = byte(v2)
+	v2 = uint32(p.Z)
+	pkt[20] = byte(v2 >> 24)
+	pkt[21] = byte(v2 >> 16)
+	pkt[22] = byte(v2 >> 8)
+	pkt[23] = byte(v2)
+	pkt[24] = uint8(len(p.Name))
+	copy(pkt[25:], p.Name)
 	return pkt
 }
 
@@ -212,9 +210,37 @@ func WriteSpawnEntity(dst []byte, p SpawnPayload) []byte {
 	} else {
 		dst = make([]byte, needed)
 	}
-	binary.BigEndian.PutUint16(dst[0:2], uint16(1+payloadLen))
+	l := uint16(1 + payloadLen)
+	dst[0] = byte(l >> 8)
+	dst[1] = byte(l)
 	dst[2] = OpcodeSpawnEntity
-	encodeSpawnEntityPayload(dst[3:], p)
+	v := p.EntityID
+	dst[3] = byte(v >> 56)
+	dst[4] = byte(v >> 48)
+	dst[5] = byte(v >> 40)
+	dst[6] = byte(v >> 32)
+	dst[7] = byte(v >> 24)
+	dst[8] = byte(v >> 16)
+	dst[9] = byte(v >> 8)
+	dst[10] = byte(v)
+	dst[11] = p.Type
+	v2 := uint32(p.MapID)
+	dst[12] = byte(v2 >> 24)
+	dst[13] = byte(v2 >> 16)
+	dst[14] = byte(v2 >> 8)
+	dst[15] = byte(v2)
+	v2 = uint32(p.X)
+	dst[16] = byte(v2 >> 24)
+	dst[17] = byte(v2 >> 16)
+	dst[18] = byte(v2 >> 8)
+	dst[19] = byte(v2)
+	v2 = uint32(p.Z)
+	dst[20] = byte(v2 >> 24)
+	dst[21] = byte(v2 >> 16)
+	dst[22] = byte(v2 >> 8)
+	dst[23] = byte(v2)
+	dst[24] = uint8(len(p.Name))
+	copy(dst[25:], p.Name)
 	return dst
 }
 
@@ -293,26 +319,30 @@ type StatsSyncPayload struct {
 
 // BuildStatsSync constructs an S2C StatsSync packet (opcode 0x13).
 func BuildStatsSync(p StatsSyncPayload) []byte {
-	payloadLen := 32
-	pkt := make([]byte, 3+payloadLen)
-	binary.BigEndian.PutUint16(pkt[0:2], uint16(1+payloadLen))
+	pkt := make([]byte, 35)
+	binary.BigEndian.PutUint16(pkt[0:2], 33)
 	pkt[2] = OpcodeStatsSync
-	encodeStatsSyncPayload(pkt[3:], p)
+	binary.BigEndian.PutUint64(pkt[3:11], p.EntityID)
+	binary.BigEndian.PutUint64(pkt[11:19], uint64(uint32(p.HP))<<32|uint64(uint32(p.MaxHP)))
+	binary.BigEndian.PutUint64(pkt[19:27], uint64(uint32(p.MP))<<32|uint64(uint32(p.MaxMP)))
+	binary.BigEndian.PutUint64(pkt[27:35], uint64(uint32(p.Dam))<<32|uint64(uint32(p.Level)))
 	return pkt
 }
 
 // WriteStatsSync writes an S2C StatsSync packet into dst (0 allocs).
 func WriteStatsSync(dst []byte, p StatsSyncPayload) []byte {
-	payloadLen := 32
-	needed := 3 + payloadLen
+	const needed = 35
 	if cap(dst) >= needed {
 		dst = dst[:needed]
 	} else {
 		dst = make([]byte, needed)
 	}
-	binary.BigEndian.PutUint16(dst[0:2], uint16(1+payloadLen))
+	binary.BigEndian.PutUint16(dst[0:2], 33)
 	dst[2] = OpcodeStatsSync
-	encodeStatsSyncPayload(dst[3:], p)
+	binary.BigEndian.PutUint64(dst[3:11], p.EntityID)
+	binary.BigEndian.PutUint64(dst[11:19], uint64(uint32(p.HP))<<32|uint64(uint32(p.MaxHP)))
+	binary.BigEndian.PutUint64(dst[19:27], uint64(uint32(p.MP))<<32|uint64(uint32(p.MaxMP)))
+	binary.BigEndian.PutUint64(dst[27:35], uint64(uint32(p.Dam))<<32|uint64(uint32(p.Level)))
 	return dst
 }
 
@@ -327,9 +357,20 @@ type ChatPayload struct {
 func BuildChatMessage(p ChatPayload) []byte {
 	payloadLen := 4 + len(p.SenderName) + len(p.Message)
 	pkt := make([]byte, 3+payloadLen)
-	binary.BigEndian.PutUint16(pkt[0:2], uint16(1+payloadLen))
+	l := uint16(1 + payloadLen)
+	pkt[0] = byte(l >> 8)
+	pkt[1] = byte(l)
 	pkt[2] = OpcodeChat
-	encodeChatMessagePayload(pkt[3:], p)
+	hw := uint16(p.Channel)<<8 | uint16(uint8(len(p.SenderName)))
+	pkt[3] = byte(hw >> 8)
+	pkt[4] = byte(hw)
+	_ = pkt[5+len(p.SenderName)+1] // bounds check hoist
+	copy(pkt[5:], p.SenderName)
+	offset := 5 + len(p.SenderName)
+	ml := uint16(len(p.Message))
+	pkt[offset] = byte(ml >> 8)
+	pkt[offset+1] = byte(ml)
+	copy(pkt[offset+2:], p.Message)
 	return pkt
 }
 
@@ -342,8 +383,19 @@ func WriteChatMessage(dst []byte, p ChatPayload) []byte {
 	} else {
 		dst = make([]byte, needed)
 	}
-	binary.BigEndian.PutUint16(dst[0:2], uint16(1+payloadLen))
+	l := uint16(1 + payloadLen)
+	dst[0] = byte(l >> 8)
+	dst[1] = byte(l)
 	dst[2] = OpcodeChat
-	encodeChatMessagePayload(dst[3:], p)
+	hw := uint16(p.Channel)<<8 | uint16(uint8(len(p.SenderName)))
+	dst[3] = byte(hw >> 8)
+	dst[4] = byte(hw)
+	_ = dst[5+len(p.SenderName)+1] // bounds check hoist
+	copy(dst[5:], p.SenderName)
+	offset := 5 + len(p.SenderName)
+	ml := uint16(len(p.Message))
+	dst[offset] = byte(ml >> 8)
+	dst[offset+1] = byte(ml)
+	copy(dst[offset+2:], p.Message)
 	return dst
 }

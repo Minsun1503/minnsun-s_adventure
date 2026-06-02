@@ -1,5 +1,15 @@
 # PEAKGO GAME SERVER AGENT RULES (V2026)
 
+## I. STRICT BUILD/TEST LIFECYCLE CONTROL GUIDELINES
+
+1. DO NOT run the `go test` or `go build` commands if the changes made have already been confirmed as syntax correct by a static analysis tool or MCP compiler.
+
+2. Absolutely DO NOT rerun the build step if the Game Server (`server.exe`) is running or the MCP Bridge port is green. On Windows, overwriting a file while it's open will cause File Locking errors and system crashes (70% crash rate).
+
+3. If you need to verify code after making changes: Prioritize using the `code_get_outline` tool or running the lightweight syntax check command `go vet ./...` instead of running the full test suite.
+
+4. The `go test` command should only be activated when there is an explicit request from the user.
+
 ## II. CORE ARCHITECTURE GUARDRAILS (Hàng rào kiến trúc bắt buộc)
 You are working on a High-Performance, Zero-Allocation MMORPG Go Server. Never violate these rules:
 
@@ -31,3 +41,63 @@ You are working on a High-Performance, Zero-Allocation MMORPG Go Server. Never v
 - When editing, output the complete file or the precise git diff if requested.
 - STOP immediately after providing the file contents. DO NOT attempt to run compilers, linters, or test suites to check your work.
 - Ensure all logs are safely wrapped inside condition guards (e.g., 'if loggate.DebugEnabled()') to prevent useless string allocations on Production mode.
+
+## IV WINDOWS PATH RULES (MANDATORY)
+The project directory contains single quotes "Minnsun's Adventure". When executing the `cd` command or any command involving paths, it is MANDATORY to enclose the entire path in DOUBLE QUOTATION MARKS `""`.
+
+Standard example: `cd "c:\Minnsun's Adventure\server" && go vet ./...`
+Absolutely do not write the path without quotation marks, as this will cause a PowerShell syntax crash (>> error).
+
+## V WINDOWS POWERSHELL & GO WORKSPACE RULES (CRITICAL)
+
+1. **Do not use the `&&` operator:** The default PowerShell 5.1 version on the host machine does NOT support the `&&` operator. Absolutely do not use `&&` to concatenate commands (this will cause a `ParserError`). Use a semicolon `;` or a newline if you need to separate independent commands.
+
+2. **Handling single quotes in paths (`Minnsun's Adventure`)**:
+
+- The project folder name contains a single quote in the word `Minnsun's`.
+
+- ANY time a command involving a path is executed, the entire path MUST be enclosed in DOUBLE QUOTATION MARKS `""` (Example: `"c:\Minnsun's Adventure\server"`).
+
+- Absolutely do not use bare paths or parentheses, as this will break PowerShell syntax and cause system crashes (the `>>` symbol error).
+
+3. **Forcing Working Directory for Go Modules**:
+
+- The root directory of VS Code is `C:\Minnsun's Adventure`, but the `go.mod` file is located in the `server/` subdirectory.
+
+- To avoid the compiler reporting the `cannot find main module` error, all Go-related commands (`go build`, `go vet`, `go test`) MUST NOT be run directly using the normal `cd` command.
+
+- It is MANDATORY to use the `-WorkingDirectory` flag explicitly through the child PowerShell to ensure proper execution environment isolation.
+
+4. **Standard Execution Syntax (Required Pattern)**:
+
+- When running `go vet`:
+
+`powershell -WorkingDirectory "c:\Minnsun's Adventure\server" -Command "go vet ./..."`
+
+- When building `server.exe`:
+
+`powershell -WorkingDirectory "c:\Minnsun's Adventure\server" -Command "go build -o server.exe ."`
+
+- When building `mcp-bridge.exe`:
+
+`powershell -WorkingDirectory "c:\Minnsun's Adventure\server" -Command "go build -o mcp-bridge.exe ./cmd/mcp-bridge/"`
+
+5. **Preventing Freezing and File Locking (70% of Freezing Errors)**:
+
+- Absolutely DO NOT restart the build step or run the test suite if the changes just made have been confirmed as correct syntax by the static analysis tool.
+
+- Do not perform an overwrite build while the Game Server (`server.exe`) is running or the MCP Bridge port is showing green to avoid Windows File Locking errors.
+
+# VI. PROHIBITED USE OF BUILT-IN READ_FILE (MANDATORY)
+
+1. **Absolute prohibition of built-in tools**: It is STRICTLY PROHIBITED to use the built-in `read_file` or `search_files` tools for any file with the extensions `.go`, `.sql`, or `.json` in the `server/` directory.
+
+2. **Forced use of MCP Token-Savers**:
+
+- When wanting to view the overall structure of a file, it is MANDATORY to call the MCP tool `code_get_outline`.
+
+- When reading code content for analysis or modification, it is MANDATORY to use the MCP tool `code_read_lines` to read in small intervals (maximum 50-100 lines per call).
+
+- When checking the DB table, it is MANDATORY to call the MCP tool `db_get_schema`.
+
+3. **Penalty for violations**: If you intentionally use the built-in `read_file` tool to read the entire large Go file, the user will press DENY and the process will close immediately. Please comply to save system tokens.

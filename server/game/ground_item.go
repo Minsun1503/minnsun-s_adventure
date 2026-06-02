@@ -55,23 +55,27 @@ func SpawnItemOnGround(itemTemplateID uint64, mapID int, x int, z int) ecs.Entit
 	return itemEntity
 }
 
-// RunGroundItemDecaySystem scans all active entities and purges expired floor loot.
+// RunGroundItemDecaySystem scans all active ground items and purges expired floor loot.
+// Uses RangeSnapshots for zero-extra-allocation scanning per architectural rules.
 func RunGroundItemDecaySystem() {
-	allEntities := ecs.GlobalRegistry.GetAllEntities()
 	now := time.Now()
 
-	for _, id := range allEntities {
-		// 1. Check if the entity has an active lifetime component tracking record
-		lifetime, hasLifetime := ecs.GlobalRegistry.GetLifetime(id)
+	ecs.GlobalRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
+		// 1. Only process ground items with a lifetime component
+		if snap.Meta.Type != ecs.EntityGroundItem {
+			return true // Skip players, permanent monsters, etc.
+		}
+
+		lifetime, hasLifetime := ecs.GlobalRegistry.GetLifetime(snap.ID)
 		if !hasLifetime {
-			continue // Skip players, permanent monsters, etc.
+			return true
 		}
 
 		// 2. Evaluate if the expiry threshold duration has been crossed
 		if now.After(lifetime.SpawnedAt.Add(lifetime.Duration)) {
 			// Fetch data for the exit notification before clearing columns
-			pos, posOk := ecs.GlobalRegistry.GetPosition(id)
-			meta, metaOk := ecs.GlobalRegistry.GetMetadata(id)
+			pos, posOk := ecs.GlobalRegistry.GetPosition(snap.ID)
+			meta, metaOk := ecs.GlobalRegistry.GetMetadata(snap.ID)
 
 			if posOk && metaOk {
 				decayNotice := fmt.Sprintf("[DECAY]: The %s sitting at (%d, %d) faded away into dust.\r\n",
@@ -80,8 +84,10 @@ func RunGroundItemDecaySystem() {
 			}
 
 			// 3. PURGE TRANSACTION: Clean up spatial grid and parallel memory tables completely
-			world.GlobalSpatialGrid.RemoveEntity(id)
-			ecs.GlobalRegistry.RemoveEntity(id)
+			world.GlobalSpatialGrid.RemoveEntity(snap.ID)
+			ecs.GlobalRegistry.RemoveEntity(snap.ID)
 		}
-	}
+
+		return true
+	})
 }

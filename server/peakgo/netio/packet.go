@@ -128,25 +128,3 @@ func WritePacket(conn net.Conn, data []byte) error {
 
 	return nil
 }
-
-// WritePacketExplicit gửi dữ liệu thô với cơ chế bảo vệ dòng chảy TCP toàn vẹn.
-func WritePacketData(conn net.Conn, data []byte) error {
-	// Thiết lập mốc giới hạn xả băng thông bảo vệ tài nguyên thread
-	_ = conn.SetWriteDeadline(time.Now().Add(writeDeadline))
-
-	// Giải phóng hoàn toàn Write Deadline sau khi thoát hàm để đưa kết nối về trạng thái tự do
-	defer func() {
-		_ = conn.SetWriteDeadline(time.Time{})
-	}()
-
-	// Vòng lặp bảo vệ tối cao: Tiếp tục đẩy phần dữ liệu còn sót lại cho tới khi xả sạch mảng byte
-	for len(data) > 0 {
-		n, err := conn.Write(data)
-		if err != nil {
-			return err // Trả lỗi ngay lập tức để caller chủ động đóng connection bị gãy
-		}
-		data = data[n:] // Gọt bớt phần mảng dữ liệu đã gửi thành công
-	}
-
-	return nil
-}

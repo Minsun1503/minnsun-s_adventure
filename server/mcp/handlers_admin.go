@@ -34,15 +34,18 @@ func init() {
 
 	Register("admin_teleport", func(req Request) Response {
 		var p struct {
-			EntityID uint64 `json:"entity_id"`
+			PlayerID uint64 `json:"player_id"`
 			MapID    int    `json:"map_id"`
 			X        int    `json:"x"`
 			Z        int    `json:"z"`
 		}
-		if err := json.Unmarshal(req.Params, &p); err != nil || p.EntityID == 0 {
-			return rpcError(req.ID, ErrCodeInvalidParams, "entity_id, map_id, x, z are required")
+		if err := json.Unmarshal(req.Params, &p); err != nil || p.PlayerID == 0 {
+			return rpcError(req.ID, ErrCodeInvalidParams, "player_id, x, z are required (map_id defaults to 1)")
 		}
-		msg, ok := world.ExecuteMapTransfer(ecs.Entity(p.EntityID), p.MapID, p.X, p.Z)
+		if p.MapID == 0 {
+			p.MapID = 1
+		}
+		msg, ok := world.ExecuteMapTransfer(ecs.Entity(p.PlayerID), p.MapID, p.X, p.Z)
 		if !ok {
 			return rpcError(req.ID, ErrCodeInternal, msg)
 		}

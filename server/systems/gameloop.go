@@ -42,7 +42,7 @@ func tickWorld(tick uint64) {
 		case ecs.EntityPlayer:
 			hasPlayers = true
 		case ecs.EntityMonster:
-			processMonster(snap)
+			debugLogMonsterState(snap)
 		}
 		return true
 	})
@@ -74,9 +74,9 @@ func tickWorld(tick uint64) {
 	})
 }
 
-// processMonster logs active monster state at DEBUG level only.
+// debugLogMonsterState logs active monster state at DEBUG level only.
 // In production (debug=false), loggate.Debugf is a guaranteed no-op.
-func processMonster(snap ecs.EntitySnapshot) {
+func debugLogMonsterState(snap ecs.EntitySnapshot) {
 	if !snap.HasPos || !snap.HasStats {
 		return
 	}
@@ -90,7 +90,7 @@ func UpdateWorldEntitiesSystem() {
 		if snap.Meta.Type != ecs.EntityMonster || !snap.HasPos || !snap.HasStats {
 			return true
 		}
-		processMonster(snap)
+		debugLogMonsterState(snap)
 		return true
 	})
 

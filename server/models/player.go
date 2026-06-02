@@ -255,14 +255,6 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 		// At this point, saved == nil means loadSavedPlayerState found nothing — this is a
 		// first-ever login right after registration. The password_hash is already in the DB
 		// from RegisterNewAccount; we only need to insert the default character_states row.
-		// However, if we bypassed RegisterNewAccount, we insert the default row here with a blank hash.
-		if _, err := tx.ExecContext(ctx,
-			"INSERT INTO characters (id, name, password_hash) VALUES (?, ?, ?)",
-			entityID, username, "",
-		); err != nil {
-			return 0, fmt.Errorf("DB insert character failed: %w", err)
-		}
-
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO character_states (character_id, map_id, x, z, hp, max_hp, damage, level, xp, mp, max_mp, weapon_id, armor_id)
 			 VALUES (?, 1, 0, 0, 100, 100, 15, 1, 0, 100, 100, 0, 0)`,
