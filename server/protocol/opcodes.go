@@ -44,7 +44,8 @@ const (
 // ─── Server → Client (S2C) Opcodes ──────────────────────────────────────────
 
 const (
-	OpcodeS2CError byte = 0xFF // Server error response — see error_packet.go
+	OpcodeS2CSuccess byte = 0x01 // Server success response (e.g., registration OK) — see error_packet.go
+	OpcodeS2CError   byte = 0xFF // Server error response — see error_packet.go
 	// Future S2C opcodes:
 	// OpcodeS2CSpawnEntity   byte = 0x10 // broadcast new entity to client
 	// OpcodeS2CDespawnEntity byte = 0x11 // broadcast entity removal

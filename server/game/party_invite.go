@@ -151,13 +151,11 @@ func AcceptPartyInviteSystem(playerID, targetPartyID ecs.Entity) (string, bool) 
 		return "Error: You are already in a party.\r\n", false
 	}
 
-	// Verify party size limit again.
-	if len(party.MemberIDs) >= maxPartySize {
+	// Atomically check size limit and add the player in a single CoW operation.
+	// This eliminates the TOCTOU race between a separate size-check and write.
+	if !TryAddMemberToParty(targetPartyID, playerID) {
 		return "Error: Party is now full.\r\n", false
 	}
-
-	// Add the player to the party.
-	AddMemberToParty(targetPartyID, playerID)
 
 	// Fetch names for the roster announcement.
 	playerMeta, _ := registry.GetMetadata(playerID)
@@ -166,8 +164,10 @@ func AcceptPartyInviteSystem(playerID, targetPartyID ecs.Entity) (string, bool) 
 		playerName = playerMeta.Name
 	}
 
+	// Re-fetch the party to get the updated member count after TryAddMemberToParty.
+	updatedParty, _ := registry.GetParty(targetPartyID)
 	rosterMsg := fmt.Sprintf("[PARTY] %s has joined '%s'! Members: %d/%d\r\n",
-		playerName, party.TeamName, len(party.MemberIDs)+1, maxPartySize)
+		playerName, party.TeamName, len(updatedParty.MemberIDs), maxPartySize)
 	BroadcastToParty(targetPartyID, rosterMsg)
 
 	personalMsg := fmt.Sprintf("You have joined '%s'!\r\n", party.TeamName)

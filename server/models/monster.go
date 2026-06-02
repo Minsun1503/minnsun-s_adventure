@@ -17,6 +17,7 @@ type MonsterTemplate struct {
 	Name           string  `json:"name"`
 	HP             int     `json:"hp"`
 	Dam            int     `json:"damage"`
+	MapID          int     `json:"map_id"`    // World map this monster belongs to. Defaults to 1 if omitted.
 	SpawnX         int     `json:"spawn_x"`
 	SpawnZ         int     `json:"spawn_z"`
 	RoamRadius     int     `json:"roam_radius"`
@@ -52,9 +53,13 @@ func LoadMonster(filePath string) ([]MonsterTemplate, error) {
 	}
 
 	// Populate the template store for SpawnMonsterFromTemplate lookups.
+	// Apply default MapID=1 for templates that omit the field in JSON.
 	templateStoreMu.Lock()
-	for _, t := range list {
-		templateStore[t.ID] = t
+	for i := range list {
+		if list[i].MapID == 0 {
+			list[i].MapID = 1
+		}
+		templateStore[list[i].ID] = list[i]
 	}
 	templateStoreMu.Unlock()
 
@@ -72,14 +77,15 @@ func GetTemplate(templateID int) (MonsterTemplate, bool) {
 
 // SpawnMonsterFromTemplate instantiates a live monster entity from a loaded template.
 // The template provides base stats and AI configuration; spawn coordinates
-// can override the template's default spawn point for scripted placement.
+// and the target map can override the template's defaults for scripted placement.
 //
 // Parameters:
-//   - templateID: JSON template ID to copy stats from.
-//   - spawnX, spawnZ: world coordinates for this instance.
+//   - templateID:    JSON template ID to copy stats from.
+//   - mapID:         World map ID the monster should be placed on.
+//   - spawnX, spawnZ: World coordinates for this instance.
 //
 // Returns the new ecs.Entity ID, or an error if the template is not found.
-func SpawnMonsterFromTemplate(templateID, spawnX, spawnZ int) (ecs.Entity, error) {
+func SpawnMonsterFromTemplate(templateID, mapID, spawnX, spawnZ int) (ecs.Entity, error) {
 	t, ok := GetTemplate(templateID)
 	if !ok {
 		return 0, fmt.Errorf("template ID %d not found — did you call LoadMonster?", templateID)
@@ -95,7 +101,7 @@ func SpawnMonsterFromTemplate(templateID, spawnX, spawnZ int) (ecs.Entity, error
 		Type: "monster",
 	})
 
-	spawnPos := ecs.PositionComponent{MapID: 1, X: spawnX, Z: spawnZ}
+	spawnPos := ecs.PositionComponent{MapID: mapID, X: spawnX, Z: spawnZ}
 	ecs.GlobalRegistry.SetPosition(id, spawnPos)
 
 	ecs.GlobalRegistry.SetStats(id, ecs.StatsComponent{
@@ -139,12 +145,12 @@ func GetTemplateByName(name string) (MonsterTemplate, bool) {
 	return MonsterTemplate{}, false
 }
 
-// SpawnFromDefaultPosition spawns a monster at its template-defined default coordinates.
-// Convenience wrapper used during server boot when no override is needed.
+// SpawnFromDefaultPosition spawns a monster at its template-defined default coordinates
+// and map. Convenience wrapper used during server boot when no override is needed.
 func SpawnFromDefaultPosition(templateID int) (ecs.Entity, error) {
 	t, ok := GetTemplate(templateID)
 	if !ok {
 		return 0, fmt.Errorf("template ID %d not found", templateID)
 	}
-	return SpawnMonsterFromTemplate(templateID, t.SpawnX, t.SpawnZ)
+	return SpawnMonsterFromTemplate(templateID, t.MapID, t.SpawnX, t.SpawnZ)
 }

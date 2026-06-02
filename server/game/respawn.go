@@ -58,8 +58,8 @@ func (rs *RespawnScheduler) RunRespawnSystem() {
 
 	for _, ev := range rs.events {
 		if now.After(ev.RespawnAt) {
-			// Timer expired — spawn the monster.
-			id, err := models.SpawnMonsterFromTemplate(ev.TemplateID, ev.SpawnX, ev.SpawnZ)
+			// Timer expired — spawn the monster on the correct map.
+			id, err := models.SpawnMonsterFromTemplate(ev.TemplateID, ev.MapID, ev.SpawnX, ev.SpawnZ)
 			if err != nil {
 				logger.Error("[RESPAWN] Failed to spawn template %d: %v", ev.TemplateID, err)
 				remaining = append(remaining, ev) // Keep in queue to retry next tick
@@ -67,12 +67,10 @@ func (rs *RespawnScheduler) RunRespawnSystem() {
 			}
 			// Register in the spatial grid so AI systems can find it.
 			if pos, ok := ecs.GlobalRegistry.GetPosition(id); ok {
-				pos.MapID = ev.MapID // Set the correct MapID (since SpawnMonsterFromTemplate defaults to 1)
-				ecs.GlobalRegistry.SetPosition(id, pos)
 				world.GlobalSpatialGrid.UpdateEntityPosition(id, pos)
 			}
-			logger.Info("[RESPAWN] Spawned %s (entity %d) at (%d,%d)",
-				monsterName(ev.TemplateID), id, ev.SpawnX, ev.SpawnZ)
+			logger.Info("[RESPAWN] Spawned %s (entity %d) at map=%d (%d,%d)",
+				monsterName(ev.TemplateID), id, ev.MapID, ev.SpawnX, ev.SpawnZ)
 		} else {
 			// Not yet — keep in the queue.
 			remaining = append(remaining, ev)

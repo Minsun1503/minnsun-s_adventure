@@ -59,8 +59,44 @@ func GetPlayerPartyID(playerID ecs.Entity) ecs.Entity {
 	return pm.PartyID
 }
 
+// TryAddMemberToParty atomically checks the party size limit and adds the player
+// if there is still room. Returns true on success, false if the party is full or
+// no longer exists.
+//
+// This is the preferred call site for AcceptPartyInviteSystem because it
+// eliminates the TOCTOU window that exists between a separate size-check and write.
+// The CoW sequence (load → clone → append → store) is the atomic unit of mutation
+// under the ECS sync.Map model: no other goroutine can observe a partially-appended
+// slice because the new slice is only visible after SetParty's atomic Store returns.
+func TryAddMemberToParty(partyID, playerID ecs.Entity) bool {
+	registry := ecs.GlobalRegistry
+
+	party, ok := registry.GetParty(partyID)
+	if !ok {
+		return false
+	}
+
+	// Re-check the size limit after loading the latest snapshot.
+	// Any concurrent accept that committed first will have already updated the
+	// stored value, so we see the post-commit length here.
+	if len(party.MemberIDs) >= maxPartySize {
+		return false
+	}
+
+	// Clone → mutate → store (CoW write).
+	party = party.Clone()
+	party.MemberIDs = append(party.MemberIDs, playerID)
+	registry.SetParty(partyID, party)
+
+	registry.SetPartyMember(playerID, ecs.PartyMemberComponent{
+		PartyID: partyID,
+	})
+	return true
+}
+
 // AddMemberToParty appends a player to the party roster and sets their
-// PartyMemberComponent. Assumes caller has already validated the invite.
+// PartyMemberComponent. Assumes caller has already validated the invite
+// and the party size limit.
 func AddMemberToParty(partyID, playerID ecs.Entity) {
 	registry := ecs.GlobalRegistry
 

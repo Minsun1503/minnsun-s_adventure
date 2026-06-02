@@ -209,8 +209,9 @@ func processLogin(conn net.Conn) {
 			return
 		}
 
-		// Send success text response and close — client must now LOGIN.
-		protocol.SendErrorPacket(conn, 0, "Account registered successfully! Please log in.")
+		// Registration successful — notify client and close.
+		// Client must now send a LOGIN packet to enter the game.
+		protocol.SendSuccessPacket(conn, "Account registered successfully! Please log in.")
 		conn.Close()
 
 	default:

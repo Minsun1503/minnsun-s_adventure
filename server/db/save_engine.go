@@ -34,9 +34,11 @@ func StartSaveWorkerEngine() {
 
 // QueuePlayerSave captures a fast inline memory snapshot and pushes it to the worker buffer thread.
 //
-// NOTE: This snapshot is not atomic across all components.
-// A torn read (components from different game ticks) is acceptable
-// given the 250ms tick rate. The worst case is a 1-tick-stale save.
+// Inventory is deep-copied immediately (for k, v := range inv.Items) before the snapshot
+// is enqueued, so the worker goroutine always sees a consistent bag state — even if a
+// trade or pickup modifies the live component on a different goroutine before the worker
+// drains the queue. Position and stats are value-type fields (copied by value out of
+// sync.Map) so they are inherently snapshot-safe as well.
 func QueuePlayerSave(playerID ecs.Entity) {
 	meta, _ := ecs.GlobalRegistry.GetMetadata(playerID)
 	pos, _ := ecs.GlobalRegistry.GetPosition(playerID)
@@ -119,11 +121,23 @@ func tryWrite(snap SaveSnapshot) error {
 		return err
 	}
 
-	// 2. Sync inventory bag matrices via Batch Upsert
+	// 2. Sync inventory bag matrices via Batch Upsert.
 	if len(snap.Inventory) > 0 {
+		// Upsert items with qty > 0.
 		query, args := buildBatchInventoryUpsert(snap.EntityID, snap.Inventory)
 		if query != "" {
 			_, err = tx.ExecContext(ctx, query, args...)
+			if err != nil {
+				return err
+			}
+		}
+
+		// Delete items whose quantity has dropped to zero so the DB stays clean.
+		// This handles the case where a player used the last of an item or gave it
+		// all away in a trade — the upsert above would set qty=0 without this step.
+		delQuery, delArgs := buildBatchInventoryDelete(snap.EntityID, snap.Inventory)
+		if delQuery != "" {
+			_, err = tx.ExecContext(ctx, delQuery, delArgs...)
 			if err != nil {
 				return err
 			}
@@ -148,5 +162,25 @@ func buildBatchInventoryUpsert(entityID ecs.Entity, inv map[uint64]int) (string,
 	}
 	query += strings.Join(placeholders, ",") +
 		` ON DUPLICATE KEY UPDATE quantity=VALUES(quantity)`
+	return query, args
+}
+
+// buildBatchInventoryDelete constructs a DELETE query that removes all rows for the
+// given entity where the item quantity is zero or below. This keeps the DB clean
+// after trades, item consumption, or other quantity-decrement operations.
+func buildBatchInventoryDelete(entityID ecs.Entity, inv map[uint64]int) (string, []any) {
+	var args []any
+	var pairs []string
+	for itemID, qty := range inv {
+		if qty <= 0 {
+			pairs = append(pairs, "(?, ?)")
+			args = append(args, entityID, itemID)
+		}
+	}
+	if len(pairs) == 0 {
+		return "", nil
+	}
+	query := `DELETE FROM character_inventory WHERE (character_id, item_template_id) IN (` +
+		strings.Join(pairs, ",") + `)`
 	return query, args
 }

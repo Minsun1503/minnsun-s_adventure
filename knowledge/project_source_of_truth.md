@@ -178,27 +178,11 @@
 - Giao thức lỗi nhị phân: Opcode 255 (0xFF) là opcode dành riêng cho Server Error. Client Unity cần switch trên `ErrorCode` (uint16 BE) tại byte offset 3-4 sau opcode để hiển thị popup tương ứng.
 
 ## 3. Những việc còn dang dở (Pending tasks)
-- Khôi phục (Load) dữ liệu người chơi từ DB khi họ đăng nhập (hiện tại người chơi kết nối luôn được khởi tạo dưới tên Guest mới với chỉ số mặc định, chưa được load ngược lại từ các bảng `character_states` và `character_inventory`).
 - Tự chạy và kiểm thử kiểm soát đa kết nối Client trong môi trường ECS mới.
 - Kết nối logic Client Unity với ECS Server thông qua TCP client.
-- save_engine.go — torn read
-go// QueuePlayerSave: comment tự thừa nhận
-// "A torn read (components from different game ticks) is acceptable"
-Acceptable cho vị trí/stats, không acceptable cho inventory. Nếu player trade xong, đồng thời disconnect, inventory snapshot có thể lấy pre-trade state từ một goroutine khác đang commit. Comment che giấu một race condition thực sự.
-- respawn.go — MapID hardcode
-go// SpawnMonsterFromTemplate:
-spawnPos := ecs.PositionComponent{MapID: 1, X: spawnX, Z: spawnZ}
-Rồi RunRespawnSystem phải patch lại:
-gopos.MapID = ev.MapID // "Set the correct MapID since SpawnMonsterFromTemplate defaults to 1"
-Đây là workaround cho một design flaw. SpawnMonsterFromTemplate nên nhận mapID làm parameter.
-- server.go — processLogin có một bug tinh vi
-gocase protocol.OpcodeC2SRegister:
-    // ...
-    protocol.SendErrorPacket(conn, 0, "Account registered successfully!")
-Dùng SendErrorPacket với errorCode = 0 để báo thành công. Client phải switch trên error code để phân biệt success/failure — fragile, và sai về mặt semantic.
-- party_invite.go — AcceptPartyInviteSystem race
-goif len(party.MemberIDs)+1 >= maxPartySize {  // check
-    // ... gap ở đây
-}
-AddMemberToParty(targetPartyID, playerID)  // write
-Giữa check và write, party có thể đã đầy do concurrent accept. Không có lock bao quanh toàn bộ operation.
+
+## 4. Những bug đã khắc phục (Fixed bugs)
+- **[FIXED] save_engine.go — Comment sai về torn read**: Xóa comment sai "torn read is acceptable" và thay bằng giải thích rõ ràng rằng inventory được deep-copy tức thời trước khi enqueue nên safe. Thêm `buildBatchInventoryDelete` để xóa các item có qty≤0 khỏi DB khi save (tránh DB rác sau khi player dùng hết item hoặc trade đi).
+- **[FIXED] respawn.go + monster.go — MapID hardcode design flaw**: Thêm field `MapID int` vào `MonsterTemplate` (json: "map_id", default 1 nếu thiếu). Thêm parameter `mapID int` vào `SpawnMonsterFromTemplate`. Cập nhật `SpawnFromDefaultPosition` truyền `t.MapID`. Xóa hoàn toàn workaround patch `pos.MapID = ev.MapID` trong `RunRespawnSystem`.
+- **[FIXED] server.go — processLogin dùng SendErrorPacket với errorCode=0 để báo success**: Thêm `OpcodeS2CSuccess byte = 0x01` vào opcodes.go và hàm `SendSuccessPacket(conn, message)` vào error_packet.go. Cập nhật `processLogin` dùng `protocol.SendSuccessPacket` thay vì `SendErrorPacket(conn, 0, ...)` khi register thành công. Client Unity có thể switch trên opcode byte đầu (0x01 = success, 0xFF = error).
+- **[FIXED] party_invite.go — AcceptPartyInviteSystem TOCTOU race**: Thêm `TryAddMemberToParty(partyID, playerID ecs.Entity) bool` vào party.go thực hiện check party size + write trong một CoW sequence nguyên tử (load → re-check → clone → append → store). Cập nhật `AcceptPartyInviteSystem` dùng `TryAddMemberToParty` thay vì kiểm tra riêng lẻ rồi mới `AddMemberToParty`.
