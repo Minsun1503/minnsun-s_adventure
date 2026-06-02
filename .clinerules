@@ -101,3 +101,28 @@ Absolutely do not write the path without quotation marks, as this will cause a P
 - When checking the DB table, it is MANDATORY to call the MCP tool `db_get_schema`.
 
 3. **Penalty for violations**: If you intentionally use the built-in `read_file` tool to read the entire large Go file, the user will press DENY and the process will close immediately. Please comply to save system tokens.
+
+[CRITICAL RULE: NO TERMINAL FOR FILE CREATION/PATCHING]
+1. Absolutely DO NOT use Terminal commands (such as `echo`, `cat`, `Set-Content`, `Out-File`) or navigation keys (`>`, `>>`) to create or modify source code files. Since the system is running on Windows PowerShell, this will trigger a "Double Interpolation" error with special characters like $, \, `, (, ), * and cause the file to freeze/corrupt.
+
+2. You MUST use internal file system tools (File System MCP Tools such as `write_to_file`, `edit_file_multi`, `patch`) to write content directly to the hard drive.
+3. When writing Go Assembly code (Plan 9 ASM), constants or mathematical operations (e.g., `NodeSZ*4`) must be flat-calculated to a specific numerical value (Immediate Constant, e.g., $96) before writing to the .s file to avoid syntax conflicts with the compiler and shell.
+
+[CRITICAL RULE: COMMAND TIMEOUT & HUNG PROCESS RECOVERY]
+1. TIMEOUT IS MANDATORY: Every Terminal command (especially go test, go build, powershell) must have a time limit flag or proactively check for responses within a short time. Commands must never run indefinitely.
+
+2. ANTI-INFINITE LOOP RULE:
+
+- If a command timeouts or hangs more than once, it is ABSOLUTELY NOT allowed to run the exact same command again.
+
+- The AI ​​must immediately activate the self-reflection process: Analyze why the freeze occurred (Was the file locked? Was PowerShell waiting for input stdin? Was there incorrect syntax causing blocking?).
+
+3. RECOVERY STRATEGY (RECOVERY PIVOT):
+
+- If you experience repeated freezes/timeouts, you MUST FIND ANOTHER WAY to handle it:
+
+* Example 1 (File Stuck/Locked File): Run a command to check and release the process occupying the file (use `Get-Process` or `Stop-Process` if necessary).
+
+* Example 2 (Terminal Stuck): Switch to writing a separate script file (like a short `.ps1` file), configure it to run in the background without blocking, then read the output log file.
+
+* Example 3 (Too stupid to realize): If trying both methods still results in timeouts, stop, clearly report the hardware freeze to the User to request assistance, and absolutely do not automatically loop and waste tokens.

@@ -218,15 +218,17 @@ func (pc *PathCache) allocNode(x, z int32) int32 {
 	return idx
 }
 
+// nodeIndexASM is an SSE2-accelerated linear scan of the global cache array.
+// Declared here (no body), implemented in astar_amd64.s for amd64.
+//
+//go:noescape
+func nodeIndexASM(x, z int32, pc *PathCache) int32
+
 // nodeIndex returns the index of a node with the given coordinates.
 // Returns -1 if not found.
+// Uses the SSE2-accelerated assembly implementation.
 func (pc *PathCache) nodeIndex(x, z int32) int32 {
-	for i := range pc.nodeCount {
-		if cache[i].X == x && cache[i].Z == z {
-			return int32(i)
-		}
-	}
-	return -1
+	return nodeIndexASM(x, z, pc)
 }
 
 // pushOpen adds a node index to the open set.
