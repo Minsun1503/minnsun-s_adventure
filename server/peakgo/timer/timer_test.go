@@ -341,3 +341,13 @@ func BenchmarkTickTimerVsManual(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkIsReadyPeakGo measures TickTimer.Tick() hot-path with auto-reset.
+func BenchmarkIsReadyPeakGo(b *testing.B) {
+	tt := timer.NewTickTimer(4)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = tt.Tick()
+	}
+}

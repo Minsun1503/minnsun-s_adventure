@@ -244,3 +244,12 @@ func BenchmarkDistanceSqVsSqrt(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkDistance2DPeakGo measures continuous 2D distance calculation hot-path.
+func BenchmarkDistance2DPeakGo(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sinkInt = gmath.DistanceSq(10, 20, 73, 85)
+	}
+}

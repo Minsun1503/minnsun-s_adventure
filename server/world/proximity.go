@@ -42,7 +42,8 @@ func GetNearbyPlayers(originID ecs.Entity, worldRadius float64) []ProximityResul
 	}
 
 	candidates := GlobalSpatialGrid.QueryRadius(pos, worldRadius, originID)
-	if len(candidates) == 0 {
+	if len(*candidates) == 0 {
+		FreeQueryCandidates(candidates)
 		return nil
 	}
 
@@ -50,9 +51,9 @@ func GetNearbyPlayers(originID ecs.Entity, worldRadius float64) []ProximityResul
 	results := *pSlice
 	results = results[:0]
 
-	for _, c := range candidates {
+	for _, c := range *candidates {
 		meta, hasMeta := ecs.GlobalRegistry.GetMetadata(c.ID)
-		if !hasMeta || meta.Type != "player" {
+		if !hasMeta || meta.Type != ecs.EntityPlayer {
 			continue // Filter non-players early
 		}
 		stats, hasStats := ecs.GlobalRegistry.GetStats(c.ID)
@@ -66,6 +67,7 @@ func GetNearbyPlayers(originID ecs.Entity, worldRadius float64) []ProximityResul
 			Stats: stats,
 		})
 	}
+	FreeQueryCandidates(candidates)
 	return results
 }
 
@@ -79,7 +81,8 @@ func GetNearbyMonsters(originID ecs.Entity, worldRadius float64) []ProximityResu
 	}
 
 	candidates := GlobalSpatialGrid.QueryRadius(pos, worldRadius, originID)
-	if len(candidates) == 0 {
+	if len(*candidates) == 0 {
+		FreeQueryCandidates(candidates)
 		return nil
 	}
 
@@ -87,9 +90,9 @@ func GetNearbyMonsters(originID ecs.Entity, worldRadius float64) []ProximityResu
 	results := *pSlice
 	results = results[:0]
 
-	for _, c := range candidates {
+	for _, c := range *candidates {
 		meta, hasMeta := ecs.GlobalRegistry.GetMetadata(c.ID)
-		if !hasMeta || meta.Type != "monster" {
+		if !hasMeta || meta.Type != ecs.EntityMonster {
 			continue // Filter non-monsters early
 		}
 		stats, hasStats := ecs.GlobalRegistry.GetStats(c.ID)
@@ -103,6 +106,7 @@ func GetNearbyMonsters(originID ecs.Entity, worldRadius float64) []ProximityResu
 			Stats: stats,
 		})
 	}
+	FreeQueryCandidates(candidates)
 	return results
 }
 

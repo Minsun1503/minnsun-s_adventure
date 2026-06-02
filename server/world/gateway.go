@@ -1,11 +1,37 @@
 package world
 
 import (
-	"encoding/binary"
 	"fmt"
+	"net"
 	"server/ecs"
-	"server/protocol"
+	"server/peakgo/codec"
+	"server/peakgo/netio"
 )
+
+// writeConn is the single write point for all outbound TCP data.
+func writeConn(c net.Conn, data []byte) {
+	if c == nil {
+		return
+	}
+	if err := netio.WritePacket(c, data); err != nil {
+		c.Close()
+	}
+}
+
+// broadcastToMap sends data to all players on targetMapID.
+// Inlined to avoid circular import: world → protocol → world.
+func broadcastToMap(targetMapID int, data []byte) {
+	ecs.GlobalRegistry.RangeConnections(func(playerID ecs.Entity, netComp ecs.ConnectionComponent) bool {
+		if netComp.Conn == nil {
+			return true
+		}
+		playerPos, posExists := ecs.GlobalRegistry.GetPosition(playerID)
+		if posExists && playerPos.MapID == targetMapID {
+			writeConn(netComp.Conn, data)
+		}
+		return true
+	})
+}
 
 // HandleWarpSystem parses a binary payload containing MapID, X, and Z coordinates,
 // and delegates to ExecuteMapTransfer.
@@ -15,9 +41,9 @@ func HandleWarpSystem(playerID ecs.Entity, payload []byte) (string, bool) {
 		return "Error: Invalid warp payload length. Expected 12 bytes.\r\n", false
 	}
 
-	targetMapID := int(int32(binary.BigEndian.Uint32(payload[0:4])))
-	targetX := int(int32(binary.BigEndian.Uint32(payload[4:8])))
-	targetZ := int(int32(binary.BigEndian.Uint32(payload[8:12])))
+	targetMapID := int(codec.ReadInt32(payload[0:4]))
+	targetX := int(codec.ReadInt32(payload[4:8]))
+	targetZ := int(codec.ReadInt32(payload[8:12]))
 
 	return ExecuteMapTransfer(playerID, targetMapID, targetX, targetZ)
 }
@@ -46,8 +72,8 @@ func ExecuteMapTransfer(playerID ecs.Entity, targetMapID int, targetX int, targe
 
 	// Phase 1: THE MAP EXIT
 	// Alert all witnesses on the OLD map that this entity has vanished
-	exitNotice := fmt.Sprintf("[PORTAL]: Player %s vanished into a warping rift!\r\n", meta.Name)
-	protocol.BroadcastToMap(oldPos.MapID, exitNotice)
+	exitNotice := []byte(fmt.Sprintf("[PORTAL]: Player %s vanished into a warping rift!\r\n", meta.Name))
+	broadcastToMap(oldPos.MapID, exitNotice)
 
 	// Phase 2: THE COORDINATE MIGRATION
 	// Modify our local structure copy and overwrite the database column lock-free
@@ -62,9 +88,9 @@ func ExecuteMapTransfer(playerID ecs.Entity, targetMapID int, targetX int, targe
 
 	// Phase 3: THE MAP ENTRANCE
 	// Alert all witnesses on the NEW map that this entity has materialized
-	entranceNotice := fmt.Sprintf("[PORTAL]: Player %s materialized out of a warping rift at X:%d, Z:%d!\r\n",
-		meta.Name, targetX, targetZ)
-	protocol.BroadcastToMap(targetMapID, entranceNotice)
+	entranceNotice := []byte(fmt.Sprintf("[PORTAL]: Player %s materialized out of a warping rift at X:%d, Z:%d!\r\n",
+		meta.Name, targetX, targetZ))
+	broadcastToMap(targetMapID, entranceNotice)
 
 	successMsg := fmt.Sprintf("[WARP]: Successfully zoned from Map #%d to Map #%d! Position: (%d, %d)\r\n",
 		oldMapID, targetMapID, targetX, targetZ)

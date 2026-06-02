@@ -9,6 +9,7 @@ import (
 	"server/ecs"
 	"server/game"
 	"server/logger"
+	"server/mcp"
 	"server/models"
 	"server/peakgo/codec"
 	"server/peakgo/loggate"
@@ -22,19 +23,20 @@ import (
 // Exposed via netio.DefaultPool; defined here for documentation locality.
 var packetPool = netio.DefaultPool
 
+var opcodeNames = map[byte]string{
+	1: "MOVE", 2: "INV", 3: "USE", 4: "WARP", 5: "ATTACK",
+	6: "INFO", 7: "QUIT", 8: "PICKUP", 9: "EQUIP",
+	10: "LOGIN", 11: "REGISTER", 12: "PARTY_CREATE",
+	13: "PARTY_INVITE", 14: "PARTY_JOIN",
+	15: "TRADE_INIT", 16: "TRADE_OFFER", 17: "TRADE_CONFIRM", 18: "TRADE_CANCEL",
+	19: "SKILL_CAST", 20: "CHAT",
+}
+
 // opcodeNameOf returns a human-readable name for a binary opcode byte.
 // Used by the network packet debug middleware in handleBinaryPacket.
 func opcodeNameOf(op byte) string {
-	names := map[byte]string{
-		1: "MOVE", 2: "INV", 3: "USE", 4: "WARP", 5: "ATTACK",
-		6: "INFO", 7: "QUIT", 8: "PICKUP", 9: "EQUIP",
-		10: "LOGIN", 11: "REGISTER", 12: "PARTY_CREATE",
-		13: "PARTY_INVITE", 14: "PARTY_JOIN",
-		15: "TRADE_INIT", 16: "TRADE_OFFER", 17: "TRADE_CONFIRM", 18: "TRADE_CANCEL",
-		19: "SKILL_CAST", 20: "CHAT",
-	}
-	if name, ok := names[op]; ok {
-		return name
+	if s, ok := opcodeNames[op]; ok {
+		return s
 	}
 	return "UNKNOWN"
 }
@@ -228,6 +230,24 @@ func main() {
 	world.InitializeCollisionMaps()
 	models.InitializeSkillRegistry()
 
+	// Sync item registry to MCP for inventory display.
+	for id, t := range game.ItemRegistry {
+		mcp.ItemRegistryGlobal[id] = struct {
+			ID        uint64
+			Name      string
+			HealValue int
+			SlotType  string
+			BonusDam  int
+			BonusHP   int
+		}{
+			ID: t.ID, Name: t.Name,
+			HealValue: t.HealValue,
+			SlotType:  t.SlotType,
+			BonusDam:  t.BonusDam,
+			BonusHP:   t.BonusHP,
+		}
+	}
+
 	models.InitializeDatabase("root:root@tcp(127.0.0.1:3306)/?parseTime=true")
 	db.StartSaveWorkerEngine()
 
@@ -270,6 +290,11 @@ func main() {
 
 	systems.StartGameLoop()
 	StartLoginWorkerPool(4) // Start 4 connection login workers to process db queue
+
+	// Start the MCP JSON-RPC HTTP server for AI agent inspection.
+	// Uses port 8080 by default; configure via MCP_PORT env var or data/config.json.
+	mcp.Start(mcp.Config{Port: 8080})
+	logger.Info("[BOOT] MCP admin interface available on http://localhost:8080/mcp")
 
 	for {
 		conn, err := lis.Accept()
@@ -323,6 +348,8 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 	)
 	systems.SendNoticeSystem(playerEntity, []byte(spawnMsg))
 
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Minute))
+
 	for {
 		// Zero-alloc header read: stack [2]byte + BigEndian.Uint16, no reflection.
 		length, err := netio.ReadHeader(conn)
@@ -346,6 +373,7 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		handleBinaryPacket(conn, playerEntity, opcode, payload)
 
 		packetPool.Put(pBuf)
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Minute))
 	}
 }
 

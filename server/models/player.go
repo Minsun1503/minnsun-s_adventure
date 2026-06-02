@@ -294,7 +294,7 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 	}
 
 	ecs.GlobalRegistry.SetConnection(entityID, ecs.ConnectionComponent{Conn: conn})
-	ecs.GlobalRegistry.SetMetadata(entityID, ecs.MetadataComponent{Name: username, Type: "player"})
+	ecs.GlobalRegistry.SetMetadata(entityID, ecs.MetadataComponent{Name: username, Type: ecs.EntityPlayer})
 
 	// Track active player mapping.
 	ActivePlayers.Set(playerAddress, entityID)

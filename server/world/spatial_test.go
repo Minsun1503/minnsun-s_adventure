@@ -35,21 +35,21 @@ func TestSpatialGridUpdateAndQuery(t *testing.T) {
 	// 2. Query Radius
 	// Query around entity1 (5, 5) with radius 5 (should find entity2 at 8,8 because distance is sqrt(3^2 + 3^2) = 4.24 <= 5)
 	results := grid.QueryRadius(pos1, 5.0, entity1)
-	if len(results) != 1 {
+	if len(*results) != 1 {
 		FreeQueryCandidates(results)
-		t.Fatalf("Expected 1 result in radius, got %d", len(results))
+		t.Fatalf("Expected 1 result in radius, got %d", len(*results))
 	}
-	if results[0].ID != entity2 {
+	if (*results)[0].ID != entity2 {
 		FreeQueryCandidates(results)
-		t.Errorf("Expected entity2, got %d", results[0].ID)
+		t.Errorf("Expected entity2, got %d", (*results)[0].ID)
 	}
 	FreeQueryCandidates(results)
 
 	// Query around entity1 (5, 5) with radius 2 (should find nothing because entity2 is at distance 4.24)
 	results = grid.QueryRadius(pos1, 2.0, entity1)
-	if len(results) != 0 {
+	if len(*results) != 0 {
 		FreeQueryCandidates(results)
-		t.Errorf("Expected 0 results, got %d", len(results))
+		t.Errorf("Expected 0 results, got %d", len(*results))
 	}
 	FreeQueryCandidates(results)
 
@@ -63,9 +63,9 @@ func TestSpatialGridUpdateAndQuery(t *testing.T) {
 	}
 
 	// Verify it's no longer in chunk (0,0)
-	results = grid.QueryChunk(pos1, 0)
-	if len(results) != 1 || results[0].ID != entity1 {
-		t.Errorf("Expected only entity1 in chunk (0,0), got %v", results)
+	chunkResults := grid.QueryChunk(pos1, 0)
+	if len(chunkResults) != 1 || chunkResults[0].ID != entity1 {
+		t.Errorf("Expected only entity1 in chunk (0,0), got %v", chunkResults)
 	}
 
 	// 4. Remove entity1
@@ -75,8 +75,8 @@ func TestSpatialGridUpdateAndQuery(t *testing.T) {
 		t.Error("Expected entity1 to be removed from reverse index")
 	}
 
-	results = grid.QueryChunk(pos1, 0)
-	if len(results) != 0 {
-		t.Errorf("Expected chunk (0,0) to be empty, got %v", results)
+	chunkResults = grid.QueryChunk(pos1, 0)
+	if len(chunkResults) != 0 {
+		t.Errorf("Expected chunk (0,0) to be empty, got %v", chunkResults)
 	}
 }

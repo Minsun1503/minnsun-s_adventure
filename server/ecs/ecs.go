@@ -5,10 +5,42 @@ import (
 	"server/peakgo/timer" // Tích hợp chặt chẽ hệ thống TickTimer lõi
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Entity đại diện cho mã định danh thực thể kiểu uint64 giúp tra cứu Map O(1).
 type Entity uint64
+
+// Entity 0 is reserved.
+// SparseSet uses 0 as "not present" marker inside the dense/sparse vectors.
+const InvalidEntity Entity = 0
+
+// ─── ENTITY TYPE ENUM ─────────────────────────────────────────────────────────
+// EntityType represents a strictly typed identifier for game entity categories.
+// Replaces fragile raw strings to catch invalid type queries at compile time.
+type EntityType uint8
+
+const (
+	EntityAny        EntityType = iota // Matches any entity type in the grid
+	EntityPlayer                       // Matches "player" type entities
+	EntityMonster                      // Matches "monster" type entities
+	EntityGroundItem                   // Matches "ground_item" type entities
+)
+
+// String maps the strongly-typed EntityType enum back to the underlying
+// string representation. Used for logging / debugging — NOT for hot-path comparison.
+func (t EntityType) String() string {
+	switch t {
+	case EntityPlayer:
+		return "player"
+	case EntityMonster:
+		return "monster"
+	case EntityGroundItem:
+		return "ground_item"
+	default:
+		return ""
+	}
+}
 
 // ─── COMPONENT DEFINITIONS ───────────────────────────────────────────────────
 // Các Component được lưu trữ dưới dạng inline value (không dùng con trỏ)
@@ -26,7 +58,7 @@ type ConnectionComponent struct {
 
 type MetadataComponent struct {
 	Name string
-	Type string
+	Type EntityType
 }
 
 type StatsComponent struct {
@@ -89,15 +121,48 @@ type AIComponent struct {
 }
 
 type InventoryComponent struct {
-	Slots []uint64
+	Items map[uint64]int // Maps ItemTemplateID -> Quantity owned
+}
+
+// Clone thực hiện DEEP COPY dữ liệu map bên trong.
+// Bắt buộc gọi trước khi chỉnh sửa linh kiện từ bất kỳ System nào.
+func (c InventoryComponent) Clone() InventoryComponent {
+	if c.Items == nil {
+		return InventoryComponent{Items: make(map[uint64]int)}
+	}
+	clone := make(map[uint64]int, len(c.Items))
+	for k, v := range c.Items {
+		clone[k] = v
+	}
+	return InventoryComponent{Items: clone}
 }
 
 type LifetimeComponent struct {
-	Millis int64
+	SpawnedAt time.Time     // The exact moment the item hit the floor
+	Duration  time.Duration // How long it is allowed to live (e.g., 60 * time.Second)
 }
 
+// ActiveEffect represents a single temporary modifier layer running on an entity.
+type ActiveEffect struct {
+	Type         string        // "poison", "burn", "haste_buff"
+	Value        int           // The damage or stat modifier amount
+	Duration     time.Duration // Total remaining time
+	LastTickTime time.Time     // Last time a DoT damage was applied
+}
+
+// EffectsComponent is mapped directly to an entity row anchor inside the TypedSyncMap
 type EffectsComponent struct {
-	ActiveEffects []uint32
+	ActiveList []ActiveEffect
+}
+
+// Clone thực hiện DEEP COPY danh sách hiệu ứng bên trong.
+func (c EffectsComponent) Clone() EffectsComponent {
+	if c.ActiveList == nil {
+		return EffectsComponent{ActiveList: nil}
+	}
+	return EffectsComponent{
+		ActiveList: append([]ActiveEffect(nil), c.ActiveList...),
+	}
 }
 
 type EquipmentComponent struct {
@@ -358,6 +423,9 @@ func (r *Registry) GetStats(id Entity) (StatsComponent, bool) { return r.stats.G
 
 func (r *Registry) SetLifetime(id Entity, comp LifetimeComponent)   { r.lifetimes.Set(id, comp) }
 func (r *Registry) GetLifetime(id Entity) (LifetimeComponent, bool) { return r.lifetimes.Get(id) }
+
+func (r *Registry) SetInventory(id Entity, comp InventoryComponent)   { r.inventories.Set(id, comp) }
+func (r *Registry) GetInventory(id Entity) (InventoryComponent, bool) { return r.inventories.Get(id) }
 
 func (r *Registry) SetItemTemplate(id Entity, comp ItemTemplateComponent) {
 	r.itemTemplates.Set(id, comp)

@@ -1,9 +1,9 @@
 package game
 
 import (
-	"encoding/binary"
 	"fmt"
 	"server/ecs"
+	"server/peakgo/codec"
 )
 
 // HandleItemUsageSystem processes a USE [item_id] binary command packet.
@@ -15,7 +15,7 @@ func HandleItemUsageSystem(playerID ecs.Entity, payload []byte) (string, bool) {
 	}
 
 	// 1. Decode Item ID from binary payload
-	itemID := binary.BigEndian.Uint64(payload[0:8])
+	itemID := codec.ReadUint64(payload)
 
 	// 2. VERIFY STATIC ITEM CONFIGURATION
 	itemTemplate, itemExists := ItemRegistry[itemID]

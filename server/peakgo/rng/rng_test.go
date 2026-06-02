@@ -256,3 +256,13 @@ func BenchmarkIntnConcurrent_StdlibGlobalRandBaseline(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkNextIntPeakGo measures the hot-path NextInt (Intn) RNG call.
+func BenchmarkNextIntPeakGo(b *testing.B) {
+	rng.WarmUp(8)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sinkInt = rng.Intn(100)
+	}
+}

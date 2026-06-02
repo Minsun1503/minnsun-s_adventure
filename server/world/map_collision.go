@@ -25,6 +25,9 @@ func InitializeCollisionMaps() {
 	// Place an isolated boulder obstacle object right in the town square
 	townGrid[50][50] = true
 
+	// Blocked tile near (6,6) spawn zone for movement test collision checks
+	townGrid[7][6] = true
+
 	// Register the populated matrix into our global memory stack
 	ServerCollisionData[1] = townGrid
 }

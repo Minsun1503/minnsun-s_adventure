@@ -28,12 +28,12 @@ func TestAttackSystemValidations(t *testing.T) {
 	monsterID := registry.NewEntity()
 
 	// 1. Setup stats & metadata
-	registry.SetMetadata(playerID, ecs.MetadataComponent{Name: "Hero", Type: "player"})
+	registry.SetMetadata(playerID, ecs.MetadataComponent{Name: "Hero", Type: ecs.EntityPlayer})
 	registry.SetStats(playerID, ecs.StatsComponent{Level: 1, HP: 100, MaxHP: 100, XP: 0, Dam: 15})
 	registry.SetPosition(playerID, ecs.PositionComponent{MapID: 1, X: 10, Z: 10})
 	world.GlobalSpatialGrid.UpdateEntityPosition(playerID, ecs.PositionComponent{MapID: 1, X: 10, Z: 10})
 
-	registry.SetMetadata(monsterID, ecs.MetadataComponent{Name: "Orc", Type: "monster"})
+	registry.SetMetadata(monsterID, ecs.MetadataComponent{Name: "Orc", Type: ecs.EntityMonster})
 	registry.SetStats(monsterID, ecs.StatsComponent{Level: 1, HP: 100, MaxHP: 100, Dam: 5})
 	registry.SetPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 11, Z: 11}) // Melee range
 	world.GlobalSpatialGrid.UpdateEntityPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 11, Z: 11})
@@ -78,12 +78,12 @@ func TestAttackSystemKillingBlow(t *testing.T) {
 	monsterID := registry.NewEntity()
 
 	// Initialize entities
-	registry.SetMetadata(playerID, ecs.MetadataComponent{Name: "Hero", Type: "player"})
+	registry.SetMetadata(playerID, ecs.MetadataComponent{Name: "Hero", Type: ecs.EntityPlayer})
 	registry.SetStats(playerID, ecs.StatsComponent{Level: 1, HP: 100, MaxHP: 100, XP: 0, Dam: 15})
 	registry.SetPosition(playerID, ecs.PositionComponent{MapID: 1, X: 10, Z: 10})
 	world.GlobalSpatialGrid.UpdateEntityPosition(playerID, ecs.PositionComponent{MapID: 1, X: 10, Z: 10})
 
-	registry.SetMetadata(monsterID, ecs.MetadataComponent{Name: "Orc", Type: "monster"})
+	registry.SetMetadata(monsterID, ecs.MetadataComponent{Name: "Orc", Type: ecs.EntityMonster})
 	registry.SetStats(monsterID, ecs.StatsComponent{Level: 1, HP: 10, MaxHP: 10, Dam: 5}) // 10 HP, player deals 15
 	registry.SetPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 11, Z: 11})
 	world.GlobalSpatialGrid.UpdateEntityPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 11, Z: 11})

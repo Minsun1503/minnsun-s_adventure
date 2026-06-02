@@ -416,3 +416,57 @@ func BenchmarkPublishConcurrent(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkPublishPeakGo measures Publish hot-path with one pre-subscribed listener.
+func BenchmarkPublishPeakGo(b *testing.B) {
+	bus := eventbus.New()
+	bus.Subscribe("bench", func(e eventbus.Event) {}, 1<<20)
+	b.Cleanup(func() { bus.Drain() })
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bus.Publish("bench", i)
+	}
+}
+
+// ─── PublishSync Benchmarks (direct handler call, no channel) ─────────────────
+
+// BenchmarkPublishSyncOneSubscriber measures PublishSync hot-path with 1 subscriber.
+// Expected to be ~3× faster than async Publish for the same case.
+func BenchmarkPublishSyncOneSubscriber(b *testing.B) {
+	bus := eventbus.New()
+	bus.Subscribe("syncbench", func(e eventbus.Event) {}, 1<<20)
+	b.Cleanup(func() { bus.Drain() })
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bus.PublishSync("syncbench", i)
+	}
+}
+
+// BenchmarkPublishSyncThreeSubscribers measures PublishSync scaling.
+// Expected to be ~5× faster than async Publish for 3 subscribers.
+func BenchmarkPublishSyncThreeSubscribers(b *testing.B) {
+	bus := eventbus.New()
+	for i := 0; i < 3; i++ {
+		bus.Subscribe("syncbench3", func(e eventbus.Event) {}, 1<<20)
+	}
+	b.Cleanup(func() { bus.Drain() })
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bus.PublishSync("syncbench3", i)
+	}
+}
+
+// BenchmarkPublishSyncPeakGo measures PublishSync hot-path with one subscriber.
+func BenchmarkPublishSyncPeakGo(b *testing.B) {
+	bus := eventbus.New()
+	bus.Subscribe("syncbench", func(e eventbus.Event) {}, 1<<20)
+	b.Cleanup(func() { bus.Drain() })
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bus.PublishSync("syncbench", i)
+	}
+}

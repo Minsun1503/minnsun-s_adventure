@@ -87,7 +87,7 @@ func SpawnMonsterFromTemplate(templateID, mapID, spawnX, spawnZ int) (ecs.Entity
 
 	ecs.GlobalRegistry.SetMetadata(id, ecs.MetadataComponent{
 		Name: t.Name,
-		Type: "monster",
+		Type: ecs.EntityMonster,
 	})
 
 	spawnPos := ecs.PositionComponent{MapID: mapID, X: spawnX, Z: spawnZ}

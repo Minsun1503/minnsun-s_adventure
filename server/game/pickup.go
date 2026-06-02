@@ -12,7 +12,7 @@ import (
 func HandleItemPickupSystem(playerID ecs.Entity, itemEntityID ecs.Entity) (string, bool) {
 	// 1. FETCH ITEM METADATA: Verify this entity is actually a piece of ground floor loot
 	itemMeta, hasMeta := ecs.GlobalRegistry.GetMetadata(itemEntityID)
-	if !hasMeta || itemMeta.Type != "ground_item" {
+	if !hasMeta || itemMeta.Type != ecs.EntityGroundItem {
 		return "Error: That item is either not on the ground or has already vanished!\r\n", false
 	}
 

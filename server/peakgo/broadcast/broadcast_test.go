@@ -449,3 +449,15 @@ func BenchmarkWriteChatMessage(b *testing.B) {
 		dst = broadcast.WriteChatMessage(dst[:0], p)
 	}
 }
+
+// BenchmarkBroadcastToNeighborsPeakGo measures the core packet encoding used by
+// BroadcastToNeighbors hot-path (WritePositionSync with pre-allocated dst buffer).
+func BenchmarkBroadcastToNeighborsPeakGo(b *testing.B) {
+	dst := make([]byte, 0, 512)
+	p := broadcast.PositionSyncPayload{EntityID: 42, X: 30, Z: 50}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		dst = broadcast.WritePositionSync(dst[:0], p)
+	}
+}

@@ -109,3 +109,14 @@ func BenchmarkInfof(b *testing.B) {
 		loggate.Infof("server heartbeat status checkpoint loop tick index: %d", i)
 	}
 }
+
+// BenchmarkShouldLogPeakGo measures the pure guard check DebugEnabled() hot-path.
+func BenchmarkShouldLogPeakGo(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if loggate.DebugEnabled() {
+			loggate.Debugf("log %d", i)
+		}
+	}
+}

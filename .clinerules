@@ -1,109 +1,33 @@
-# Minnsun's Adventure - Cline rules & instructions
+# PEAKGO GAME SERVER AGENT RULES (V2026)
 
-Bạn đang hoạt động trong dự án **Minnsun's Adventure** - một game MMO Server viết bằng Go (phiên bản Go 1.26.3+) theo kiến trúc **ECS (Entity-Component-System)** cao cấp, kết nối TCP nhị phân hiệu năng cao.
+## II. CORE ARCHITECTURE GUARDRAILS (Hàng rào kiến trúc bắt buộc)
+You are working on a High-Performance, Zero-Allocation MMORPG Go Server. Never violate these rules:
 
-Dưới đây là các chỉ thị vận hành, cấu trúc kiến trúc và quy chuẩn lập trình bạn **BẮT BUỘC** phải tuân thủ khi chỉnh sửa hoặc phát triển thêm tính năng cho codebase này.
+1. NETWORK LAYER (peakgo/codec & netio):
+   - ALWAYS use 'peakgo/codec' for binary parsing. Manual bit shifting or 'encoding/binary' on hot-paths is FORBIDDEN.
+   - Guard against DoS: Ensure packet length validations have a hard restriction ceiling (e.g., MaxPacketSize = 1024 or 4096).
+   - Zero-Alloc Broadcast: Broadcast movement or combat updates using raw binary frames from 'netio.DefaultPool', casted safely via unsafe zero-copy pointers. NO 'fmt.Sprintf' text broadcasting.
 
----
+2. ECS REGISTRY LAYER (ecs/ecs.go):
+   - Store components as inline flat values (NO pointers) to enforce CPU cache-locality and zero GC pressure.
+   - Hot-Path Reads: Use 'ComponentStore.Range()' (Single-Lock pattern). NEVER acquire/release locks inside the loop per entity.
+   - Mutate Paths: Use 'ComponentStore.RangeMutate()' when adding/deleting entities inside loops to fetch safe pooled slice buffers.
+   - No Entity Removals in Single-locks: Deletions/Cleanups must be single-threaded or handled atomically via RangeMutate.
 
-## 🔬 KIẾN TRÚC HỆ THỐNG (ECS INDUSTRY TARGET)
+3. SPATIAL PROXIMITY GRID (world/spatial.go):
+   - NO raw 'sync.Pool' allocations for generic slices.
+   - ALWAYS use 'pool.SlicePool[T]' with an anti-pollution guard to automatically drop oversized slices (>4x capacity) under heavy crowd load.
+   - Synchronous Writes: Any registry modification regarding coordinates MUST immediately trigger 'world.GlobalSpatialGrid.UpdateEntityPosition()' to prevent spatial de-synchronization.
 
-Dự án áp dụng mô hình ECS tách biệt hoàn toàn giữa **Dữ liệu (Components)** và **Logic (Systems)** để đạt hiệu năng tối đa và khả năng mở rộng tối ưu:
+4. TICK TIME SYSTEM (systems/gameloop.go):
+   - TIME IS ATOMIC: Inside game loops and hot-paths, NEVER call 'time.Now()' or 'time.Since()' (Eliminate System Calls).
+   - ALWAYS track cooldowns and durations by subtracting frame counts using 'systems.CurrentTick()' against a saved tick number.
+   - Use 'timer.TickTimer' for FSM AI state delays and action cooldowns.
 
-1. **Entity (Thực thể)**:
-   - Được định nghĩa đơn giản là một `uint64` (loại bỏ chuỗi ID để tối ưu hóa tra cứu O(1), tránh heap allocation).
-   - Không chứa bất kỳ dữ liệu hay hàm xử lý nghiệp vụ nào.
+5. ANTI-CHEAT REGIME:
+   - Absolute Distance Verification: Player movement packets MUST validate target distance against a tick constraint ('gmath.InRangeInt' with MaxMoveDistance) before committing coordinates to the Registry. Teleporting without valid state is a critical breach.
 
-2. **Component (Thành phần dữ liệu)**:
-   - Nằm tại thư mục `server/ecs/`.
-   - Chỉ chứa dữ liệu thô (struct attributes), không chứa logic nghiệp vụ.
-   - Các Component hiện có:
-     - `PositionComponent`: Vị trí `X`, `Z`, `MapID`.
-     - `StatsComponent`: HP, MaxHP, Damage, BaseHP, BaseDamage, Speed.
-     - `InventoryComponent`: Quản lý vật phẩm trong balo (Map từ ItemID -> Quantity, TemplateID).
-     - `AIComponent`: Trạng thái AI (Idle, Roaming, Chasing, Attacking, Returning), tọa độ spawn, mục tiêu đuổi theo (Target Entity).
-     - `EquipmentComponent`: Vũ khí (Weapon), Giáp (Armor) đang đeo.
-     - `LifetimeComponent`: Thời điểm sinh và thời hạn tồn tại (dùng cho vật phẩm rơi trên đất).
-   - Đăng ký Component: Mọi Component mới phải được đăng ký trong Registry tại `server/ecs/ecs.go` dưới dạng `state.TypedSyncMap[Entity, ComponentType]`.
-
-3. **System (Hệ thống logic)**:
-   - Nằm tại thư mục `server/systems/` (hoặc `server/world/` và `server/systems/` sau khi tái cấu trúc).
-   - Chỉ chứa logic xử lý nghiệp vụ, không giữ trạng thái riêng. Các System truy vấn dữ liệu từ các Registry Component trong `ecs.Registry` và thực thi biến đổi trạng thái.
-   - Hoạt động thông qua **Game Loop Heartbeat** chạy định kỳ mỗi 250ms (nền tảng điều phối AI, phân rã vật phẩm, v.v.).
-
----
-
-## ⚡ CONCURRENCY & MEMORY OPTIMIZATION (HIGH PERFORMANCE)
-
-Để đáp ứng tiêu chuẩn game MMO thương mại chịu tải lớn:
-
-1. **Lock-Free / Lock-Minimized**:
-   - Sử dụng `state.TypedSyncMap` (bọc quanh `sync.Map` của Go) thay cho các Mutex thô trên phạm vi rộng, giảm thiểu tối đa tranh chấp khóa (lock contention).
-   - Khi giải phóng thực thể (`RemoveEntity`), sử dụng `sync.WaitGroup` chạy song song dọn dẹp các component trong các luồng Goroutine riêng biệt.
-
-2. **Memory Allocation (Zero-Alloc in Loop)**:
-   - Các thuật toán chạy tần suất cao trong Game Loop (ví dụ: BFS Pathfinding) **không được phép** cấp phát bộ nhớ mới trên heap ở mỗi chu kỳ.
-   - Sử dụng `sync.Pool` để tái sử dụng các slice/map thông qua struct ngữ cảnh (e.g., `pathfindContext`).
-   - Tận dụng hàm `clear()` tích hợp của Go để dọn dẹp map mà không giải phóng vùng nhớ đã cấp phát của map đó, giúp giữ nguyên kích thước dung lượng đệm (capacity).
-
----
-
-## 📡 GIAO THỨC TRUYỀN THÔNG (BINARY PACKET PROTOCOL)
-
-Hệ thống giao tiếp TCP thô sử dụng gói tin định dạng nhị phân thuần túy:
-
-1. **Cấu trúc gói tin**:
-   - `[Length uint16 Big-Endian] [Opcode uint8] [Payload N-bytes]`
-   - Độ dài gói tin được mã hóa bằng 2 bytes Big-Endian ở đầu, theo sau là 1 byte mã Opcode, và cuối cùng là các byte dữ liệu Payload.
-
-2. **Bảng Opcode (Opcodes Registry)**:
-   - Định nghĩa tập trung trong `server/systems/opcodes.go`.
-   - **Client to Server (C2S)**:
-     - `1`: MOVE (Payload: `X int32 BE`, `Z int32 BE`)
-     - `2`: INV (Balo/Inventory query)
-     - `3`: USE (Payload: `ItemID uint64 BE`)
-     - `4`: WARP (Payload: `MapID int32 BE`, `X int32 BE`, `Z int32 BE`)
-     - `5`: ATTACK (Tấn công mục tiêu lân cận)
-     - `6`: INFO (Lấy thông tin người chơi)
-     - `7`: QUIT (Thoát game)
-     - `8`: PICKUP (Payload: `DroppedItemID uint64 BE`)
-     - `9`: EQUIP (Payload: `ItemID uint64 BE`)
-   - **Server to Client (S2C)**:
-     - `255 (0xFF)`: ERROR PACKET. Định dạng gói tin lỗi:
-       `[Length uint16 BE] [Opcode 0xFF] [ErrorCode uint16 BE] [MessageLen uint16 BE] [Message UTF-8 string]`
-       - `ErrorCode = 1`: Server Full (Hàng đợi Login đầy).
-       - `ErrorCode = 2`: Database Error (Lỗi DB timeout hoặc kết nối).
-       - `ErrorCode = 3`: Internal Error (Lỗi logic hệ thống).
-
-3. **Chống nghẽn & Giải phóng nhanh**:
-   - Thiết lập write deadline (ví dụ: 5 giây) cho mọi kết nối client trước khi ghi dữ liệu nhằm tránh tình trạng các client phản hồi chậm (slow clients) treo luồng worker.
-
----
-
-## 💾 CƠ SỞ DỮ LIỆU BẤT ĐỒNG BỘ (ASYNC DB SAVE QUEUE)
-
-1. **Handshake Connection Guard**:
-   - Khi người chơi kết nối, thông tin tĩnh (`characters`) được ghi đồng bộ vào DB trước để xác thực sự tồn tại hợp lệ. Lỗi ghi DB ở bước này sẽ từ chối kết nối ngay lập tức.
-   - Áp dụng Context timeout (`context.WithTimeout`) tối đa 3 giây cho các thao tác khởi tạo nhân vật để tránh treo luồng chấp nhận kết nối.
-
-2. **Save Queue Worker Pool**:
-   - Trạng thái động (`character_states`, `character_inventory`) được lưu bất đồng bộ thông qua kênh truyền `systems.SaveQueue` (chạy nền bởi Save Worker Engine).
-   - Chỉ đẩy yêu cầu lưu dữ liệu vào hàng đợi khi người chơi ngắt kết nối (`QUIT`) hoặc định kỳ để tránh quá tải I/O.
-   - Mọi câu lệnh SQL cập nhật trạng thái động phải sử dụng cú pháp MySQL `ON DUPLICATE KEY UPDATE` để đảm bảo cơ chế Upsert an toàn và hiệu quả.
-
----
-
-## 🛡️ AN TOÀN HỆ THỐNG & QUY TẮC PHÁT TRIỂN (RULES OF DEVELOPMENT)
-
-1. **Zero-Trust**:
-   - Cấm tin tưởng dữ liệu tọa độ, vật phẩm hoặc hành động từ Client gửi lên mà không kiểm tra lại ở Server.
-   - Di chuyển/Warp phải được validate ranh giới bản đồ (0 - 100) và kiểm tra va chạm tĩnh thông qua `systems.IsTileBlocked`.
-   - Nhặt đồ phải kiểm tra khoảng cách Euclidean giữa người chơi và vật phẩm rơi trên đất (phải < 5.0 đơn vị).
-
-2. **Tránh vòng lặp phụ thuộc (Import Cycle)**:
-   - Các package trong Go tạo thành cấu trúc cây phân cấp nghiêm ngặt.
-   - Thư mục `models` và `ecs` KHÔNG ĐƯỢC phép import ngược lại `systems` hay `server`.
-   - Logic kết nối chéo giữa các tầng này phải được đưa lên tầng điều phối trung gian (`server.go` hoặc các Service Registry).
-
-3. **Hàng rào Chesterton**:
-   - TUYỆT ĐỐI không xóa hay sửa đổi cấu trúc dữ liệu, các hàm của hệ thống legacy khi chưa hiểu rõ vì sao nó tồn tại ở đó. Luôn bảo tồn các comment giải thích nghiệp vụ có sẵn.
+## III. REFACTORING WORKFLOW
+- When editing, output the complete file or the precise git diff if requested.
+- STOP immediately after providing the file contents. DO NOT attempt to run compilers, linters, or test suites to check your work.
+- Ensure all logs are safely wrapped inside condition guards (e.g., 'if loggate.DebugEnabled()') to prevent useless string allocations on Production mode.

@@ -4,37 +4,87 @@ import (
 	"net"
 	"server/ecs"
 	"server/peakgo/netio"
+	"server/world"
 )
 
-// BroadcastToMap transits a network packet ONLY to player entities
-// who currently occupy the exact same map zone index sector.
-func BroadcastToMap(targetMapID int, textPacket string) {
-	bytePayload := []byte(textPacket)
+// broadcastAOIRadius defines the area-of-interest radius (world units)
+// for neighbor-based broadcasts (position sync, spawn/despawn).
+const broadcastAOIRadius = 60.0
 
-	// Interrogate all active client network connections lock-free
+// BroadcastToMap sends text data to ALL players on targetMapID.
+// Still O(N) across total connections but scoped to one map.
+// Pre-allocates once via string → []byte conversion before looping.
+func BroadcastToMap(targetMapID int, data string) {
+	b := []byte(data)
 	ecs.GlobalRegistry.RangeConnections(func(playerID ecs.Entity, netComp ecs.ConnectionComponent) bool {
 		if netComp.Conn == nil {
-			return true // Skip broken sockets, continue scanning
+			return true
 		}
-
-		// Pull the target client's spatial position record
 		playerPos, posExists := ecs.GlobalRegistry.GetPosition(playerID)
-
-		// ZONING FILTER: Only transit data bytes if player is on the same map grid!
 		if posExists && playerPos.MapID == targetMapID {
-			writeMapConn(netComp.Conn, bytePayload)
+			writeConn(netComp.Conn, b)
 		}
-
-		return true // Continue scanning the rest of the map connections
+		return true
 	})
 }
 
-// writeMapConn is the single write point for all outbound map TCP data.
-func writeMapConn(c net.Conn, data []byte) {
+// BroadcastToNeighbors sends data only to players within AOI radius of origin,
+// using SpatialGrid.QueryRadius for O(1) chunk lookup (vs scanning all connections).
+// This is the movement/combat sync hot-path — zero-allocation when data is pooled.
+func BroadcastToNeighbors(origin ecs.PositionComponent, data []byte, excludeID ecs.Entity) {
+	candidates := world.GlobalSpatialGrid.QueryRadius(origin, broadcastAOIRadius, excludeID)
+	for _, entry := range *candidates {
+		connComp, hasConn := ecs.GlobalRegistry.GetConnection(entry.ID)
+		if !hasConn || connComp.Conn == nil {
+			continue
+		}
+		// Monster/ground-item entities without net connections are skipped automatically.
+		writeConn(connComp.Conn, data)
+	}
+	world.FreeQueryCandidates(candidates)
+}
+
+// BroadcastToNeighborsMap is a convenience: builds a PositionComponent from mapID/x/z
+// and broadcasts to neighbors on that map within AOI.
+func BroadcastToNeighborsMap(mapID int, x, z int, data []byte, excludeID ecs.Entity) {
+	origin := ecs.PositionComponent{MapID: mapID, X: x, Z: z}
+	BroadcastToNeighbors(origin, data, excludeID)
+}
+
+// BroadcastToChunk sends data only to players inside the exact spatial chunk containing pos.
+// Uses SpatialGrid.QueryChunk for O(1) chunk lookup — no map-wide scan.
+// Use this for events that only matter to entities in the same tile/cell (e.g. ground items).
+func BroadcastToChunk(pos ecs.PositionComponent, data []byte, excludeID ecs.Entity) {
+	candidates := world.GlobalSpatialGrid.QueryChunk(pos, excludeID)
+	for _, entry := range candidates {
+		connComp, hasConn := ecs.GlobalRegistry.GetConnection(entry.ID)
+		if !hasConn || connComp.Conn == nil {
+			continue
+		}
+		writeConn(connComp.Conn, data)
+	}
+}
+
+// BroadcastToChunkWithRadius sends data to players in all chunks within
+// AOI radius. Uses SpatialGrid.QueryRadius for O(chunk) lookup - lighter
+// than BroadcastToMap's O(N) scan. Maintains exact distance filtering.
+func BroadcastToChunkWithRadius(pos ecs.PositionComponent, data []byte, excludeID ecs.Entity) {
+	candidates := world.GlobalSpatialGrid.QueryRadius(pos, broadcastAOIRadius, excludeID)
+	for _, entry := range *candidates {
+		connComp, hasConn := ecs.GlobalRegistry.GetConnection(entry.ID)
+		if !hasConn || connComp.Conn == nil {
+			continue
+		}
+		writeConn(connComp.Conn, data)
+	}
+	world.FreeQueryCandidates(candidates)
+}
+
+// writeConn is the single write point for all outbound TCP data.
+func writeConn(c net.Conn, data []byte) {
 	if c == nil {
 		return
 	}
-
 	if err := netio.WritePacket(c, data); err != nil {
 		c.Close()
 	}

@@ -97,7 +97,7 @@ func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
 		DeathSystem(targetID, attackerID, targetMeta, attackerMeta)
 
 		// Roll loot and spawn items on the ground if the killed target is a monster and attacker is a player.
-		if targetMeta.Type == "monster" && attackerMeta.Type == "player" {
+		if targetMeta.Type == ecs.EntityMonster && attackerMeta.Type == ecs.EntityPlayer {
 			// Resolve the monster's template ID from its name so every monster
 			// rolls its own loot table instead of always falling back to template 1.
 			if tmpl, found := models.GetTemplateByName(targetMeta.Name); found {
@@ -183,7 +183,7 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 	registry := ecs.GlobalRegistry
 
 	var killMsg string
-	if killerMeta.Type == "monster" {
+	if killerMeta.Type == ecs.EntityMonster {
 		stats, _ := registry.GetStats(killerID)
 		killMsg = fmt.Sprintf("[DEATH] %s (#%d) struck Player %s for %d damage and DEFEATED them!\r\n",
 			killerMeta.Name, killerID, targetMeta.Name, stats.Dam)
@@ -203,7 +203,7 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 	// ← NEW: remove từ spatial grid trước khi ECS cleanup
 	world.GlobalSpatialGrid.RemoveEntity(targetID)
 
-	if targetMeta.Type == "player" {
+	if targetMeta.Type == ecs.EntityPlayer {
 		conn, ok := registry.GetConnection(targetID)
 		if ok && conn.Conn != nil {
 			conn.Conn.Close()
@@ -219,7 +219,7 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 			)
 
 			// Distribute XP if killer was a player
-			if killerMeta.Type == "player" {
+			if killerMeta.Type == ecs.EntityPlayer {
 				xpBounty := t.XPReward
 				if xpBounty > 0 {
 					if partyID := GetPlayerPartyID(killerID); partyID != 0 {
@@ -247,7 +247,7 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 func broadcastHit(r CombatResult) {
 	var msg string
 	attackerMeta, ok := ecs.GlobalRegistry.GetMetadata(r.AttackerID)
-	if ok && attackerMeta.Type == "monster" {
+	if ok && attackerMeta.Type == ecs.EntityMonster {
 		msg = fmt.Sprintf("[COMBAT] %s (#%d) hit Player %s for %d damage! (Player HP: %d)\r\n",
 			r.AttackerName, r.AttackerID, r.TargetName, r.Damage, r.TargetHP)
 	} else {

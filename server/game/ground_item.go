@@ -33,7 +33,7 @@ func SpawnItemOnGround(itemTemplateID uint64, mapID int, x int, z int) ecs.Entit
 	// 4. Populate metadata classification columns
 	ecs.GlobalRegistry.SetMetadata(itemEntity, ecs.MetadataComponent{
 		Name: name,
-		Type: "ground_item",
+		Type: ecs.EntityGroundItem,
 	})
 
 	// 5. Populate ItemTemplateComponent so systems don't have to parse names

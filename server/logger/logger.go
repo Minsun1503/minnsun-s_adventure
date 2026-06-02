@@ -44,10 +44,10 @@ var levelLabels = [...]string{"DEBUG", "INFO ", "WARN ", "ERROR"}
 
 // ANSI color codes for console output.
 var levelColors = [...]string{
-	"\033[36m",  // DEBUG  → Cyan
-	"\033[32m",  // INFO   → Green
-	"\033[33m",  // WARN   → Yellow
-	"\033[31m",  // ERROR  → Red
+	"\033[36m", // DEBUG  → Cyan
+	"\033[32m", // INFO   → Green
+	"\033[33m", // WARN   → Yellow
+	"\033[31m", // ERROR  → Red
 }
 
 const ansiReset = "\033[0m"
@@ -55,9 +55,9 @@ const ansiReset = "\033[0m"
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 type serverConfig struct {
-	Debug     bool   `json:"debug"`
-	LogDir    string `json:"log_dir"`
-	LogMaxMB  int    `json:"log_max_mb"`
+	Debug    bool   `json:"debug"`
+	LogDir   string `json:"log_dir"`
+	LogMaxMB int    `json:"log_max_mb"`
 }
 
 // ─── Log Entry ───────────────────────────────────────────────────────────────
@@ -71,10 +71,10 @@ type logEntry struct {
 // ─── Logger State ────────────────────────────────────────────────────────────
 
 var (
-	debugMode    atomic.Bool           // true = print DEBUG entries
-	logChannel   chan logEntry          // async buffer
+	debugMode    atomic.Bool   // true = print DEBUG entries
+	logChannel   chan logEntry // async buffer
 	shutdownOnce sync.Once
-	done         = make(chan struct{})  // signals worker has flushed and exited
+	done         = make(chan struct{}) // signals worker has flushed and exited
 
 	// file rotation state (guarded by fileMu)
 	fileMu      sync.Mutex
@@ -165,6 +165,12 @@ func push(lv level, format string, args ...any) {
 		lv:      lv,
 		ts:      time.Now(),
 		message: fmt.Sprintf(format, args...),
+	}
+
+	// If the logger has not been initialized yet, silently discard all entries
+	// to avoid blocking the caller forever on a nil channel.
+	if logChannel == nil {
+		return
 	}
 
 	// WARN and ERROR always make it through (block if needed).

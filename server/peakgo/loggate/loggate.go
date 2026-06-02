@@ -1,16 +1,45 @@
 // Package loggate provides production-safe logging wrappers for the
 // Minnsun's Adventure game server core.
 //
-// # The Allocation Problem
+// # Understanding Go's Variadic Allocation Trap
 //
-// Calling loggate.Debugf("entity %d moved", entity.ID) still evaluates the
-// variadic parameters and allocates an argument slice (`[]any`) at the call site
-// before entering the function, even when debug mode is turned OFF.
+// In Go, calling any variadic function (e.g., Debugf("entity %d", id)) forces
+// the compiler to allocate a []any{...} slice at the CALL SITE before entering
+// the function — even if the first line of that function is an early return.
+// This means:
 //
-// To achieve a true, absolute zero-cost footprint on hyper-critical hot paths
-// (such as spatial grids, entity motion ticks, or network frame processing),
-// you must either explicitly guard the call with DebugEnabled() or utilize
-// the deferred block helper DebugLazy().
+//   - loggate.Debugf("entity %d moved", entity.ID)           // 8 B/op alloc
+//   - loggate.Infof("player %s connected", playerName)       // 8 B/op alloc
+//
+// These allocations happen regardless of whether the log level is enabled.
+// This is a fundamental Go language limitation and cannot be eliminated
+// from within the library.
+//
+// # Zero-Allocation Hot-Path Strategies
+//
+// For hyper-critical game loops (spatial queries, movement ticks, packet
+// processing) where even a single per-call allocation is unacceptable,
+// use one of these patterns:
+//
+//  1. Guard with DebugEnabled() — most efficient for hot paths:
+//
+//     if loggate.DebugEnabled() {
+//     loggate.Debugf("entity %d moved to (%d,%d)", id, x, z)
+//     }
+//     // 0 B/op when debug is disabled
+//
+//  2. Use DebugLazy() — convenient for complex multi-arg formatting:
+//
+//     loggate.DebugLazy(func() {
+//     loggate.Debugf("heavy state: %+v", monster.DeepDump())
+//     })
+//     // 0 B/op, closure is never called when debug is disabled
+//
+// # Non-Debug Functions (Info/Warn/Error)
+//
+// Info, Warn, and Error level functions always pass through to the underlying
+// logger and are intended for lower-frequency operational logging (startup
+// messages, critical events). They are not designed for hot-path use.
 package loggate
 
 import "server/logger"

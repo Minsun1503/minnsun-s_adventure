@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"server/ecs"
+	"server/peakgo/pool"
 	"sync"
 )
 
@@ -25,28 +26,17 @@ type ChunkEntry struct {
 }
 
 // Memory pool for chunk bucket slices to completely avoid slice allocation churn during movement.
-var chunkSlicePool = sync.Pool{
-	New: func() any {
-		s := make([]ChunkEntry, 0, 8)
-		return &s
-	},
-}
+var chunkSlicePool = pool.NewSlicePool[ChunkEntry](8)
 
 // Memory pool for QueryRadius outputs to avoid heap allocations in the game loop.
-var queryResultPool = sync.Pool{
-	New: func() any {
-		s := make([]ChunkEntry, 0, 16)
-		return &s
-	},
-}
+var queryResultPool = pool.NewSlicePool[ChunkEntry](256)
 
 // FreeQueryCandidates recycles the slice returned by QueryRadius.
-func FreeQueryCandidates(s []ChunkEntry) {
+func FreeQueryCandidates(s *[]ChunkEntry) {
 	if s == nil {
 		return
 	}
-	s = s[:0]
-	queryResultPool.Put(&s)
+	queryResultPool.Put(s)
 }
 
 // SpatialGrid is the authoritative spatial partition registry.
@@ -70,7 +60,16 @@ func newSpatialGrid() *SpatialGrid {
 	}
 }
 
-// worldToChunk converts a world-space position into its ChunkKey.
+// WorldToChunk converts a world-space position into its ChunkKey (exported).
+func WorldToChunk(pos ecs.PositionComponent) ChunkKey {
+	return ChunkKey{
+		MapID: pos.MapID,
+		X:     int(math.Floor(float64(pos.X) / chunkSize)),
+		Z:     int(math.Floor(float64(pos.Z) / chunkSize)),
+	}
+}
+
+// worldToChunk converts a world-space position into its ChunkKey (unexported).
 func worldToChunk(pos ecs.PositionComponent) ChunkKey {
 	return ChunkKey{
 		MapID: pos.MapID,
@@ -84,18 +83,20 @@ func worldToChunk(pos ecs.PositionComponent) ChunkKey {
 // UpdateEntityPosition is the single write path for spatial data.
 // It handles same-chunk updates in-place, and different-chunk movements
 // using swap-and-slice removals combined with pooled slice allocations.
+//
+// Lock ordering: indexMu.Lock() → chunkMu.Lock() → chunkMu.Unlock() → indexMu.Unlock().
+// Both index and chunk buckets are updated atomically as a transaction.
 func (g *SpatialGrid) UpdateEntityPosition(id ecs.Entity, pos ecs.PositionComponent) {
 	newChunk := worldToChunk(pos)
 	entry := ChunkEntry{ID: id, Pos: pos}
 
-	// Read current chunk under read lock first (fast path: same-chunk update).
-	g.indexMu.RLock()
+	g.indexMu.Lock()
+	g.chunkMu.Lock()
+
 	oldChunk, existed := g.entityIndex[id]
-	g.indexMu.RUnlock()
 
 	if existed && oldChunk == newChunk {
 		// Same chunk: only update the position entry in-place
-		g.chunkMu.Lock()
 		bucket := g.chunks[newChunk]
 		for i, e := range bucket {
 			if e.ID == id {
@@ -104,11 +105,10 @@ func (g *SpatialGrid) UpdateEntityPosition(id ecs.Entity, pos ecs.PositionCompon
 			}
 		}
 		g.chunkMu.Unlock()
+		g.indexMu.Unlock()
 		return
 	}
 
-	// Different chunk or new entity: full update.
-	g.chunkMu.Lock()
 	if existed {
 		// Remove from old chunk bucket
 		oldBucket := g.chunks[oldChunk]
@@ -124,7 +124,6 @@ func (g *SpatialGrid) UpdateEntityPosition(id ecs.Entity, pos ecs.PositionCompon
 		}
 		if len(oldBucket) == 0 {
 			delete(g.chunks, oldChunk)
-			oldBucket = oldBucket[:0]
 			chunkSlicePool.Put(&oldBucket)
 		} else {
 			g.chunks[oldChunk] = oldBucket
@@ -134,27 +133,27 @@ func (g *SpatialGrid) UpdateEntityPosition(id ecs.Entity, pos ecs.PositionCompon
 	// Insert into new chunk bucket
 	newBucket, ok := g.chunks[newChunk]
 	if !ok {
-		pSlice := chunkSlicePool.Get().(*[]ChunkEntry)
-		newBucket = *pSlice
-		newBucket = newBucket[:0]
+		newBucket = *chunkSlicePool.Get()
 	}
 	newBucket = append(newBucket, entry)
 	g.chunks[newChunk] = newBucket
-	g.chunkMu.Unlock()
 
-	// Update reverse index.
-	g.indexMu.Lock()
+	// Update reverse index atomically with chunk state.
 	g.entityIndex[id] = newChunk
+
+	g.chunkMu.Unlock()
 	g.indexMu.Unlock()
 }
 
 // RemoveEntity removes an entity from the spatial grid entirely.
+//
+// Lock ordering: indexMu.Lock() → chunkMu.Lock() → chunkMu.Unlock() → indexMu.Unlock().
+// Both index and chunk buckets are updated atomically as a transaction.
 func (g *SpatialGrid) RemoveEntity(id ecs.Entity) {
-	g.indexMu.RLock()
+	g.indexMu.Lock()
 	chunk, exists := g.entityIndex[id]
-	g.indexMu.RUnlock()
-
 	if !exists {
+		g.indexMu.Unlock()
 		return
 	}
 
@@ -172,15 +171,12 @@ func (g *SpatialGrid) RemoveEntity(id ecs.Entity) {
 	}
 	if len(bucket) == 0 {
 		delete(g.chunks, chunk)
-		bucket = bucket[:0]
 		chunkSlicePool.Put(&bucket)
 	} else {
 		g.chunks[chunk] = bucket
 	}
-	g.chunkMu.Unlock()
-
-	g.indexMu.Lock()
 	delete(g.entityIndex, id)
+	g.chunkMu.Unlock()
 	g.indexMu.Unlock()
 }
 
@@ -188,19 +184,19 @@ func (g *SpatialGrid) RemoveEntity(id ecs.Entity) {
 
 // QueryRadius returns all entities within worldRadius world units of origin.
 // Uses slice pooling to avoid allocating result slices on the heap.
+// Returns *[]ChunkEntry (pointer to pooled slice) to prevent slice header escape
+// across function return boundaries. Callers must dereference and FreeQueryCandidates.
 func (g *SpatialGrid) QueryRadius(
 	origin ecs.PositionComponent,
 	worldRadius float64,
 	excludeID ecs.Entity,
-) []ChunkEntry {
+) *[]ChunkEntry {
 	chunkRadius := int(math.Ceil(worldRadius / chunkSize))
 	originChunk := worldToChunk(origin)
 
 	radiusSq := worldRadius * worldRadius
 
-	pSlice := queryResultPool.Get().(*[]ChunkEntry)
-	results := *pSlice
-	results = results[:0]
+	results := queryResultPool.Get()
 
 	g.chunkMu.RLock()
 	defer g.chunkMu.RUnlock()
@@ -219,7 +215,7 @@ func (g *SpatialGrid) QueryRadius(
 				ddx := float64(entry.Pos.X - origin.X)
 				ddz := float64(entry.Pos.Z - origin.Z)
 				if ddx*ddx+ddz*ddz <= radiusSq {
-					results = append(results, entry)
+					*results = append(*results, entry)
 				}
 			}
 		}
@@ -239,6 +235,24 @@ func (g *SpatialGrid) QueryChunk(pos ecs.PositionComponent, excludeID ecs.Entity
 	for _, entry := range g.chunks[key] {
 		if entry.ID != excludeID {
 			results = append(results, entry)
+		}
+	}
+	return results
+}
+
+// QueryChunkByKey returns all entities in the given chunk key, excluding excludeID.
+// Uses pooled slice allocation to avoid heap churn.
+// Returns *[]ChunkEntry (pointer to pooled slice) to maintain consistent pointer-semantics
+// with QueryRadius. Callers must dereference and FreeQueryCandidates.
+func (g *SpatialGrid) QueryChunkByKey(key ChunkKey, excludeID ecs.Entity) *[]ChunkEntry {
+	results := queryResultPool.Get()
+
+	g.chunkMu.RLock()
+	defer g.chunkMu.RUnlock()
+
+	for _, entry := range g.chunks[key] {
+		if entry.ID != excludeID {
+			*results = append(*results, entry)
 		}
 	}
 	return results

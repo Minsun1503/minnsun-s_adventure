@@ -8,30 +8,40 @@ import (
 	"time"
 )
 
+// globalTick is the monotonically advancing atomic tick counter.
+// Each tick from the heartbeat Ticker increments this counter by 1.
+// Systems consume this value instead of calling time.Now() for drift-free
+// epoch-relative scheduling (e.g. AI roaming, effect expiry, respawn).
+var globalTick uint64
+
+// StartGameLoop launches the 250ms heartbeat Ticker and blocks forever
+// on ticker.C. This function is designed to run as a goroutine.
+//
+// Zero-Syscall hot-path: All time.Now() and time.Since() calls are
+// eliminated from the main loop. The Ticker itself is the sole timing
+// authority — OS scheduler jitter and clock drift are absorbed by Go's
+// runtime, which silently drops stalled ticks without compounding delay.
 func StartGameLoop() {
 	ticker := time.NewTicker(250 * time.Millisecond)
 	go func() {
 		logger.Info("[ENGINE] Heartbeat game loop started at 4 ticks/sec.")
 		for range ticker.C {
-			start := time.Now()
-			tickWorld()
-			if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
-				logger.Warn("[PERF] Game loop tick overran: %v (budget: 50ms)", elapsed)
-			}
+			globalTick++
+			tickWorld(globalTick)
 		}
 	}()
 }
 
 // tickWorld does a single metadata scan per tick.
 // hasPlayers and monster processing happen in the same pass — no double scan.
-func tickWorld() {
+func tickWorld(tick uint64) {
 	hasPlayers := false
 
 	ecs.GlobalRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
 		switch snap.Meta.Type {
-		case "player":
+		case ecs.EntityPlayer:
 			hasPlayers = true
-		case "monster":
+		case ecs.EntityMonster:
 			processMonster(snap)
 		}
 		return true
@@ -77,7 +87,7 @@ func processMonster(snap ecs.EntitySnapshot) {
 // UpdateWorldEntitiesSystem — kept for external callers, now zero double-lookup.
 func UpdateWorldEntitiesSystem() {
 	ecs.GlobalRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
-		if snap.Meta.Type != "monster" || !snap.HasPos || !snap.HasStats {
+		if snap.Meta.Type != ecs.EntityMonster || !snap.HasPos || !snap.HasStats {
 			return true
 		}
 		processMonster(snap)
@@ -86,4 +96,11 @@ func UpdateWorldEntitiesSystem() {
 
 	// Process floor items lifecycle expiration countdown
 	game.RunGroundItemDecaySystem()
+}
+
+// CurrentTick returns the global monotonic tick counter.
+// Subsystems can compare saved tick values against this to implement
+// timer-free, drift-free expiration logic (e.g. "is 5 ticks have passed").
+func CurrentTick() uint64 {
+	return globalTick
 }

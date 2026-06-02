@@ -223,3 +223,14 @@ func BenchmarkSlicePoolRecycleCycle_Scale1024(b *testing.B) {
 		p.Put(ps)
 	}
 }
+
+// BenchmarkBytesPoolGetPutPeakGo measures Get/Put cycle with 1024-byte fixed buffer.
+func BenchmarkBytesPoolGetPutPeakGo(b *testing.B) {
+	p := pool.NewBytesPool(1024)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf := p.Get()
+		p.Put(buf)
+	}
+}

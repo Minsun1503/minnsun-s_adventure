@@ -48,8 +48,11 @@ func TestMovementSystem(t *testing.T) {
 	defer conn.Close()
 
 	registry.SetConnection(playerID, ecs.ConnectionComponent{Conn: conn})
-	registry.SetMetadata(playerID, ecs.MetadataComponent{Name: "Hero", Type: "player"})
+	registry.SetMetadata(playerID, ecs.MetadataComponent{Name: "Hero", Type: ecs.EntityPlayer})
 	registry.SetPosition(playerID, ecs.PositionComponent{MapID: 1, X: 5, Z: 5})
+
+	// Fix AOI: Explicitly register entity in SpatialGrid before AOI queries
+	world.GlobalSpatialGrid.UpdateEntityPosition(playerID, ecs.PositionComponent{MapID: 1, X: 5, Z: 5})
 
 	// 1. Test valid movement
 	success := MovementSystem(playerID, 6, 6)
@@ -69,15 +72,8 @@ func TestMovementSystem(t *testing.T) {
 		t.Errorf("Expected player in spatial grid chunk (0,0), got ok=%t chk=%+v", ok, chk)
 	}
 
-	// Read broadcast msg from connection
-	select {
-	case msg := <-msgChan:
-		if !strings.Contains(msg, "Hero moved to position: X=6, Z=6") {
-			t.Errorf("Unexpected broadcast message: %q", msg)
-		}
-	case <-time.After(200 * time.Millisecond):
-		t.Error("Timed out waiting for movement broadcast")
-	}
+	// No broadcast assertion here because BroadcastToNeighbors excludes the source entity.
+	// With only one player in the test, no binary frame reaches the connection.
 
 	// 2. Test out-of-bounds movement
 	success = MovementSystem(playerID, -1, 5)
@@ -93,10 +89,11 @@ func TestMovementSystem(t *testing.T) {
 		t.Error("Timed out waiting for boundary rejection notice")
 	}
 
-	// 3. Test blocked tile collision
-	success = MovementSystem(playerID, 50, 50) // Blocked square
+	// 3. Test blocked tile collision — use a neighboring blocked tile within MaxMoveDistance=2
+	// (7, 6) is within Chebyshev distance 1 from current pos (6, 6), but tile is blocked.
+	success = MovementSystem(playerID, 7, 6) // Blocked neighbor
 	if success {
-		t.Error("Expected movement to blocked square (50, 50) to be rejected")
+		t.Error("Expected movement to blocked tile (7, 6) to be rejected")
 	}
 	select {
 	case msg := <-msgChan:
@@ -105,5 +102,20 @@ func TestMovementSystem(t *testing.T) {
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Error("Timed out waiting for collision rejection notice")
+	}
+
+	// 4. Test anti-teleport / speed-hack detection
+	// Jump from last valid pos (6,6) to (20,20) — dx=14, dz=14 both exceed MaxMoveDistance=2.
+	success = MovementSystem(playerID, 20, 20)
+	if success {
+		t.Error("Expected teleport jump to (20, 20) to be rejected by anti-cheat")
+	}
+	select {
+	case msg := <-msgChan:
+		if !strings.Contains(msg, "Movement rejected! Teleport/Speed hack detected.") {
+			t.Errorf("Unexpected anti-cheat message: %q", msg)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Error("Timed out waiting for anti-cheat rejection notice")
 	}
 }

@@ -123,8 +123,8 @@ func broadcastBinaryMovement(entity ecs.Entity, pos ecs.PositionComponent) {
 	codec.WriteInt32(buf[11:15], int32(pos.X))
 	codec.WriteInt32(buf[15:19], int32(pos.Z))
 
-	// Truyền thẳng mảng byte nhị phân xuống Network Buffer của toàn map, gánh ngon lành hàng vạn CCU
-	protocol.BroadcastToMap(pos.MapID, string(buf))
+	// Phát sóng theo vùng AOI: chỉ gửi gói tin đến các thực thể lân cận, triệt tiêu O(N)
+	protocol.BroadcastToNeighbors(pos, buf, entity)
 
 	// Đạt mốc 0 alloc hoàn hảo cho hệ thống Debug: Chỉ truy vết Metadata khi chế độ Debug thực sự bật
 	if loggate.DebugEnabled() {

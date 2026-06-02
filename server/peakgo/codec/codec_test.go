@@ -290,3 +290,15 @@ func BenchmarkReadAttackPayload(b *testing.B) {
 		_, _ = codec.ReadAttackPayload(buf)
 	}
 }
+
+// BenchmarkMarshalPeakGo measures the cost of encoding a MovePayload struct into a byte buffer.
+// Simulates the hot-path Marshal operation used in packet construction.
+func BenchmarkMarshalPeakGo(b *testing.B) {
+	buf := make([]byte, 8)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		codec.WriteInt32(buf[0:4], 50)
+		codec.WriteInt32(buf[4:8], 75)
+	}
+}

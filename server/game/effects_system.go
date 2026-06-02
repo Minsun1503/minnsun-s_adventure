@@ -31,7 +31,7 @@ func RunStatusEffectsSystem() {
 			effect.Duration -= tickInterval
 
 			if effect.Duration <= 0 {
-				// Effect expired! 
+				// Effect expired!
 				if effect.Type == "haste_buff" {
 					forceStatRecalc = true
 				}
@@ -52,13 +52,13 @@ func RunStatusEffectsSystem() {
 						if stats.HP < 0 {
 							stats.HP = 0
 						}
-						
+
 						// OVERWRITE
 						ecs.GlobalRegistry.SetStats(id, stats)
 						effect.LastTickTime = now
 
 						if posOk {
-							protocol.BroadcastToMap(pos.MapID, fmt.Sprintf("[STATUS] %s (#%d) suffered -%d %s damage! (HP: %d/%d)\r\n", 
+							protocol.BroadcastToMap(pos.MapID, fmt.Sprintf("[STATUS] %s (#%d) suffered -%d %s damage! (HP: %d/%d)\r\n",
 								meta.Name, id, effect.Value, effect.Type, stats.HP, stats.MaxHP))
 						}
 
@@ -68,8 +68,8 @@ func RunStatusEffectsSystem() {
 								protocol.BroadcastToMap(pos.MapID, fmt.Sprintf("[DEATH] %s (#%d) succumbed to %s.\r\n", meta.Name, id, effect.Type))
 							}
 
-							DeathSystem(id, 0, meta, ecs.MetadataComponent{Name: effect.Type, Type: "status_effect"})
-							continue // Stop processing an already erased row anchor
+							DeathSystem(id, 0, meta, ecs.MetadataComponent{Name: effect.Type, Type: ecs.EntityMonster}) // status_effect not in EntityType enum; fallback to monster for logging
+							continue                                                                                    // Stop processing an already erased row anchor
 						}
 					}
 				}
@@ -84,7 +84,7 @@ func RunStatusEffectsSystem() {
 		ecs.GlobalRegistry.SetEffects(id, effComp)
 
 		// If a major buff expired, re-run aggregation logic immediately to strip bonus points
-		if forceStatRecalc && meta.Type == "player" {
+		if forceStatRecalc && meta.Type == ecs.EntityPlayer {
 			RecalculateActiveStats(id)
 		}
 
