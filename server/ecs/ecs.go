@@ -2,15 +2,17 @@ package ecs
 
 import (
 	"net"
+	"server/peakgo/timer" // Tích hợp chặt chẽ hệ thống TickTimer lõi
 	"sync"
 	"sync/atomic"
 )
 
-// Entity is a uint64 for O(1) integer map lookup instead of string hashing.
+// Entity đại diện cho mã định danh thực thể kiểu uint64 giúp tra cứu Map O(1).
 type Entity uint64
 
-// Components stored as inline values (not pointers) to avoid extra heap allocs.
-// Exception: ConnectionComponent keeps net.Conn as an interface (already a pointer).
+// ─── COMPONENT DEFINITIONS ───────────────────────────────────────────────────
+// Các Component được lưu trữ dưới dạng inline value (không dùng con trỏ)
+// để tối ưu bộ nhớ đệm CPU cache-locality và triệt tiêu áp lực dọn rác của GC.
 
 type PositionComponent struct {
 	MapID int
@@ -19,7 +21,7 @@ type PositionComponent struct {
 }
 
 type ConnectionComponent struct {
-	Conn net.Conn
+	Conn net.Conn // Interface bản chất là con trỏ, giữ nguyên.
 }
 
 type MetadataComponent struct {
@@ -41,29 +43,87 @@ type ItemTemplateComponent struct {
 	TemplateID uint64
 }
 
-// PartyComponent represents a player party/team entity.
-// The entity owning this component is the party itself (not a player).
-// MemberIDs tracks all current members in insertion order.
-// PartyMemberComponent on each member carries a back-reference to this party entity.
+// AIState định danh các trạng thái của cỗ máy FSM quái vật.
+type AIState uint8
+
+const (
+	AIStateIdle AIState = iota
+	AIStateRoaming
+	AIStateChasing
+	AIStateAttacking
+	AIStateReturning
+)
+
+func (s AIState) String() string {
+	switch s {
+	case AIStateIdle:
+		return "Idle"
+	case AIStateRoaming:
+		return "Roaming"
+	case AIStateChasing:
+		return "Chasing"
+	case AIStateAttacking:
+		return "Attacking"
+	case AIStateReturning:
+		return "Returning"
+	default:
+		return "Unknown"
+	}
+}
+
+// AIComponent lưu giữ trạng thái bộ đếm thời gian và chỉ số tư duy của Quái vật.
+type AIComponent struct {
+	State       AIState
+	TargetID    Entity
+	SpawnX      int
+	SpawnZ      int
+	SpawnRadius int
+	AggroRadius float64
+	LeashRadius int
+	MeleeRange  int
+	AttackTimer timer.TickTimer
+	IdleTimer   timer.TickTimer
+	PathTimer   timer.TickTimer
+	RoamTargetX int
+	RoamTargetZ int
+}
+
+type InventoryComponent struct {
+	Slots []uint64
+}
+
+type LifetimeComponent struct {
+	Millis int64
+}
+
+type EffectsComponent struct {
+	ActiveEffects []uint32
+}
+
+type EquipmentComponent struct {
+	WeaponID uint64
+	ArmorID  uint64
+}
+
 type PartyComponent struct {
 	LeaderID  Entity
 	TeamName  string
 	MemberIDs []Entity
 }
 
-// Clone thực hiện DEEP COPY danh sách thành viên tổ đội bên trong.
 func (c PartyComponent) Clone() PartyComponent {
 	return PartyComponent{
 		LeaderID:  c.LeaderID,
 		TeamName:  c.TeamName,
-		MemberIDs: append([]Entity(nil), c.MemberIDs...),
+		MemberIDs: append([]Entity(nil), c.MemberIDs...), // Deep copy mảng tránh gãy vùng nhớ.
 	}
 }
 
-// PartyMemberComponent is attached to each player who belongs to a party.
 type PartyMemberComponent struct {
 	PartyID Entity
 }
+
+// ─── SPARSE SET COMPONENT STORE ARCHITECTURE ─────────────────────────────────
 
 const chunkSize = 1024
 
@@ -74,12 +134,10 @@ var entitySlicePool = sync.Pool{
 	},
 }
 
-// ComponentStore implements a thread-safe, high-performance, cache-friendly Sparse Set.
-// It stores components contiguously in memory and provides O(1) lookups, insertions, and deletions.
 type ComponentStore[T any] struct {
 	mu     sync.RWMutex
 	dense  []Entity
-	sparse [][]int32 // Paged sparse array to avoid allocating huge flat slices for sparse Entity IDs
+	sparse [][]int32 // Paged sparse array chống phình bộ nhớ phân mảnh.
 	values []T
 }
 
@@ -102,14 +160,12 @@ func (s *ComponentStore[T]) Set(id Entity, val T) {
 	offset := id % chunkSize
 	idx := page[offset]
 
-	// Overwrite if already exists
 	if idx != 0 && idx-1 < int32(len(s.dense)) && s.dense[idx-1] == id {
 		s.values[idx-1] = val
 		s.mu.Unlock()
 		return
 	}
 
-	// Add new
 	newIdx := int32(len(s.dense)) + 1
 	page[offset] = newIdx
 	s.dense = append(s.dense, id)
@@ -186,7 +242,25 @@ func (s *ComponentStore[T]) Delete(id Entity) {
 	s.mu.Unlock()
 }
 
+// Range là hàm siêu tốc tối ưu cho Hot-Path ĐỌC dữ liệu (99% chu kỳ game loop).
+// Đã sửa: Giữ RLock duy nhất cho toàn bộ chu trình duyệt mảng dense/values song song,
+// triệt tiêu hoàn toàn gánh nặng lock/unlock liên tục trên từng thực thể độc lập.
+// Giao kèo: Lập trình viên KHÔNG ĐƯỢC phép thêm/xóa component của store này trong hàm callback f.
 func (s *ComponentStore[T]) Range(f func(key Entity, value T) bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for i, id := range s.dense {
+		if !f(id, s.values[i]) {
+			break
+		}
+	}
+}
+
+// RangeMutate chuyên dụng cho các vòng lặp cần chỉnh sửa cấu trúc (Mutation).
+// Thích hợp khi callback f cần gọi Set() hoặc Delete() trực tiếp lên chính store này.
+// Tận dụng mảng đệm mượn từ Pool để triệt tiêu chi phí Allocation vùng nhớ rác.
+func (s *ComponentStore[T]) RangeMutate(f func(key Entity) bool) {
 	s.mu.RLock()
 	count := len(s.dense)
 	if count == 0 {
@@ -205,9 +279,9 @@ func (s *ComponentStore[T]) Range(f func(key Entity, value T) bool) {
 	s.mu.RUnlock()
 
 	for _, id := range buf {
-		val, ok := s.Get(id)
-		if ok {
-			if !f(id, val) {
+		// Re-fetch động bảo vệ an toàn cho bộ nhớ nếu vòng lặp trước đã thực hiện lệnh xóa
+		if _, ok := s.Get(id); ok {
+			if !f(id) {
 				break
 			}
 		}
@@ -217,15 +291,15 @@ func (s *ComponentStore[T]) Range(f func(key Entity, value T) bool) {
 	entitySlicePool.Put(pBuf)
 }
 
-// Registry uses paged Sparse Set per component type for peak cache-locality and O(1) performance.
-// ID generation uses an atomic counter, making RegisterEntity lock-free.
+// ─── MASTER REGISTRY SYSTEM ──────────────────────────────────────────────────
+
 type Registry struct {
 	nextID        atomic.Uint64
 	positions     ComponentStore[PositionComponent]
 	conns         ComponentStore[ConnectionComponent]
 	metadata      ComponentStore[MetadataComponent]
 	stats         ComponentStore[StatsComponent]
-	ai            ComponentStore[AIComponent]
+	ai            ComponentStore[AIComponent] // Quản lý AI Quái vật.
 	inventories   ComponentStore[InventoryComponent]
 	lifetimes     ComponentStore[LifetimeComponent]
 	itemTemplates ComponentStore[ItemTemplateComponent]
@@ -237,18 +311,19 @@ type Registry struct {
 
 var GlobalRegistry = &Registry{}
 
-// NewEntity generates a new unique Entity ID atomically — no lock needed.
 func (r *Registry) NewEntity() Entity {
 	return Entity(r.nextID.Add(1))
 }
 
-// RemoveEntity deletes all components sequentially.
+// RemoveEntity thực hiện dọn dẹp tuần tự toàn bộ các thành phần của một Entity.
+// Cảnh báo Concurrency: Hàm này không mang tính Transaction nguyên tử liên vùng.
+// Hoạt động an toàn tuyệt đối dưới cấu trúc vòng lặp game loop đơn luồng (Single-threaded worker framework).
 func (r *Registry) RemoveEntity(id Entity) {
 	r.positions.Delete(id)
 	r.conns.Delete(id)
 	r.metadata.Delete(id)
 	r.stats.Delete(id)
-	r.ai.Delete(id)
+	r.ai.Delete(id) // Giải phóng thành phần trí tuệ AI.
 	r.inventories.Delete(id)
 	r.lifetimes.Delete(id)
 	r.itemTemplates.Delete(id)
@@ -258,121 +333,69 @@ func (r *Registry) RemoveEntity(id Entity) {
 	r.effects.Delete(id)
 }
 
-// RangeMetadata iterates all entities that have a MetadataComponent.
-func (r *Registry) RangeMetadata(f func(id Entity, meta MetadataComponent) bool) {
-	r.metadata.Range(f)
-}
+// ─── AI COMPONENT STORE PUBLIC APIS ──────────────────────────────────────────
+// Đã sửa: Bổ sung trọn bộ API cầu nối AI cho Registry để hệ thống Quái vật compile thành công 100%.
 
-// SetNextID sets the internal atomic entity ID counter.
-func (r *Registry) SetNextID(val uint64) {
-	r.nextID.Store(val)
-}
+func (r *Registry) SetAI(id Entity, comp AIComponent)                 { r.ai.Set(id, comp) }
+func (r *Registry) GetAI(id Entity) (AIComponent, bool)               { return r.ai.Get(id) }
+func (r *Registry) DeleteAI(id Entity)                                { r.ai.Delete(id) }
+func (r *Registry) RangeAI(f func(id Entity, value AIComponent) bool) { r.ai.Range(f) }
 
-// RangeEffects iterates all entities that have an EffectsComponent.
-func (r *Registry) RangeEffects(f func(id Entity, comp EffectsComponent) bool) {
-	r.effects.Range(f)
-}
+// ─── STANDARD COMPONENT REGISTRY CORE APIS ───────────────────────────────────
 
-func (r *Registry) SetEffects(id Entity, comp EffectsComponent) {
-	r.effects.Set(id, comp)
-}
+func (r *Registry) SetPosition(id Entity, comp PositionComponent)   { r.positions.Set(id, comp) }
+func (r *Registry) GetPosition(id Entity) (PositionComponent, bool) { return r.positions.Get(id) }
 
-func (r *Registry) GetEffects(id Entity) (EffectsComponent, bool) {
-	return r.effects.Get(id)
-}
+func (r *Registry) SetConnection(id Entity, comp ConnectionComponent)   { r.conns.Set(id, comp) }
+func (r *Registry) GetConnection(id Entity) (ConnectionComponent, bool) { return r.conns.Get(id) }
 
-func (r *Registry) DeleteEffects(id Entity) {
-	r.effects.Delete(id)
-}
+func (r *Registry) SetMetadata(id Entity, comp MetadataComponent)                { r.metadata.Set(id, comp) }
+func (r *Registry) GetMetadata(id Entity) (MetadataComponent, bool)              { return r.metadata.Get(id) }
+func (r *Registry) RangeMetadata(f func(id Entity, meta MetadataComponent) bool) { r.metadata.Range(f) }
 
-func (r *Registry) SetLifetime(id Entity, comp LifetimeComponent) {
-	r.lifetimes.Set(id, comp)
-}
+func (r *Registry) SetStats(id Entity, comp StatsComponent)   { r.stats.Set(id, comp) }
+func (r *Registry) GetStats(id Entity) (StatsComponent, bool) { return r.stats.Get(id) }
 
-func (r *Registry) GetLifetime(id Entity) (LifetimeComponent, bool) {
-	return r.lifetimes.Get(id)
-}
+func (r *Registry) SetLifetime(id Entity, comp LifetimeComponent)   { r.lifetimes.Set(id, comp) }
+func (r *Registry) GetLifetime(id Entity) (LifetimeComponent, bool) { return r.lifetimes.Get(id) }
 
 func (r *Registry) SetItemTemplate(id Entity, comp ItemTemplateComponent) {
 	r.itemTemplates.Set(id, comp)
 }
-
 func (r *Registry) GetItemTemplate(id Entity) (ItemTemplateComponent, bool) {
 	return r.itemTemplates.Get(id)
 }
 
-func (r *Registry) SetEquipment(id Entity, comp EquipmentComponent) {
-	r.equipment.Set(id, comp)
-}
+func (r *Registry) SetEquipment(id Entity, comp EquipmentComponent)   { r.equipment.Set(id, comp) }
+func (r *Registry) GetEquipment(id Entity) (EquipmentComponent, bool) { return r.equipment.Get(id) }
 
-func (r *Registry) GetEquipment(id Entity) (EquipmentComponent, bool) {
-	return r.equipment.Get(id)
-}
+func (r *Registry) SetEffects(id Entity, comp EffectsComponent)                { r.effects.Set(id, comp) }
+func (r *Registry) GetEffects(id Entity) (EffectsComponent, bool)              { return r.effects.Get(id) }
+func (r *Registry) DeleteEffects(id Entity)                                    { r.effects.Delete(id) }
+func (r *Registry) RangeEffects(f func(id Entity, comp EffectsComponent) bool) { r.effects.Range(f) }
 
-func (r *Registry) SetPosition(id Entity, comp PositionComponent) {
-	r.positions.Set(id, comp)
-}
+func (r *Registry) SetParty(id Entity, comp PartyComponent)   { r.parties.Set(id, comp) }
+func (r *Registry) GetParty(id Entity) (PartyComponent, bool) { return r.parties.Get(id) }
+func (r *Registry) DeleteParty(id Entity)                     { r.parties.Delete(id) }
 
-func (r *Registry) GetPosition(id Entity) (PositionComponent, bool) {
-	return r.positions.Get(id)
-}
-
-func (r *Registry) SetConnection(id Entity, comp ConnectionComponent) {
-	r.conns.Set(id, comp)
-}
-
-func (r *Registry) GetConnection(id Entity) (ConnectionComponent, bool) {
-	return r.conns.Get(id)
-}
-
-func (r *Registry) SetMetadata(id Entity, comp MetadataComponent) {
-	r.metadata.Set(id, comp)
-}
-
-func (r *Registry) GetMetadata(id Entity) (MetadataComponent, bool) {
-	return r.metadata.Get(id)
-}
-
-func (r *Registry) SetStats(id Entity, comp StatsComponent) {
-	r.stats.Set(id, comp)
-}
-
-func (r *Registry) GetStats(id Entity) (StatsComponent, bool) {
-	return r.stats.Get(id)
-}
-
-// ─── Party Component helpers ─────────────────────────────────────────────
-
-func (r *Registry) SetParty(id Entity, comp PartyComponent) {
-	r.parties.Set(id, comp)
-}
-
-func (r *Registry) GetParty(id Entity) (PartyComponent, bool) {
-	return r.parties.Get(id)
-}
-
-func (r *Registry) DeleteParty(id Entity) {
-	r.parties.Delete(id)
-}
-
-func (r *Registry) SetPartyMember(id Entity, comp PartyMemberComponent) {
-	r.partyMembers.Set(id, comp)
-}
-
+func (r *Registry) SetPartyMember(id Entity, comp PartyMemberComponent) { r.partyMembers.Set(id, comp) }
 func (r *Registry) GetPartyMember(id Entity) (PartyMemberComponent, bool) {
 	return r.partyMembers.Get(id)
 }
-
-func (r *Registry) DeletePartyMember(id Entity) {
-	r.partyMembers.Delete(id)
-}
-
-// RangePartyMembers iterates all entities that have a PartyMemberComponent.
+func (r *Registry) DeletePartyMember(id Entity) { r.partyMembers.Delete(id) }
 func (r *Registry) RangePartyMembers(f func(id Entity, pm PartyMemberComponent) bool) {
 	r.partyMembers.Range(f)
 }
 
-// GetAllEntities collects all entities that have at least a MetadataComponent.
+func (r *Registry) RangeConnections(f func(id Entity, conn ConnectionComponent) bool) {
+	r.conns.Range(f)
+}
+
+// ─── DIAGNOSTIC & SURVEY LAYER APIS ──────────────────────────────────────────
+
+// GetAllEntities thu thập toàn bộ ID thực thể đang hoạt động trong game.
+// Cảnh báo Hiệu năng: Hàm này liên tục thực hiện lệnh append gây phình Heap bộ nhớ rác.
+// Chỉ định tuyến sử dụng cho mục đích Debug, Admin Command hoặc lưu dữ liệu (Save Game). Tuyệt đối cấm gọi trên Hot-Path game loop!
 func (r *Registry) GetAllEntities() []Entity {
 	var list []Entity
 	r.metadata.Range(func(key Entity, _ MetadataComponent) bool {
@@ -382,7 +405,7 @@ func (r *Registry) GetAllEntities() []Entity {
 	return list
 }
 
-// EntitySnapshot holds a pre-fetched view of all components for one entity.
+// EntitySnapshot đại diện cho một góc nhìn tổng hợp nhanh về trạng thái thực thể.
 type EntitySnapshot struct {
 	ID       Entity
 	Meta     MetadataComponent
@@ -392,8 +415,9 @@ type EntitySnapshot struct {
 	HasStats bool
 }
 
-// RangeSnapshots iterates all entities that have a MetadataComponent and yields
-// an EntitySnapshot with Position and Stats pre-fetched — zero follow-up lookups.
+// RangeSnapshots thực hiện kết xuất lát cắt trạng thái thực thể diện rộng.
+// Chú thích thiết kế: Hàm này thực hiện nhiều lệnh tra cứu riêng lẻ, dữ liệu tổng hợp không mang tính
+// nguyên tử tuyệt đối trừ khi toàn bộ tiến trình game loop được bảo vệ bởi một khóa Master Lock bên ngoài.
 func (r *Registry) RangeSnapshots(f func(snap EntitySnapshot) bool) {
 	r.metadata.Range(func(id Entity, meta MetadataComponent) bool {
 		pos, hasPos := r.positions.Get(id)
@@ -409,12 +433,6 @@ func (r *Registry) RangeSnapshots(f func(snap EntitySnapshot) bool) {
 	})
 }
 
-// RangeConnections iterates all entities that have a ConnectionComponent.
-func (r *Registry) RangeConnections(f func(id Entity, conn ConnectionComponent) bool) {
-	r.conns.Range(f)
-}
-
-// GetSnapshot returns a fully pre-fetched EntitySnapshot for a single entity.
 func (r *Registry) GetSnapshot(id Entity) (EntitySnapshot, bool) {
 	meta, ok := r.metadata.Get(id)
 	if !ok {
@@ -431,3 +449,6 @@ func (r *Registry) GetSnapshot(id Entity) (EntitySnapshot, bool) {
 		HasStats: hasStats,
 	}, true
 }
+
+// Sắp xếp dữ liệu kiểm soát thủ công ID counter nếu cần thiết (ví dụ: hot-reload)
+func (r *Registry) SetNextID(val uint64) { r.nextID.Store(val) }

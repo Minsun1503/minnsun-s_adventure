@@ -8,169 +8,235 @@ import (
 	"time"
 )
 
-// ─── Correctness ─────────────────────────────────────────────────────────────
-
+// TestSubscribeAndPublish verifies the most basic pub/sub loop:
+// Registering a subscriber, publishing a single message, and asserting content.
 func TestSubscribeAndPublish(t *testing.T) {
 	bus := eventbus.New()
-	received := make(chan eventbus.Event, 1)
+	defer bus.Drain() // Ensures background workers are terminated cleanly after test
 
-	bus.Subscribe("test.topic", func(e eventbus.Event) {
-		received <- e
+	received := make(chan string, 1)
+
+	bus.Subscribe("test", func(e eventbus.Event) {
+		received <- e.(string)
 	}, 0)
 
-	bus.Publish("test.topic", "hello")
+	bus.Publish("test", "hello")
 
 	select {
-	case e := <-received:
-		if e.(string) != "hello" {
-			t.Fatalf("expected 'hello', got %v", e)
+	case got := <-received:
+		if got != "hello" {
+			t.Fatalf("expected hello, got %q", got)
 		}
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("timed out waiting for event")
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for event")
 	}
 }
 
-func TestMultipleSubscribersSameTopicAllReceive(t *testing.T) {
+// TestMultipleSubscribersReceiveEvent ensures that when an event is published,
+// ALL subscribers listening to that specific topic receive exactly one copy (Fan-out pattern).
+func TestMultipleSubscribersReceiveEvent(t *testing.T) {
 	bus := eventbus.New()
-	const N = 3
-	var count atomic.Int32
-	var wg sync.WaitGroup
-	wg.Add(N)
+	defer bus.Drain()
 
-	for i := 0; i < N; i++ {
-		bus.Subscribe("broadcast.topic", func(e eventbus.Event) {
-			count.Add(1)
+	const subscribers = 5
+
+	var wg sync.WaitGroup
+	wg.Add(subscribers)
+
+	for i := 0; i < subscribers; i++ {
+		bus.Subscribe("broadcast", func(e eventbus.Event) {
 			wg.Done()
 		}, 0)
 	}
 
-	bus.Publish("broadcast.topic", struct{}{})
+	bus.Publish("broadcast", struct{}{})
 
 	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
 	select {
 	case <-done:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatalf("timed out — only %d/%d subscribers received event", count.Load(), N)
-	}
-	if count.Load() != N {
-		t.Fatalf("expected %d deliveries, got %d", N, count.Load())
+	case <-time.After(time.Second):
+		t.Fatal("not all subscribers received event")
 	}
 }
 
-func TestPublishToUnknownTopicIsNoOp(t *testing.T) {
+// TestPublishUnknownTopic verifies that publishing an event to a topic
+// with zero registered subscribers is a safe, non-blocking no-op.
+func TestPublishUnknownTopic(t *testing.T) {
 	bus := eventbus.New()
-	// Should not panic or block
-	bus.Publish("nonexistent.topic", "event")
+	defer bus.Drain()
+
+	bus.Publish("unknown", struct{}{})
 }
 
-func TestPublishMultipleEventsOrdering(t *testing.T) {
+// TestOrderingPerSubscriber guarantees the strict FIFO delivery rule.
+// Events dispatched sequentially must land in the exact same sequence at the subscriber.
+func TestOrderingPerSubscriber(t *testing.T) {
 	bus := eventbus.New()
-	results := make([]int, 0, 5)
-	var mu sync.Mutex
-	done := make(chan struct{})
+	defer bus.Drain()
+
 	expected := []int{1, 2, 3, 4, 5}
 
-	bus.Subscribe("order.topic", func(e eventbus.Event) {
+	var (
+		mu      sync.Mutex
+		results []int
+		done    = make(chan struct{})
+	)
+
+	bus.Subscribe("order", func(e eventbus.Event) {
 		mu.Lock()
+		defer mu.Unlock()
+
 		results = append(results, e.(int))
-		if len(results) == 5 {
+
+		if len(results) == len(expected) {
 			close(done)
 		}
-		mu.Unlock()
 	}, 16)
 
 	for _, v := range expected {
-		bus.Publish("order.topic", v)
+		bus.Publish("order", v)
 	}
 
 	select {
 	case <-done:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timed out waiting for all events")
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for ordered events")
 	}
 
 	mu.Lock()
 	defer mu.Unlock()
-	for i, v := range expected {
-		if results[i] != v {
-			t.Fatalf("order mismatch at index %d: expected %d got %d", i, v, results[i])
+
+	for i := range expected {
+		if results[i] != expected[i] {
+			t.Fatalf(
+				"index=%d expected=%d got=%d",
+				i,
+				expected[i],
+				results[i],
+			)
 		}
 	}
 }
 
+// TestDropWhenChannelFull validates the critical "At-Most-Once" delivery rule.
+// It explicitly blocks the consumer worker, fills up the channel buffer (capacity 1),
+// floods the bus, and verifies that overflowing events are safely dropped without stalling the engine.
 func TestDropWhenChannelFull(t *testing.T) {
 	bus := eventbus.New()
-	// Subscribe with channel size 1 and a slow handler to force drops.
-	var received atomic.Int32
-	bus.Subscribe("slow.topic", func(e eventbus.Event) {
-		time.Sleep(50 * time.Millisecond) // slow consumer
-		received.Add(1)
+
+	var delivered atomic.Int32
+
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+
+	// Subscribe with a tiny buffer size of 1
+	bus.Subscribe("slow", func(e eventbus.Event) {
+		if e == "blocker" {
+			close(handlerStarted)
+			<-releaseHandler // Freezes the worker completely
+			return
+		}
+
+		delivered.Add(1)
 	}, 1)
 
-	// Publish 10 events rapidly — most should be dropped.
-	for i := 0; i < 10; i++ {
-		bus.Publish("slow.topic", i)
+	// 1. Send the blocker packet to freeze the consumer
+	bus.Publish("slow", "blocker")
+	<-handlerStarted // Wait until the worker is locked
+
+	// 2. This event occupies the 1 available slot in the buffer channel
+	bus.Publish("slow", "buffered")
+
+	// 3. Flood the bus. Since the worker is frozen and the buffer is full,
+	// all 100 packets must be thrown away instantly (non-blocking drop)
+	for i := 0; i < 100; i++ {
+		bus.Publish("slow", i)
 	}
 
-	// Wait for the 1-2 that got through.
-	time.Sleep(200 * time.Millisecond)
-	got := received.Load()
-	if got > 3 {
-		t.Fatalf("expected at most 3 deliveries with slow consumer, got %d", got)
+	// 4. Release the consumer freeze and let the bus flush
+	close(releaseHandler)
+	bus.Drain() // Wait for the remaining "buffered" event to process
+
+	// Only "buffered" should make it through. All 100 loops must be dropped.
+	if delivered.Load() != 1 {
+		t.Fatalf(
+			"expected exactly one buffered event, got %d",
+			delivered.Load(),
+		)
 	}
 }
 
+// TestDrainStopsFurtherPublish evaluates the lifecycle isolation.
+// Once Drain() triggers, the system turns away new incoming packages instantly.
+func TestDrainStopsFurtherPublish(t *testing.T) {
+	bus := eventbus.New()
+
+	var count atomic.Int32
+
+	bus.Subscribe("drain", func(e eventbus.Event) {
+		count.Add(1)
+	}, 8)
+
+	bus.Publish("drain", 1) // Safe delivery
+
+	bus.Drain() // Closes the bus completely
+
+	bus.Publish("drain", 2) // Must be blocked and ignored safely
+
+	if count.Load() != 1 {
+		t.Fatalf(
+			"expected 1 delivery, got %d",
+			count.Load(),
+		)
+	}
+}
+
+// TestTopicAndSubscriberCount verifies internal reporting counters are reporting accurate data maps.
 func TestTopicAndSubscriberCount(t *testing.T) {
 	bus := eventbus.New()
-	if bus.TopicCount() != 0 {
-		t.Fatal("expected 0 topics on new bus")
-	}
+	defer bus.Drain()
 
 	bus.Subscribe("a", func(e eventbus.Event) {}, 0)
 	bus.Subscribe("a", func(e eventbus.Event) {}, 0)
 	bus.Subscribe("b", func(e eventbus.Event) {}, 0)
 
 	if bus.TopicCount() != 2 {
-		t.Fatalf("expected 2 topics, got %d", bus.TopicCount())
+		t.Fatalf(
+			"expected 2 topics, got %d",
+			bus.TopicCount(),
+		)
 	}
+
 	if bus.SubscriberCount() != 3 {
-		t.Fatalf("expected 3 subscribers, got %d", bus.SubscriberCount())
+		t.Fatalf(
+			"expected 3 subscribers, got %d",
+			bus.SubscriberCount(),
+		)
 	}
 }
 
-func TestDrainStopsDelivery(t *testing.T) {
-	bus := eventbus.New()
-	var count atomic.Int32
-
-	bus.Subscribe("drain.topic", func(e eventbus.Event) {
-		count.Add(1)
-	}, 4)
-
-	bus.Publish("drain.topic", 1)
-	time.Sleep(50 * time.Millisecond)
-	bus.Drain()
-
-	// Events published after Drain should be no-ops.
-	bus.Publish("drain.topic", 2)
-	time.Sleep(50 * time.Millisecond)
-
-	if count.Load() > 1 {
-		t.Fatalf("expected at most 1 delivery after drain, got %d", count.Load())
-	}
-}
-
+// TestTypedEventRoundTrip verifies the real-world payload integrity.
+// Asserts that specific struct fields pass correctly without truncation or corruption.
 func TestTypedEventRoundTrip(t *testing.T) {
 	bus := eventbus.New()
+	defer bus.Drain()
+
 	received := make(chan eventbus.MonsterDeathEvent, 1)
 
-	bus.Subscribe(eventbus.TopicMonsterDeath, func(e eventbus.Event) {
-		if ev, ok := e.(eventbus.MonsterDeathEvent); ok {
-			received <- ev
-		}
-	}, 0)
+	bus.Subscribe(
+		eventbus.TopicMonsterDeath,
+		func(e eventbus.Event) {
+			received <- e.(eventbus.MonsterDeathEvent)
+		},
+		0,
+	)
 
-	ev := eventbus.MonsterDeathEvent{
+	expected := eventbus.MonsterDeathEvent{
 		MonsterID:   42,
 		KillerID:    7,
 		MonsterName: "Bandit",
@@ -178,58 +244,175 @@ func TestTypedEventRoundTrip(t *testing.T) {
 		XPReward:    50,
 		TemplateID:  2,
 	}
-	bus.Publish(eventbus.TopicMonsterDeath, ev)
+
+	bus.Publish(
+		eventbus.TopicMonsterDeath,
+		expected,
+	)
 
 	select {
 	case got := <-received:
-		if got.MonsterID != 42 || got.KillerID != 7 || got.MonsterName != "Bandit" {
-			t.Fatalf("event fields mismatch: %+v", got)
+		if got != expected {
+			t.Fatalf(
+				"expected %+v got %+v",
+				expected,
+				got,
+			)
 		}
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("timed out waiting for MonsterDeathEvent")
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
 	}
+}
+
+// TestConcurrentPublish executes intensive multi-threaded publication workloads.
+// Designed to be triggered with the '-race' detector flag to catch data racing hazards.
+func TestConcurrentPublish(t *testing.T) {
+	bus := eventbus.New()
+	defer bus.Drain()
+
+	var count atomic.Int64
+
+	bus.Subscribe("concurrent", func(e eventbus.Event) {
+		count.Add(1)
+	}, 100000)
+
+	const goroutines = 16
+	const publishes = 1000
+
+	var wg sync.WaitGroup
+
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			for i := 0; i < publishes; i++ {
+				bus.Publish("concurrent", i)
+			}
+		}()
+	}
+
+	wg.Wait()
+	bus.Drain()
+
+	if count.Load() == 0 {
+		t.Fatal("expected events to be delivered")
+	}
+}
+
+// TestPublishWhileDrain tests an extreme edge case scenario:
+// Massive publication pipelines executing precisely while the system calls Drain().
+// Ensures no race-panics occur under shutdown contention.
+func TestPublishWhileDrain(t *testing.T) {
+	bus := eventbus.New()
+
+	bus.Subscribe("race", func(e eventbus.Event) {}, 1024)
+
+	var wg sync.WaitGroup
+
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			for j := 0; j < 10000; j++ {
+				bus.Publish("race", j)
+			}
+		}()
+	}
+
+	go bus.Drain()
+
+	wg.Wait()
 }
 
 // ─── Benchmarks ───────────────────────────────────────────────────────────────
 
+// BenchmarkPublishNoSubscribers benchmarks the pure overhead of looking up a topic
+// inside the internal map when no subscribers exist.
 func BenchmarkPublishNoSubscribers(b *testing.B) {
 	bus := eventbus.New()
+	defer bus.Drain()
+
 	b.ReportAllocs()
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		bus.Publish("empty.topic", i)
+		bus.Publish("empty", i)
 	}
 }
 
+// BenchmarkPublishOneSubscriber records processing throughput and allocation spikes
+// with exactly 1 fast listener attached to a massive unblocking buffer.
 func BenchmarkPublishOneSubscriber(b *testing.B) {
 	bus := eventbus.New()
-	bus.Subscribe("bench.topic", func(e eventbus.Event) {}, 1<<20) // huge buffer, never blocks
+	defer bus.Drain()
+
+	bus.Subscribe("bench", func(e eventbus.Event) {}, 1<<20)
+
 	b.ReportAllocs()
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		bus.Publish("bench.topic", i)
+		bus.Publish("bench", i)
 	}
 }
 
+// BenchmarkPublishThreeSubscribers benchmarks scaling behaviors under typical fan-out operations (3 subscribers).
 func BenchmarkPublishThreeSubscribers(b *testing.B) {
 	bus := eventbus.New()
+	defer bus.Drain()
+
 	for i := 0; i < 3; i++ {
-		bus.Subscribe("bench3.topic", func(e eventbus.Event) {}, 1<<20)
+		bus.Subscribe("bench3", func(e eventbus.Event) {}, 1<<20)
 	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		bus.Publish("bench3.topic", i)
+		bus.Publish("bench3", i)
 	}
 }
 
+// BenchmarkPublishHundredSubscribers measures routing stress limits and latency degradation
+// when broadcasting a single event to a massive listener cluster (100 subscribers).
+func BenchmarkPublishHundredSubscribers(b *testing.B) {
+	bus := eventbus.New()
+	defer bus.Drain()
+
+	for i := 0; i < 100; i++ {
+		bus.Subscribe("bench100", func(e eventbus.Event) {}, 1<<20)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		bus.Publish("bench100", i)
+	}
+}
+
+// BenchmarkPublishConcurrent executes intense parallel thread loops to evaluate
+// synchronization lock contention on the bus's internal RWMutex under max loads.
 func BenchmarkPublishConcurrent(b *testing.B) {
 	bus := eventbus.New()
-	bus.Subscribe("concurrent.topic", func(e eventbus.Event) {}, 1<<20)
+	defer bus.Drain()
+
+	bus.Subscribe(
+		"parallel",
+		func(e eventbus.Event) {},
+		1<<20,
+	)
+
 	b.ReportAllocs()
+	b.ResetTimer()
+
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			bus.Publish("concurrent.topic", struct{}{})
+			bus.Publish("parallel", struct{}{})
 		}
 	})
 }

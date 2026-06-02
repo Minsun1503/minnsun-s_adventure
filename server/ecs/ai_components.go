@@ -1,5 +1,9 @@
 package ecs
 
+import (
+	"server/peakgo/timer"
+)
+
 // AIState represents the current behavioral state of a monster entity.
 type AIState uint8
 
@@ -35,16 +39,21 @@ func (s AIState) String() string {
 // Position and stats are owned by their respective components and
 // mutated exclusively through MovementSystem and DamageSystem.
 type AIComponent struct {
-	State          AIState
-	SpawnX         int     // world X at spawn time — leash anchor point
-	SpawnZ         int     // world Z at spawn time
-	SpawnRadius    int     // max roam distance from spawn (world units)
-	AggroRadius    float64 // distance at which monster notices players
-	LeashRadius    float64 // distance at which monster gives up the chase
-	MeleeRange     float64 // distance at which monster can strike
-	TargetID       Entity  // current chase/attack target (0 = no target)
-	AttackTick     int     // counts game ticks since last attack
-	AttackCooldown int     // ticks required between attacks (e.g. 4 = 1 atk/sec at 250ms)
-	IdleTick       int     // counts ticks spent idle before roaming begins
-	IdleDuration   int     // ticks before idle → roaming transition
+	State       AIState
+	TargetID    Entity
+	SpawnX      int
+	SpawnZ      int
+	SpawnRadius int
+	AggroRadius float64
+	LeashRadius int // Đổi sang int để chạy hệ số nguyên siêu tốc
+	MeleeRange  int // Đổi sang int để chạy hệ số nguyên siêu tốc
+
+	// --- Timers của PeakGo ---
+	AttackTimer timer.TickTimer // Thay thế hoàn toàn AttackTick + AttackCooldown
+	IdleTimer   timer.TickTimer // Thay thế hoàn toàn IdleTick + IdleDuration
+	PathTimer   timer.TickTimer // Chặn đứng việc gọi FindPath mọi tick (Ví dụ: 4 tick/lần = 1 giây)
+
+	// --- Điểm neo mục tiêu di chuyển ---
+	RoamTargetX int
+	RoamTargetZ int
 }

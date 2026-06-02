@@ -6,41 +6,36 @@ import (
 	"os"
 	"server/ecs"
 	"server/logger"
+	"server/peakgo/timer" // Tích hợp hệ thống quản lý thời gian vòng lặp lõi
 	"sync"
 )
 
-// MonsterTemplate defines the static read-only data loaded from JSON config.
-// Templates are never registered as ECS entities — they live in templateStore
-// and are copied into live instances via SpawnMonsterFromTemplate.
+// MonsterTemplate định nghĩa cấu trúc dữ liệu tĩnh (Read-Only) được tải lên từ file cấu hình JSON.
 type MonsterTemplate struct {
 	ID             int     `json:"id"`
 	Name           string  `json:"name"`
 	HP             int     `json:"hp"`
 	Dam            int     `json:"damage"`
-	MapID          int     `json:"map_id"`    // World map this monster belongs to. Defaults to 1 if omitted.
+	MapID          int     `json:"map_id"` // Bản đồ mặc định, tự động quy về 1 nếu trống
 	SpawnX         int     `json:"spawn_x"`
 	SpawnZ         int     `json:"spawn_z"`
 	RoamRadius     int     `json:"roam_radius"`
 	AggroRadius    float64 `json:"aggro_radius"`
 	AttackCooldown int     `json:"attack_cooldown"`
 	XPReward       uint64  `json:"xp_reward"`
+
+	// Đã sửa: Đưa tầm đánh vào cấu hình JSON theo khuyến nghị của kỹ sư trưởng.
+	// Sử dụng kiểu int để đồng bộ với hệ thống gmath tính toán khoảng cách số nguyên siêu tốc.
+	MeleeRange int `json:"melee_range"`
 }
 
-// templateStore is the in-memory registry for static monster templates.
-// Keyed by template ID from JSON. Separate from ECS to avoid ID collisions
-// between template IDs (1, 2, 3...) and live entity IDs (atomic counter).
+// templateStore đóng vai trò là registry trong bộ nhớ RAM lưu trữ các bản mẫu quái vật tĩnh.
 var (
 	templateStore   = make(map[int]MonsterTemplate)
 	templateStoreMu sync.RWMutex
 )
 
-// LoadMonster reads monster templates from a JSON file and populates
-// the in-memory templateStore. Call once at server boot before any spawns.
-//
-// Parameters:
-//   - filePath: path to the JSON configuration file.
-//
-// Returns error if the file cannot be read or parsed.
+// LoadMonster đọc file JSON cấu hình quái vật và nạp vào templateStore khi server khởi động.
 func LoadMonster(filePath string) ([]MonsterTemplate, error) {
 	fileBytes, err := os.ReadFile(filePath)
 	if err != nil {
@@ -52,12 +47,15 @@ func LoadMonster(filePath string) ([]MonsterTemplate, error) {
 		return nil, fmt.Errorf("failed to parse monster config: %w", err)
 	}
 
-	// Populate the template store for SpawnMonsterFromTemplate lookups.
-	// Apply default MapID=1 for templates that omit the field in JSON.
 	templateStoreMu.Lock()
 	for i := range list {
+		// Thiết lập giá trị mặc định nếu file JSON bỏ trống trường dữ liệu
 		if list[i].MapID == 0 {
 			list[i].MapID = 1
+		}
+		// Dự phòng: Nếu tầm đánh trong cấu hình bằng 0, tự động đưa về mốc mặc định là 2 ô
+		if list[i].MeleeRange == 0 {
+			list[i].MeleeRange = 2
 		}
 		templateStore[list[i].ID] = list[i]
 	}
@@ -66,8 +64,7 @@ func LoadMonster(filePath string) ([]MonsterTemplate, error) {
 	return list, nil
 }
 
-// GetTemplate returns a MonsterTemplate by its JSON ID.
-// Returns false if the template has not been loaded.
+// GetTemplate truy xuất bản mẫu quái vật tĩnh từ ID cấu hình.
 func GetTemplate(templateID int) (MonsterTemplate, bool) {
 	templateStoreMu.RLock()
 	defer templateStoreMu.RUnlock()
@@ -75,25 +72,17 @@ func GetTemplate(templateID int) (MonsterTemplate, bool) {
 	return t, ok
 }
 
-// SpawnMonsterFromTemplate instantiates a live monster entity from a loaded template.
-// The template provides base stats and AI configuration; spawn coordinates
-// and the target map can override the template's defaults for scripted placement.
+// SpawnMonsterFromTemplate khởi tạo một thực thể quái vật sống (Live Entity) vào thế giới game.
 //
-// Parameters:
-//   - templateID:    JSON template ID to copy stats from.
-//   - mapID:         World map ID the monster should be placed on.
-//   - spawnX, spawnZ: World coordinates for this instance.
-//
-// Returns the new ecs.Entity ID, or an error if the template is not found.
+// Đã sửa: Đồng bộ hoàn toàn dữ liệu với hợp đồng AI mới (Chuyển đổi bán kính xích quái sang số nguyên int,
+// nạp cấu hình MeleeRange động từ Template và khởi tạo các bộ đếm TickTimer bảo vệ CPU).
 func SpawnMonsterFromTemplate(templateID, mapID, spawnX, spawnZ int) (ecs.Entity, error) {
 	t, ok := GetTemplate(templateID)
 	if !ok {
 		return 0, fmt.Errorf("template ID %d not found — did you call LoadMonster?", templateID)
 	}
 
-	// Generate a unique entity ID from the atomic counter.
-	// This is guaranteed not to collide with template IDs because
-	// templates never enter the ECS registry.
+	// Sinh ID thực thể duy nhất từ bộ đếm nguyên tử của ECS Registry
 	id := ecs.GlobalRegistry.NewEntity()
 
 	ecs.GlobalRegistry.SetMetadata(id, ecs.MetadataComponent{
@@ -110,30 +99,33 @@ func SpawnMonsterFromTemplate(templateID, mapID, spawnX, spawnZ int) (ecs.Entity
 		Dam:   t.Dam,
 	})
 
-	// Derive leash radius from aggro radius — always 2× so monsters
-	// don't instantly give up but also don't chase indefinitely.
-	leashRadius := t.AggroRadius * 2.0
+	// Tối ưu hóa: Tính toán tầm xích quái (Leash Radius = Bán kính kích động * 2)
+	// và ép về kiểu int thô để phục vụ hàm gmath.InRangeInt trên hot-path.
+	leashRadius := int(t.AggroRadius * 2.0)
 
+	// Khởi tạo cấu hình FSM AI đồng bộ 100% với kiến trúc ai_roaming.go mới
 	ecs.GlobalRegistry.SetAI(id, ecs.AIComponent{
-		State:          ecs.AIStateIdle,
-		SpawnX:         spawnX,
-		SpawnZ:         spawnZ,
-		SpawnRadius:    t.RoamRadius,
-		AggroRadius:    t.AggroRadius,
-		LeashRadius:    leashRadius,
-		MeleeRange:     2.0, // melee is always 2 units; could be a template field later
-		AttackCooldown: t.AttackCooldown,
-		IdleDuration:   8, // 2 sec idle before roaming; same for all monsters for now
+		State:       ecs.AIStateIdle,
+		SpawnX:      spawnX,
+		SpawnZ:      spawnZ,
+		SpawnRadius: t.RoamRadius,
+		AggroRadius: t.AggroRadius,
+		LeashRadius: leashRadius,  // Đã đồng bộ sang int
+		MeleeRange:  t.MeleeRange, // Đã cấu hình động từ JSON template
+
+		// Khởi tạo các cỗ máy đếm thời gian chuyên dụng của PeakGo thay vì cộng dồn biến int thủ công
+		AttackTimer: timer.NewTickTimer(t.AttackCooldown),
+		IdleTimer:   timer.NewTickTimer(8), // Thả lỏng quái đứng nghỉ 2 giây (8 ticks với tickrate 250ms)
+		PathTimer:   timer.NewTickTimer(4), // Giới hạn chu kỳ tìm đường A* tối đa 1 giây/lần (4 ticks) để bảo vệ CPU
 	})
 
-	logger.Info("[SPAWN] %s (entity %d) at (%d, %d) | HP:%d ATK:%d aggro:%.0f leash:%.0f",
-		t.Name, id, spawnX, spawnZ, t.HP, t.Dam, t.AggroRadius, leashRadius)
+	logger.Info("[SPAWN] %s (entity %d) at (%d, %d) | HP:%d ATK:%d aggro:%.0f leash:%d melee:%d",
+		t.Name, id, spawnX, spawnZ, t.HP, t.Dam, t.AggroRadius, leashRadius, t.MeleeRange)
 
 	return id, nil
 }
 
-// GetTemplateByName returns a MonsterTemplate matching the given name.
-// Returns false if no template with that name has been loaded.
+// GetTemplateByName tìm kiếm bản mẫu quái vật dựa theo tên định danh.
 func GetTemplateByName(name string) (MonsterTemplate, bool) {
 	templateStoreMu.RLock()
 	defer templateStoreMu.RUnlock()
@@ -145,8 +137,7 @@ func GetTemplateByName(name string) (MonsterTemplate, bool) {
 	return MonsterTemplate{}, false
 }
 
-// SpawnFromDefaultPosition spawns a monster at its template-defined default coordinates
-// and map. Convenience wrapper used during server boot when no override is needed.
+// SpawnFromDefaultPosition tạo quái vật tại vị trí tọa độ mặc định được khai báo sẵn trong file cấu hình.
 func SpawnFromDefaultPosition(templateID int) (ecs.Entity, error) {
 	t, ok := GetTemplate(templateID)
 	if !ok {

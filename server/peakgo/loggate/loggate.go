@@ -1,38 +1,59 @@
 // Package loggate provides production-safe logging wrappers for the
-// Minnsun's Adventure game server.
+// Minnsun's Adventure game server core.
 //
-// # Problem it solves
+// # The Allocation Problem
 //
-// Calling logger.Debug("msg %v", someInterface) always evaluates arguments —
-// meaning fmt.Sprintf is called, potentially boxing values onto the heap —
-// even in production when debug mode is OFF.
+// Calling loggate.Debugf("entity %d moved", entity.ID) still evaluates the
+// variadic parameters and allocates an argument slice (`[]any`) at the call site
+// before entering the function, even when debug mode is turned OFF.
 //
-// The correct pattern is:
-//
-//	if logger.IsDebug() {
-//	    logger.Debug("entity %d moved", id)
-//	}
-//
-// But this requires every developer to remember the guard. loggate.Debugf
-// encapsulates the guard so callers can never accidentally forget it:
-//
-//	loggate.Debugf("entity %d moved", id)  // zero cost in production
-//
-// # Allocation profile
-//
-//   - Debugf: 0 allocs/op in production (guard exits before Sprintf).
-//   - Infof / Warnf / Errorf: identical to calling logger.* directly.
+// To achieve a true, absolute zero-cost footprint on hyper-critical hot paths
+// (such as spatial grids, entity motion ticks, or network frame processing),
+// you must either explicitly guard the call with DebugEnabled() or utilize
+// the deferred block helper DebugLazy().
 package loggate
 
 import "server/logger"
 
-// Debugf logs at DEBUG level. In production (debug=false in config.json) this
-// is a guaranteed no-op — arguments are never evaluated, no heap boxing occurs.
+// DebugEnabled reports whether the logger is configured to output DEBUG level logs.
+// Use this explicitly on hyper-critical hot paths to avoid call-site variadic slice
+// creation and interface value boxing overhead entirely.
+//
+// Example:
+//
+//	if loggate.DebugEnabled() {
+//	    loggate.Debugf("entity %d calculated path in %v", id, duration) // 0 allocs if disabled
+//	}
+func DebugEnabled() bool {
+	return logger.IsDebug()
+}
+
+// Debugf logs at DEBUG level if debug logging is enabled.
+//
+// Performance Warning: This method prevents expensive string formatting and logger
+// dispatching when disabled. However, variadic arguments are still evaluated and
+// wrapped into an allocation slice by the caller before invocation.
 func Debugf(format string, args ...any) {
 	if !logger.IsDebug() {
 		return
 	}
 	logger.Debug(format, args...)
+}
+
+// DebugLazy executes the provided closure function ONLY if DEBUG logging is enabled.
+// This achieves absolute zero-allocation overhead in production by deferring the
+// evaluation of logging variables and formatting parameters entirely.
+//
+// Example:
+//
+//	loggate.DebugLazy(func() {
+//	    loggate.Debugf("heavy entity state: %+v", monster.DeepDump())
+//	})
+func DebugLazy(fn func()) {
+	if !logger.IsDebug() {
+		return
+	}
+	fn()
 }
 
 // Infof logs at INFO level. Matches logger.Info signature exactly.

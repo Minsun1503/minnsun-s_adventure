@@ -5,24 +5,12 @@
 //
 // world.SpatialGrid is a low-level data structure — it returns raw ChunkEntry
 // slices and requires callers to manually resolve ECS components. Every system
-// that needs "who is near entity X" must:
-//
-//  1. Call GlobalSpatialGrid.QueryRadius(pos, radius, excludeID)
-//  2. Iterate candidates
-//  3. Resolve MetadataComponent (filter by type)
-//  4. Resolve StatsComponent, PositionComponent
-//  5. Remember to call FreeQueryCandidates to avoid GC pressure
+// that needs "who is near entity X" must safely query, iterate, filter by type,
+// and remember to free query candidates to avoid GC pressure.
 //
 // This package wraps that sequence into named, typed functions so new systems
 // only think in terms of game concepts ("find the nearest monster") rather
 // than spatial grid mechanics.
-//
-// # Relationship to world/proximity.go
-//
-// world/proximity.go already has GetNearbyPlayers and GetNearbyMonsters.
-// This package sits one layer higher:
-//   - proximity.go    → typed slices of ProximityResult (resolved components)
-//   - spatial helpers → single-entity answers (GetNearest, CountInRadius, IsAnyInRange)
 //
 // # Peak Go contract
 //
@@ -31,189 +19,233 @@
 package spatial
 
 import (
+	"math"
 	"server/ecs"
 	"server/peakgo/gmath"
 	"server/world"
 )
 
+// ─── Entity Type Enum ────────────────────────────────────────────────────────
+
+// EntityType represents a strictly typed identifier for game entity categories.
+// Replaces fragile raw strings to catch invalid type queries at compile time.
+type EntityType uint8
+
+const (
+	EntityAny        EntityType = iota // Matches any entity type in the grid
+	EntityPlayer                       // Matches "player" type entities
+	EntityMonster                      // Matches "monster" type entities
+	EntityGroundItem                   // Matches "ground_item" type entities
+)
+
+// String maps the strongly-typed EntityType enum back to the underlying
+// ECS Metadata string representation. Acts as an isolated compatibility layer.
+func (t EntityType) String() string {
+	switch t {
+	case EntityPlayer:
+		return "player"
+	case EntityMonster:
+		return "monster"
+	case EntityGroundItem:
+		return "ground_item"
+	default:
+		return ""
+	}
+}
+
+// ─── Query Results Structures ────────────────────────────────────────────────
+
 // NearestResult holds the closest entity found by a query, with its
-// pre-resolved position to avoid a follow-up ECS lookup.
+// pre-resolved position to avoid a follow-up expensive ECS lookup.
 type NearestResult struct {
 	ID  ecs.Entity
 	Pos ecs.PositionComponent
 }
 
-// GetNearestPlayer returns the closest player-type entity within worldRadius
-// of originID, excluding originID itself.
+// ─── High-Level Typed Semantic API ───────────────────────────────────────────
 //
-// Returns (result, true) if at least one player is found.
-// Returns (zero, false) if no players are within range.
-//
-// The returned position is the snapshot stored in the spatial grid at query
-// time — it may be up to one tick stale.
+// These functions provide a highly readable, self-documenting API for common
+// gameplay queries, short-circuiting internals wherever possible.
+
+// GetNearestPlayer returns the closest player-type entity within worldRadius of originID.
 func GetNearestPlayer(originID ecs.Entity, worldRadius float64) (NearestResult, bool) {
-	return getNearestByType(originID, worldRadius, "player")
+	return getNearestByType(originID, worldRadius, EntityPlayer)
 }
 
-// GetNearestMonster returns the closest monster-type entity within worldRadius
-// of originID, excluding originID itself.
-//
-// Returns (result, true) if at least one monster is found.
-// Returns (zero, false) if no monsters are within range.
+// GetNearestMonster returns the closest monster-type entity within worldRadius of originID.
 func GetNearestMonster(originID ecs.Entity, worldRadius float64) (NearestResult, bool) {
-	return getNearestByType(originID, worldRadius, "monster")
+	return getNearestByType(originID, worldRadius, EntityMonster)
 }
 
-// CountInRadius returns the number of entities of the given type within
-// worldRadius of originID.
-//
-// entityType: "player", "monster", "ground_item", or "" for all types.
-// Useful for area-of-effect skills and aggro checks without allocating a full list.
-func CountInRadius(originID ecs.Entity, worldRadius float64, entityType string) int {
-	originPos, ok := ecs.GlobalRegistry.GetPosition(originID)
-	if !ok {
-		return 0
-	}
+// CountPlayersInRadius counts the total number of players within range.
+func CountPlayersInRadius(originID ecs.Entity, worldRadius float64) int {
+	return CountInRadius(originID, worldRadius, EntityPlayer)
+}
 
-	candidates := world.GlobalSpatialGrid.QueryRadius(originPos, worldRadius, originID)
-	if len(candidates) == 0 {
-		world.FreeQueryCandidates(candidates)
+// CountMonstersInRadius counts the total number of monsters within range.
+func CountMonstersInRadius(originID ecs.Entity, worldRadius float64) int {
+	return CountInRadius(originID, worldRadius, EntityMonster)
+}
+
+// HasPlayerInRadius reports whether at least one player exists within range.
+func HasPlayerInRadius(originID ecs.Entity, worldRadius float64) bool {
+	return IsAnyInRadius(originID, worldRadius, EntityPlayer)
+}
+
+// HasMonsterInRadius reports whether at least one monster exists within range.
+func HasMonsterInRadius(originID ecs.Entity, worldRadius float64) bool {
+	return IsAnyInRadius(originID, worldRadius, EntityMonster)
+}
+
+// ─── Generic Core Spatial Queries ────────────────────────────────────────────
+
+// CountInRadius returns the number of entities of the given type within worldRadius of originID.
+// Useful for area-of-effect skills and aggro checks without allocating an expensive list.
+func CountInRadius(originID ecs.Entity, worldRadius float64, entityType EntityType) int {
+	_, candidates, ok := queryRadius(originID, worldRadius)
+	if !ok {
 		return 0
 	}
 	defer world.FreeQueryCandidates(candidates)
 
-	if entityType == "" {
+	if entityType == EntityAny {
 		return len(candidates)
 	}
 
+	targetStr := entityType.String()
 	count := 0
 	for _, c := range candidates {
-		meta, ok := ecs.GlobalRegistry.GetMetadata(c.ID)
-		if ok && meta.Type == entityType {
+		meta, hasMeta := ecs.GlobalRegistry.GetMetadata(c.ID)
+		if hasMeta && meta.Type == targetStr {
 			count++
 		}
 	}
 	return count
 }
 
-// IsAnyInRadius reports whether at least one entity of the given type exists
-// within worldRadius of originID. Short-circuits on the first match — faster
-// than CountInRadius when you only need a boolean answer.
-//
-// entityType: "player", "monster", "ground_item", or "" for any type.
-func IsAnyInRadius(originID ecs.Entity, worldRadius float64, entityType string) bool {
-	originPos, ok := ecs.GlobalRegistry.GetPosition(originID)
+// IsAnyInRadius reports whether at least one entity of the given type exists within worldRadius of originID.
+// Short-circuits on the very first match — highly optimized for boolean conditions.
+func IsAnyInRadius(originID ecs.Entity, worldRadius float64, entityType EntityType) bool {
+	_, candidates, ok := queryRadius(originID, worldRadius)
 	if !ok {
-		return false
-	}
-
-	candidates := world.GlobalSpatialGrid.QueryRadius(originPos, worldRadius, originID)
-	if len(candidates) == 0 {
-		world.FreeQueryCandidates(candidates)
 		return false
 	}
 	defer world.FreeQueryCandidates(candidates)
 
-	if entityType == "" {
+	if entityType == EntityAny {
 		return len(candidates) > 0
 	}
 
+	targetStr := entityType.String()
 	for _, c := range candidates {
-		meta, ok := ecs.GlobalRegistry.GetMetadata(c.ID)
-		if ok && meta.Type == entityType {
+		meta, hasMeta := ecs.GlobalRegistry.GetMetadata(c.ID)
+		if hasMeta && meta.Type == targetStr {
 			return true
 		}
 	}
 	return false
 }
 
-// FilterInRadius returns all entity IDs of the given type within worldRadius
-// of originID, appended into dst (pass nil to allocate fresh).
-//
-// The caller owns the returned slice. Use when you need the full list but
-// don't need resolved components (cheaper than world.GetNearbyPlayers).
-//
-// entityType: "player", "monster", "ground_item", or "" for all types.
-func FilterInRadius(originID ecs.Entity, worldRadius float64, entityType string, dst []ecs.Entity) []ecs.Entity {
-	originPos, ok := ecs.GlobalRegistry.GetPosition(originID)
+// FilterInRadius returns all entity IDs of the given type within worldRadius of originID,
+// appended directly into dst (pass nil to allocate fresh).
+func FilterInRadius(originID ecs.Entity, worldRadius float64, entityType EntityType, dst []ecs.Entity) []ecs.Entity {
+	_, candidates, ok := queryRadius(originID, worldRadius)
 	if !ok {
-		return dst
-	}
-
-	candidates := world.GlobalSpatialGrid.QueryRadius(originPos, worldRadius, originID)
-	if len(candidates) == 0 {
-		world.FreeQueryCandidates(candidates)
 		return dst
 	}
 	defer world.FreeQueryCandidates(candidates)
 
+	targetStr := entityType.String()
 	for _, c := range candidates {
-		if entityType == "" {
+		if entityType == EntityAny {
 			dst = append(dst, c.ID)
 			continue
 		}
-		meta, ok := ecs.GlobalRegistry.GetMetadata(c.ID)
-		if ok && meta.Type == entityType {
+		meta, hasMeta := ecs.GlobalRegistry.GetMetadata(c.ID)
+		if hasMeta && meta.Type == targetStr {
 			dst = append(dst, c.ID)
 		}
 	}
 	return dst
 }
 
-// DistanceBetween returns the squared Euclidean distance between two entities.
-// Returns (-1, false) if either entity's position cannot be resolved.
-//
-// Returns squared distance — compare against radius*radius to avoid sqrt.
-// Use gmath.DistanceSq directly if you already have both positions.
-func DistanceBetween(aID, bID ecs.Entity) (float64, bool) {
+// IsInRadius checks if entity bID is within a specific radius of entity aID.
+// Highly pragmatic helper for fast proximity tests like monster aggro or interactions.
+func IsInRadius(aID ecs.Entity, bID ecs.Entity, radius float64) bool {
+	distSq, ok := DistanceBetween(aID, bID)
+	if !ok {
+		return false
+	}
+	return float64(distSq) <= (radius * radius)
+}
+
+// DistanceBetween returns the squared Euclidean distance between two entities using pure integers.
+// Returns (0, false) if either entity's position cannot be resolved.
+func DistanceBetween(aID, bID ecs.Entity) (int, bool) {
 	aPos, okA := ecs.GlobalRegistry.GetPosition(aID)
 	bPos, okB := ecs.GlobalRegistry.GetPosition(bID)
 	if !okA || !okB {
-		return -1, false
+		return 0, false
 	}
+	// Không còn ép kiểu float64, trả về int thô từ gmath giúp tối ưu CPU tối đa
 	return gmath.DistanceSq(aPos.X, aPos.Z, bPos.X, bPos.Z), true
 }
 
-// SameMap reports whether two entities are on the same map.
-// Returns false if either entity's position cannot be resolved.
-// Useful as a fast pre-check before more expensive spatial queries.
+// SameMap reports whether two entities are on the same map zone identifier.
+// Useful as a lightning-fast pre-check before expensive spatial grid math.
 func SameMap(aID, bID ecs.Entity) bool {
 	aPos, okA := ecs.GlobalRegistry.GetPosition(aID)
 	bPos, okB := ecs.GlobalRegistry.GetPosition(bID)
 	return okA && okB && aPos.MapID == bPos.MapID
 }
 
-// ─── Internal helpers ─────────────────────────────────────────────────────────
+// ─── Internal Helpers (Single Source of Truth) ───────────────────────────────
 
-func getNearestByType(originID ecs.Entity, worldRadius float64, entityType string) (NearestResult, bool) {
+// queryRadius abstracts the repetitive boilerplate sequence required to query the spatial grid.
+// Centralizes dependencies so changes to world.GlobalSpatialGrid only require editing this single block.
+func queryRadius(originID ecs.Entity, worldRadius float64) (ecs.PositionComponent, []world.ChunkEntry, bool) {
 	originPos, ok := ecs.GlobalRegistry.GetPosition(originID)
 	if !ok {
-		return NearestResult{}, false
+		return ecs.PositionComponent{}, nil, false
 	}
 
 	candidates := world.GlobalSpatialGrid.QueryRadius(originPos, worldRadius, originID)
 	if len(candidates) == 0 {
-		world.FreeQueryCandidates(candidates)
+		world.FreeQueryCandidates(candidates) // Always clear slices cleanly
+		return originPos, nil, false
+	}
+
+	return originPos, candidates, true
+}
+
+// getNearestByType extracts the closest match using math.MaxInt bounds for pristine syntax.
+func getNearestByType(originID ecs.Entity, worldRadius float64, entityType EntityType) (NearestResult, bool) {
+	originPos, candidates, ok := queryRadius(originID, worldRadius)
+	if !ok {
 		return NearestResult{}, false
 	}
 	defer world.FreeQueryCandidates(candidates)
 
 	var nearest NearestResult
-	nearestDSq := float64(-1)
-	found := false
+	nearestDSq := math.MaxInt // Optimized: Avoid tracking cumbersome found booleans
+	targetStr := entityType.String()
 
 	for _, c := range candidates {
 		meta, hasMeta := ecs.GlobalRegistry.GetMetadata(c.ID)
-		if !hasMeta || meta.Type != entityType {
+		if !hasMeta || meta.Type != targetStr {
 			continue
 		}
+
 		dsq := gmath.DistanceSq(originPos.X, originPos.Z, c.Pos.X, c.Pos.Z)
-		if !found || dsq < nearestDSq {
+		if dsq < nearestDSq {
 			nearest = NearestResult{ID: c.ID, Pos: c.Pos}
 			nearestDSq = dsq
-			found = true
 		}
 	}
 
-	return nearest, found
+	// If nearestDSq was updated, we found a target
+	if nearestDSq < math.MaxInt {
+		return nearest, true
+	}
+	return NearestResult{}, false
 }

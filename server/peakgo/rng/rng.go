@@ -1,31 +1,20 @@
-// Package rng provides a pooled, goroutine-safe random number generator
+// Package rng provides a pooled, goroutine-safe pseudo-random number generator
 // for high-frequency game logic in Minnsun's Adventure.
 //
-// # Problem it solves
+// # Why this package exists
 //
-// The codebase currently uses two different (both suboptimal) patterns:
+// The standard math/rand global functions rely on a single, mutex-protected
+// global source. Under high concurrent traffic (hundreds of player connections
+// and thousands of monster AI ticks), this global mutex fast becomes a bottleneck.
 //
-//  1. loot.go creates rand.New(rand.NewSource(time.Now().UnixNano())) on EVERY
-//     call to RollLoot → allocates a new *rand.Rand + Source on the heap
-//     every time a monster dies. Under load this is guaranteed GC pressure.
+// Conversely, creating a fresh rand.New(rand.NewSource(...)) on every single
+// event (e.g., enemy death loot rolls) triggers massive heap allocation and GC pressure.
 //
-//  2. ai_roaming.go and combat.go call the global rand.Intn / rand.Float64
-//     which in Go's stdlib uses a single mutex-protected global source.
-//     Under many concurrent goroutines this becomes a lock bottleneck.
+// # Solution & Architecture
 //
-// # Solution
-//
-// A sync.Pool of *rand.Rand sources:
-//   - Each goroutine borrows a generator, uses it, returns it immediately.
-//   - No mutex contention between goroutines (each gets its own source).
-//   - No allocation on the hot path (source is recycled, not created).
-//   - Each new source is seeded with time.UnixNano() XOR an atomic counter
-//     to prevent multiple goroutines receiving the same seed in the same nanosecond.
-//
-// # Peak Go contract
-//
-//	rng.Intn(n)    → 0 allocs/op after pool warm-up
-//	rng.Float64()  → 0 allocs/op after pool warm-up
+// This package components encapsulate type-safe reuse inside a sync.Pool managing
+// pointers to *rand.Rand generators. To optimize consecutive hot-path loops,
+// explicit lifecycle semantics (Borrow/Return) are exposed to the caller layer.
 package rng
 
 import (
@@ -35,61 +24,99 @@ import (
 	"time"
 )
 
-// seedCounter ensures that rapid concurrent calls to pool.New never share
-// a seed, even when time.Now().UnixNano() returns the same value.
+// seedCounter guarantees that rapid concurrent allocation calls to pool.New
+// never share identical seeds, even if time.Now().UnixNano() returns identical values.
 var seedCounter atomic.Int64
 
 var pool = sync.Pool{
 	New: func() any {
-		// XOR with atomic increment guarantees uniqueness across concurrent New calls.
+		// XOR with atomic increment ensures perfect seed uniqueness across concurrent threads
 		seed := time.Now().UnixNano() ^ seedCounter.Add(1)
 		return rand.New(rand.NewSource(seed))
 	},
 }
 
-// Intn returns a uniformly distributed non-negative pseudo-random int in [0, n).
-// Panics if n <= 0 (same contract as rand.Intn).
+// ─── Lifecycle Operations (Bulk Optimization Hot-Paths) ─────────────────────
+
+// Borrow retrieves a pre-seeded *rand.Rand generator instance from the shared pool.
+//
+// High-Performance Strategy: This method is highly recommended for hot-path loops
+// requiring consecutive random selections (e.g., rolling multiple items from a loot table)
+// to avoid the heavy repetitive Get/Put lifecycle overhead of the wrapper functions.
+//
+// Callers MUST invoke 'defer rng.Return(r)' once business operations conclude.
+func Borrow() *rand.Rand {
+	return pool.Get().(*rand.Rand)
+}
+
+// Return recycles a borrowed *rand.Rand generator safely back into the shared architecture pool.
+func Return(r *rand.Rand) {
+	pool.Put(r)
+}
+
+// ─── High-Level Convenience Semantics ────────────────────────────────────────
+
+// Intn returns a uniformly distributed non-negative pseudo-random int in the half-open interval [0, n).
+// Panics instantly if n <= 0.
 func Intn(n int) int {
-	r := pool.Get().(*rand.Rand)
+	r := Borrow()
 	v := r.Intn(n)
-	pool.Put(r)
+	Return(r)
 	return v
 }
 
-// Float64 returns a pseudo-random float64 in [0.0, 1.0).
-// Use for probability rolls: if rng.Float64() <= dropChance { ... }
+// Float64 returns a pseudo-random float64 in the half-open interval [0.0, 1.0).
 func Float64() float64 {
-	r := pool.Get().(*rand.Rand)
+	r := Borrow()
 	v := r.Float64()
-	pool.Put(r)
+	Return(r)
 	return v
 }
 
-// IntnRange returns a pseudo-random int in the closed interval [lo, hi).
+// Chance reports whether a random probability check succeeds given a rate 'p' in range [0.0, 1.0].
+// Highly pragmatic semantic helper for hot-path combat calculations like critical hits,
+// dodge evaluations, or rare drop chance calculations.
+//
+// Example:
+//
+//	if rng.Chance(0.25) {
+//	    // Kích hoạt sát thương chí mạng (25% tỷ lệ)
+//	}
+func Chance(p float64) bool {
+	return Float64() < p
+}
+
+// IntnRange returns a pseudo-random int in the half-open interval [lo, hi).
 // Equivalent to lo + Intn(hi-lo). Panics if lo >= hi.
 func IntnRange(lo, hi int) int {
 	return lo + Intn(hi-lo)
 }
 
-// Shuffle performs a Fisher-Yates shuffle on s in-place using the pooled RNG.
-// Zero allocations.
+// Shuffle performs a Fisher-Yates shuffle on n elements in-place using a pooled RNG source.
+// Executes with exactly 0 allocations.
 func Shuffle(n int, swap func(i, j int)) {
-	r := pool.Get().(*rand.Rand)
+	r := Borrow()
 	r.Shuffle(n, swap)
-	pool.Put(r)
+	Return(r)
 }
 
-// WarmUp pre-fills the pool with n pre-seeded generators to avoid New calls
-// during the first burst of game-loop activity. Call once at server startup.
+// ─── Lifecycle Framework Infrastructure ──────────────────────────────────────
+
+// WarmUp pre-allocates and populates the pool with n generators to absorb
+// allocation latency overhead during the server's early launch boot phase.
+//
+// Architecture Warning: Elements inside a sync.Pool are non-deterministic and subject
+// to sudden, total cleanup by the Go Runtime Garbage Collector (GC) at any time.
+// WarmUp does not guarantee long-term retention but alleviates early execution shock.
 func WarmUp(n int) {
 	sources := make([]*rand.Rand, n)
 	for i := range sources {
 		sources[i] = pool.Get().(*rand.Rand)
 	}
-	var mu sync.Mutex // only used here, not on hot path
-	mu.Lock()
+
+	// Đã sửa: Loại bỏ hoàn toàn thực thể sync.Mutex cục bộ vô nghĩa.
+	// Đẩy trả tài nguyên trực tiếp xuống pool ở tốc độ tối đa.
 	for _, s := range sources {
 		pool.Put(s)
 	}
-	mu.Unlock()
 }
