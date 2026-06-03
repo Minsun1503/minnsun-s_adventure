@@ -63,9 +63,10 @@ type serverConfig struct {
 // ─── Log Entry ───────────────────────────────────────────────────────────────
 
 type logEntry struct {
-	lv      level
-	ts      time.Time
-	message string
+	lv     level
+	ts     time.Time
+	format string
+	args   []any
 }
 
 // ─── Logger State ────────────────────────────────────────────────────────────
@@ -161,16 +162,15 @@ func IsDebug() bool {
 // ─── Internal ────────────────────────────────────────────────────────────────
 
 func push(lv level, format string, args ...any) {
-	entry := logEntry{
-		lv:      lv,
-		ts:      time.Now(),
-		message: fmt.Sprintf(format, args...),
-	}
-
-	// If the logger has not been initialized yet, silently discard all entries
-	// to avoid blocking the caller forever on a nil channel.
 	if logChannel == nil {
 		return
+	}
+
+	entry := logEntry{
+		lv:     lv,
+		ts:     time.Now(),
+		format: format,
+		args:   args,
 	}
 
 	// WARN and ERROR always make it through (block if needed).
@@ -202,10 +202,17 @@ func runWorker() {
 
 // writeEntry formats and writes one log entry to console + file.
 func writeEntry(e logEntry) {
+	var message string
+	if len(e.args) == 0 {
+		message = e.format
+	} else {
+		message = fmt.Sprintf(e.format, e.args...)
+	}
+
 	ts := e.ts.Format("2006-01-02 15:04:05.000")
-	line := fmt.Sprintf("[%s] [%s] %s\n", ts, levelLabels[e.lv], e.message)
+	line := fmt.Sprintf("[%s] [%s] %s\n", ts, levelLabels[e.lv], message)
 	colorLine := fmt.Sprintf("%s[%s] [%s]%s %s\n",
-		levelColors[e.lv], ts, levelLabels[e.lv], ansiReset, e.message)
+		levelColors[e.lv], ts, levelLabels[e.lv], ansiReset, message)
 
 	// 1. Console (color)
 	fmt.Fprint(os.Stdout, colorLine)
