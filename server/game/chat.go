@@ -1,43 +1,50 @@
 package game
 
 import (
-	"fmt"
-	"server/ecs"
-	"server/protocol"
 	"strings"
+
+	"server/ecs"
+	"server/peakgo/broadcast"
+	"server/protocol"
 )
 
-// RouteChatMessage inspects the prefix of a text string and dispatches it
-// down the appropriate isolated network channel.
 func RouteChatMessage(senderID ecs.Entity, rawMessage string) {
 	trimmed := strings.TrimSpace(rawMessage)
 	if len(trimmed) == 0 {
 		return
 	}
 
-	// 1. Fetch sender identity information lock-free
 	meta, hasMeta := ecs.GlobalRegistry.GetMetadata(senderID)
 	if !hasMeta {
 		return
 	}
 
-	// 2. CHANNEL ROUTING PATHS
 	if strings.HasPrefix(trimmed, "/p ") || strings.HasPrefix(trimmed, "/party ") {
 		// PARTY CHAT CHANNEL
 		messageBody := stripChatPrefix(trimmed)
-		formattedPacket := fmt.Sprintf("[PARTY] %s: %s\r\n", meta.Name, messageBody)
-		
+		chatPayload := broadcast.ChatPayload{
+			Channel:    1, // party channel
+			SenderName: meta.Name,
+			Message:    messageBody,
+		}
+		frame := broadcast.BuildChatMessage(chatPayload)
+
 		if memberComp, isGrouped := ecs.GlobalRegistry.GetPartyMember(senderID); isGrouped {
-			BroadcastToParty(memberComp.PartyID, formattedPacket)
+			BroadcastToPartyBinary(memberComp.PartyID, frame)
 		} else {
-			SendNoticeSystem(senderID, []byte("Error: You are not currently inside an active party group!\r\n"))
+			SendNoticeSystem(senderID, broadcast.BuildNotice(broadcast.NoticePayload{Message: "Error: You are not currently inside an active party group!"}))
 		}
 
 	} else if strings.HasPrefix(trimmed, "/g ") || strings.HasPrefix(trimmed, "/global ") {
 		// GLOBAL WORLD CHAT CHANNEL
 		messageBody := stripChatPrefix(trimmed)
-		formattedPacket := fmt.Sprintf("[GLOBAL] %s: %s\r\n", meta.Name, messageBody)
-		BroadcastToWorld(formattedPacket)
+		chatPayload := broadcast.ChatPayload{
+			Channel:    2, // global channel
+			SenderName: meta.Name,
+			Message:    messageBody,
+		}
+		frame := broadcast.BuildChatMessage(chatPayload)
+		BroadcastToWorldBinary(frame)
 
 	} else {
 		// LOCAL MAP CHAT CHANNEL (DEFAULT FALLBACK)
@@ -45,21 +52,25 @@ func RouteChatMessage(senderID ecs.Entity, rawMessage string) {
 		if !hasPos {
 			return
 		}
-		formattedPacket := fmt.Sprintf("[MAP] %s: %s\r\n", meta.Name, trimmed)
-		protocol.BroadcastToMap(pos.MapID, formattedPacket)
+		chatPayload := broadcast.ChatPayload{
+			Channel:    0, // local/map channel
+			SenderName: meta.Name,
+			Message:    trimmed,
+		}
+		frame := broadcast.BuildChatMessage(chatPayload)
+		protocol.BroadcastToNeighbors(pos, frame, senderID)
 	}
 }
 
-// Helper tool to separate prefix commands from raw message bodies
 func stripChatPrefix(msg string) string {
-	parts := strings.SplitN(msg, " ", 2)
-	if len(parts) == 2 {
-		return parts[1]
+	idx := strings.IndexByte(msg, ' ')
+	if idx != -1 && idx+1 < len(msg) {
+		return msg[idx+1:]
 	}
 	return ""
 }
 
-// BroadcastToWorld pumps a serialized string packet into every connected client on the server.
+// Deprecated: kept for backward compatibility with text-based systems
 func BroadcastToWorld(textPacket string) {
 	bytePayload := []byte(textPacket)
 	ecs.GlobalRegistry.RangeConnections(func(id ecs.Entity, connComp ecs.ConnectionComponent) bool {
@@ -68,4 +79,26 @@ func BroadcastToWorld(textPacket string) {
 		}
 		return true
 	})
+}
+
+func BroadcastToWorldBinary(frame []byte) {
+	ecs.GlobalRegistry.RangeConnections(func(id ecs.Entity, connComp ecs.ConnectionComponent) bool {
+		if connComp.Conn != nil {
+			_, _ = connComp.Conn.Write(frame)
+		}
+		return true
+	})
+}
+
+func BroadcastToPartyBinary(partyID ecs.Entity, frame []byte) {
+	registry := ecs.GlobalRegistry
+	party, ok := registry.GetParty(partyID)
+	if !ok {
+		return
+	}
+	for _, memberID := range party.MemberIDs {
+		if conn, ok := registry.GetConnection(memberID); ok && conn.Conn != nil {
+			_, _ = conn.Conn.Write(frame)
+		}
+	}
 }

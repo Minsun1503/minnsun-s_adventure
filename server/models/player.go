@@ -129,7 +129,7 @@ func loadSavedPlayerState(name string) *savedPlayerData {
 	return &savedPlayerData{
 		CharacterID:  oldCharID,
 		Pos:          ecs.PositionComponent{MapID: mapID, X: x, Z: z},
-		Stats:        ecs.StatsComponent{Level: level, XP: xp, HP: hp, MaxHP: maxHP, MP: mp, MaxMP: maxMP, Dam: damage},
+		Stats:        ecs.StatsComponent{Level: level, XP: xp, HP: hp, MaxHP: maxHP, MP: mp, MaxMP: maxMP, Dam: damage, Attack: damage, HitRate: 850, DodgeRate: 100, CritRate: 50, CritDamage: 1500},
 		Equipment:    ecs.EquipmentComponent{WeaponID: weaponID, ArmorID: armorID},
 		Inventory:    inventory,
 		PasswordHash: storedHash,
@@ -281,7 +281,7 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 		}
 	} else {
 		ecs.GlobalRegistry.SetPosition(entityID, ecs.PositionComponent{MapID: 1, X: 0, Z: 0})
-		ecs.GlobalRegistry.SetStats(entityID, ecs.StatsComponent{Level: 1, XP: 0, HP: 100, MaxHP: 100, MP: 100, MaxMP: 100, Dam: 15})
+		ecs.GlobalRegistry.SetStats(entityID, ecs.StatsComponent{Level: 1, XP: 0, HP: 100, MaxHP: 100, MP: 100, MaxMP: 100, Dam: 15, Attack: 15, HitRate: 850, DodgeRate: 100, CritRate: 50, CritDamage: 1500})
 		ecs.GlobalRegistry.SetEquipment(entityID, ecs.EquipmentComponent{WeaponID: 0, ArmorID: 0})
 	}
 

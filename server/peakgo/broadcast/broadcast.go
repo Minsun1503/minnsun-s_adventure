@@ -23,7 +23,9 @@ const (
 	OpcodeDespawnEntity byte = 0x11
 	OpcodePositionSync  byte = 0x12
 	OpcodeStatsSync     byte = 0x13
+	OpcodeCombatHit     byte = 0x14
 	OpcodeChat          byte = 0x15
+	OpcodeNotice        byte = 0x16
 	OpcodeError         byte = 0xFF
 )
 
@@ -354,6 +356,76 @@ type ChatPayload struct {
 }
 
 // BuildChatMessage constructs an S2C ChatMessage packet (opcode 0x15).
+// ─── CombatHit Payload ─────────────────────────────────────────────────
+
+type CombatHitPayload struct {
+	AttackerID uint64
+	TargetID   uint64
+	Damage     int32
+	TargetHP   int32
+	Killed     uint8
+}
+
+func BuildCombatHit(p CombatHitPayload) []byte {
+	payloadLen := 25
+	pkt := make([]byte, 3+payloadLen)
+	binary.BigEndian.PutUint16(pkt[0:2], uint16(1+payloadLen))
+	pkt[2] = OpcodeCombatHit
+	binary.BigEndian.PutUint64(pkt[3:11], p.AttackerID)
+	binary.BigEndian.PutUint64(pkt[11:19], p.TargetID)
+	binary.BigEndian.PutUint32(pkt[19:23], uint32(p.Damage))
+	binary.BigEndian.PutUint32(pkt[23:27], uint32(p.TargetHP))
+	pkt[27] = p.Killed
+	return pkt
+}
+
+func WriteCombatHit(dst []byte, p CombatHitPayload) []byte {
+	payloadLen := 25
+	needed := 3 + payloadLen
+	if cap(dst) >= needed {
+		dst = dst[:needed]
+	} else {
+		dst = make([]byte, needed)
+	}
+	binary.BigEndian.PutUint16(dst[0:2], uint16(1+payloadLen))
+	dst[2] = OpcodeCombatHit
+	binary.BigEndian.PutUint64(dst[3:11], p.AttackerID)
+	binary.BigEndian.PutUint64(dst[11:19], p.TargetID)
+	binary.BigEndian.PutUint32(dst[19:23], uint32(p.Damage))
+	binary.BigEndian.PutUint32(dst[23:27], uint32(p.TargetHP))
+	dst[27] = p.Killed
+	return dst
+}
+
+// ─── Notice Payload ────────────────────────────────────────────────────
+
+type NoticePayload struct {
+	Message string
+}
+
+func BuildNotice(p NoticePayload) []byte {
+	payloadLen := len(p.Message)
+	pkt := make([]byte, 3+payloadLen)
+	binary.BigEndian.PutUint16(pkt[0:2], uint16(1+payloadLen))
+	pkt[2] = OpcodeNotice
+	copy(pkt[3:], p.Message)
+	return pkt
+}
+
+func WriteNotice(dst []byte, p NoticePayload) []byte {
+	payloadLen := len(p.Message)
+	needed := 3 + payloadLen
+	if cap(dst) >= needed {
+		dst = dst[:needed]
+	} else {
+		dst = make([]byte, needed)
+	}
+	binary.BigEndian.PutUint16(dst[0:2], uint16(1+payloadLen))
+	dst[2] = OpcodeNotice
+	copy(dst[3:], p.Message)
+	return dst
+}
+
 func BuildChatMessage(p ChatPayload) []byte {
 	payloadLen := 4 + len(p.SenderName) + len(p.Message)
 	pkt := make([]byte, 3+payloadLen)

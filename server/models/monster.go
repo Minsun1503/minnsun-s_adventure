@@ -97,6 +97,11 @@ func SpawnMonsterFromTemplate(templateID, mapID, spawnX, spawnZ int) (ecs.Entity
 		HP:    t.HP,
 		MaxHP: t.HP,
 		Dam:   t.Dam,
+		Attack:  t.Dam,
+		HitRate: 800,
+		DodgeRate: 50,
+		CritRate: 50,
+		CritDamage: 1500,
 	})
 
 	// Tối ưu hóa: Tính toán tầm xích quái (Leash Radius = Bán kính kích động * 2)

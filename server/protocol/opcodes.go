@@ -1,64 +1,45 @@
 package protocol
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Centralized Opcode Registry
-//
-// All binary protocol opcodes between Server ↔ Client are defined here.
-// This is the single source of truth for packet routing.
-//
-// Naming convention: Opcode + Direction prefix + Feature name
-//   C2S = Client → Server  (inbound)
-//   S2C = Server → Client  (outbound, reserved for future response packets)
-//
-// To add a new opcode:
-//   1. Define the constant here with the next available ID.
-//   2. Add the case branch in handleBinaryPacket (server.go).
-//   3. Update mock_client.go if needed.
-// ──────────────────────────────────────────────────────────────────────────────
-
-// ─── Client → Server (C2S) Opcodes ──────────────────────────────────────────
-
+// Client → Server opcodes
 const (
-	OpcodeC2SMove        byte = 1  // Payload: [X int32 BE][Z int32 BE]
-	OpcodeC2SInv         byte = 2  // Payload: empty (request bag contents)
-	OpcodeC2SUse         byte = 3  // Payload: [ItemID uint64 BE]
-	OpcodeC2SWarp        byte = 4  // Payload: [MapID int32 BE][X int32 BE][Z int32 BE]
-	OpcodeC2SAttack      byte = 5  // Payload: [TargetEntityID uint64 BE]
-	OpcodeC2SInfo        byte = 6  // Payload: [TargetEntityID uint64 BE]
-	OpcodeC2SQuit        byte = 7  // Payload: empty (graceful disconnect)
-	OpcodeC2SPickup      byte = 8  // Payload: [GroundItemEntityID uint64 BE]
-	OpcodeC2SEquip       byte = 9  // Payload: [ItemTemplateID uint64 BE]
-	OpcodeC2SLogin       byte = 10 // Payload: [UsernameLen uint8][Username UTF-8][PasswordLen uint8][Password UTF-8]
-	OpcodeC2SRegister    byte = 11 // Payload: same as LOGIN (auto-create account)
-	OpcodeC2SPartyCreate byte = 12 // Payload: [TeamNameLen uint8][TeamName UTF-8]
-	OpcodeC2SPartyInvite byte = 13 // Payload: [TargetPlayerID uint64 BE]
-	OpcodeC2SPartyJoin   byte = 14 // Payload: [PartyGroupID uint64 BE]
-	OpcodeC2STradeInit    byte = 15 // Payload: [TargetPlayerID uint64 BE]
-	OpcodeC2STradeOffer   byte = 16 // Payload: [ItemTemplateID uint64 BE][Quantity int32 BE]
-	OpcodeC2STradeConfirm byte = 17 // Payload: empty
-	OpcodeC2STradeCancel  byte = 18 // Payload: empty
-	OpcodeC2SSkillCast    byte = 19 // Payload: [SkillID uint64 BE][TargetEntityID uint64 BE]
-	OpcodeC2SChat         byte = 20 // Payload: [Message UTF-8 string]
+	OpcodeC2SMove         byte = 1
+	OpcodeC2SInv          byte = 2
+	OpcodeC2SUse          byte = 3
+	OpcodeC2SWarp         byte = 4
+	OpcodeC2SAttack       byte = 5
+	OpcodeC2SInfo         byte = 6
+	OpcodeC2SQuit         byte = 7
+	OpcodeC2SPickup       byte = 8
+	OpcodeC2SEquip        byte = 9
+	OpcodeC2SLogin        byte = 10
+	OpcodeC2SRegister     byte = 11
+	OpcodeC2SPartyCreate  byte = 12
+	OpcodeC2SPartyInvite  byte = 13
+	OpcodeC2SPartyJoin    byte = 14
+	OpcodeC2STradeInit    byte = 15
+	OpcodeC2STradeOffer   byte = 16
+	OpcodeC2STradeConfirm byte = 17
+	OpcodeC2STradeCancel  byte = 18
+	OpcodeC2SSkillCast    byte = 19
+	OpcodeC2SChat         byte = 20
 )
 
-// ─── Server → Client (S2C) Opcodes ──────────────────────────────────────────
-
+// Server → Client opcodes — MUST match peakgo/broadcast opcodes (wire format)
 const (
-	OpcodeS2CSuccess byte = 0x01 // Server success response (e.g., registration OK) — see error_packet.go
-	OpcodeS2CError   byte = 0xFF // Server error response — see error_packet.go
-	// Future S2C opcodes:
-	// OpcodeS2CSpawnEntity   byte = 0x10 // broadcast new entity to client
-	// OpcodeS2CDespawnEntity byte = 0x11 // broadcast entity removal
-	// OpcodeS2CPositionSync  byte = 0x12 // authoritative position update
-	// OpcodeS2CStatsSync     byte = 0x13 // push HP/damage/stats changes
-	// OpcodeS2CInventorySync byte = 0x14 // push full inventory snapshot
-	// OpcodeS2CChatMessage   byte = 0x15 // structured chat packet
+	OpcodeS2CSuccess       byte = 0x01
+	OpcodeS2CError         byte = 0xFF
+	OpcodeS2CSpawnEntity   byte = 0x10
+	OpcodeS2CDespawnEntity byte = 0x11
+	OpcodeS2CPositionSync  byte = 0x12
+	OpcodeS2CStatsSync     byte = 0x13
+	OpcodeS2CCombatHit     byte = 0x14
+	OpcodeS2CChat          byte = 0x15
+	OpcodeS2CNotice        byte = 0x16
 )
 
-// ─── Error Codes (sub-codes within OpcodeS2CError) ──────────────────────────
-
+// Error codes
 const (
-	ErrCodeServerFull    uint16 = 1 // Login queue saturated
-	ErrCodeDatabaseError uint16 = 2 // DB write/read timeout or failure
-	ErrCodeInternalError uint16 = 3 // Unexpected server-side panic or state corruption
+	ErrCodeServerFull    uint16 = 1
+	ErrCodeDatabaseError uint16 = 2
+	ErrCodeInternalError uint16 = 3
 )

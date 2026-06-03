@@ -3,10 +3,14 @@ package game
 import (
 	"fmt"
 	"server/ecs"
+	"server/peakgo/eventbus"
 	"server/models"
+	"server/peakgo/combat"
 	"server/peakgo/gmath"
 	"server/peakgo/loggate"
 	"server/peakgo/rng"
+	"server/peakgo/threat"
+	"server/peakgo/broadcast"
 	"server/protocol"
 	"server/world"
 	"time"
@@ -76,8 +80,27 @@ func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
 		)
 	}
 
-	// --- Damage calculation (extend here: crit, defense, buffs) ---
-	damage := calculateDamage(attackerStats, targetStats)
+	// --- Damage calculation using peakgo/combat (crit, defense, dodge) ---
+	aCombat := statsToCombatStats(attackerStats)
+	tCombat := statsToCombatStats(targetStats)
+	mods := combat.DamageModifiers{
+		DamageType: combat.DamagePhysical,
+		Element:    combat.ElementNone,
+	}
+	cr := combat.ResolvePhysical(&aCombat, &tCombat, mods)
+	damage := cr.DamageDealt
+
+	// Record threat when a player attacks a monster
+	if attackerMeta.Type == ecs.EntityPlayer && targetMeta.Type == ecs.EntityMonster {
+		if ai, hasAI := ecs.GlobalRegistry.GetAI(targetID); hasAI {
+			if ai.ThreatTable == nil {
+				ai.ThreatTable = threat.NewThreatTable()
+				ai.ThreatTable.SetDecayRate(threat.DefaultThreatDecay)
+			}
+			ai.ThreatTable.Add(uint64(attackerID), int64(damage))
+			ecs.GlobalRegistry.SetAI(targetID, ai)
+		}
+	}
 
 	// --- Apply damage via DamageSystem (copy-modify-overwrite) ---
 	remaining := DamageSystem(targetID, damage)
@@ -139,12 +162,28 @@ func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
 //
 // Current formula: flat attacker damage.
 // Future hooks: subtract target defense, multiply by crit multiplier, etc.
-func calculateDamage(attacker, _ ecs.StatsComponent) int {
-	dmg := attacker.Dam
-	if dmg <= 0 {
-		dmg = 1 // minimum 1 damage; prevent zero-damage stalemates
+// statsToCombatStats maps ecs.StatsComponent → peakgo/combat.Stats
+func statsToCombatStats(s ecs.StatsComponent) combat.Stats {
+	// Use Dam as Attack if Attack is not set (backward compat)
+	atk := s.Attack
+	if atk == 0 && s.Dam > 0 {
+		atk = s.Dam
 	}
-	return dmg
+	return combat.Stats{
+		Level:        s.Level,
+		MaxHP:        s.MaxHP,
+		CurrentHP:    s.HP,
+		MaxMP:        s.MaxMP,
+		CurrentMP:    s.MP,
+		Attack:       atk,
+		MagicAttack:  s.MagicAttack,
+		Defense:      s.Defense,
+		MagicDefense: s.MagicDefense,
+		HitRate:      s.HitRate,
+		DodgeRate:    s.DodgeRate,
+		CritRate:     s.CritRate,
+		CritDamage:   s.CritDamage,
+	}
 }
 
 // DamageSystem applies a damage value to a target entity using the
@@ -191,19 +230,28 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 		killMsg = fmt.Sprintf("[COMBAT] %s was slain by %s!\r\n",
 			targetMeta.Name, killerMeta.Name)
 	}
+	deathFrame := broadcast.BuildNotice(broadcast.NoticePayload{Message: killMsg})
 	targetPos, _ := registry.GetPosition(targetID)
 
 	// If the killer is in a party, notify the whole party instead of just the map.
 	if partyID := GetPlayerPartyID(killerID); partyID != 0 {
-		BroadcastToParty(partyID, killMsg)
+		BroadcastToPartyBinary(partyID, deathFrame)
 	} else {
-		protocol.BroadcastToMap(targetPos.MapID, killMsg)
+		protocol.BroadcastToNeighbors(targetPos, deathFrame, killerID)
 	}
 
 	// ← NEW: remove từ spatial grid trước khi ECS cleanup
 	world.GlobalSpatialGrid.RemoveEntity(targetID)
 
 	if targetMeta.Type == ecs.EntityPlayer {
+		// Publish player death event
+		eventbus.GlobalBus.Publish(eventbus.TopicPlayerDeath, eventbus.PlayerDeathEvent{
+			PlayerID:   uint64(targetID),
+			KillerID:   uint64(killerID),
+			PlayerName: targetMeta.Name,
+			MapID:      targetPos.MapID,
+		})
+
 		conn, ok := registry.GetConnection(targetID)
 		if ok && conn.Conn != nil {
 			conn.Conn.Close()
@@ -217,6 +265,20 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 			GlobalRespawnManager.ScheduleMonsterRespawn(
 				t.ID, targetPos.MapID, spawnX, spawnZ, 15*time.Second,
 			)
+
+			// Publish monster death event
+			if killerMeta.Type == ecs.EntityPlayer {
+				eventbus.GlobalBus.Publish(eventbus.TopicMonsterDeath, eventbus.MonsterDeathEvent{
+					MonsterID:   uint64(targetID),
+					KillerID:    uint64(killerID),
+					MonsterName: targetMeta.Name,
+					MapID:       targetPos.MapID,
+					SpawnX:      spawnX,
+					SpawnZ:      spawnZ,
+					XPReward:    t.XPReward,
+					TemplateID:  t.ID,
+				})
+			}
 
 			// Distribute XP if killer was a player
 			if killerMeta.Type == ecs.EntityPlayer {
@@ -245,19 +307,20 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 // broadcastHit sends a hit notification to all connected clients.
 // Called only when the target survived (HP > 0 after hit).
 func broadcastHit(r CombatResult) {
-	var msg string
-	attackerMeta, ok := ecs.GlobalRegistry.GetMetadata(r.AttackerID)
-	if ok && attackerMeta.Type == ecs.EntityMonster {
-		msg = fmt.Sprintf("[COMBAT] %s (#%d) hit Player %s for %d damage! (Player HP: %d)\r\n",
-			r.AttackerName, r.AttackerID, r.TargetName, r.Damage, r.TargetHP)
-	} else {
-		msg = fmt.Sprintf(
-			"[COMBAT] %s hit %s for %d damage! (%s HP: %d)\r\n",
-			r.AttackerName, r.TargetName, r.Damage, r.TargetName, r.TargetHP,
-		)
+	killed := uint8(0)
+	if r.Killed {
+		killed = 1
 	}
+	payload := broadcast.CombatHitPayload{
+		AttackerID: uint64(r.AttackerID),
+		TargetID:   uint64(r.TargetID),
+		Damage:     int32(r.Damage),
+		TargetHP:   int32(r.TargetHP),
+		Killed:     killed,
+	}
+	frame := broadcast.BuildCombatHit(payload)
 	attackerPos, _ := ecs.GlobalRegistry.GetPosition(r.AttackerID)
-	protocol.BroadcastToMap(attackerPos.MapID, msg)
+	protocol.BroadcastToNeighbors(attackerPos, frame, r.AttackerID)
 	loggate.Debugf("[HIT] %s → %s | dmg=%d hp_left=%d",
 		r.AttackerName, r.TargetName, r.Damage, r.TargetHP)
 }

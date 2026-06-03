@@ -1,145 +1,69 @@
-# PEAKGO GAME SERVER AGENT RULES (V2026)
+PEAKGO GAME SERVER AGENT RULES (V2026)
+I. CORE ARCHITECTURE GUARDRAILS (Hàng rào kiến trúc Zero-Alloc)
+Tuyệt đối không vi phạm các quy tắc hiệu năng cao của MMORPG Go Server này trên các hot-paths:
 
-## I. STRICT BUILD/TEST LIFECYCLE CONTROL GUIDELINES
+NETWORK (peakgo/codec & netio): BẮT BUỘC dùng peakgo/codec để parse binary. CẤM bit shifting thủ công hoặc dùng encoding/binary. Giới hạn MaxPacketSize (1024/4096) chống DoS. Broadcast chuyển động/combat bằng binary frame từ netio.DefaultPool qua unsafe zero-copy pointer; CẤM dùng fmt.Sprintf.
 
-1. DO NOT run the `go test` or `go build` commands if the changes made have already been confirmed as syntax correct by a static analysis tool or MCP compiler.
+ECS REGISTRY (ecs/ecs.go): Lưu component dạng inline flat values (KHÔNG dùng pointer) để tối ưu CPU cache-locality và loại bỏ GC. Đọc hot-path qua ComponentStore.Range() (Single-Lock, CẤM lock/unlock trong loop). Thay đổi entity trong loop qua ComponentStore.RangeMutate() (dùng pooled slice). CẤM xóa entity trong single-locks.
 
-2. Absolutely DO NOT rerun the build step if the Game Server (`server.exe`) is running or the MCP Bridge port is green. On Windows, overwriting a file while it's open will cause File Locking errors and system crashes (70% crash rate).
+SPATIAL GRID (world/spatial.go): CẤM dùng sync.Pool thô cho generic slices. BẮT BUỘC dùng pool.SlicePool[T] có guard tự động hủy slice vượt >4x capacity khi quá tải. Mọi thay đổi tọa độ phải gọi ngay world.GlobalSpatialGrid.UpdateEntityPosition().
 
-3. If you need to verify code after making changes: Prioritize using the `code_get_outline` tool or running the lightweight syntax check command `go vet ./...` instead of running the full test suite.
+ATOMIC TICK (systems/gameloop.go): CẤM gọi time.Now() hoặc time.Since() trong game loop (loại bỏ Syscalls). Tính cooldown/duration bằng cách trừ frame count: systems.CurrentTick() so với tick gốc. Dùng timer.TickTimer cho FSM AI và action cooldown.
 
-4. The `go test` command should only be activated when there is an explicit request from the user, hoặc khi cần chạy benchmark để xác minh mục tiêu tối ưu hóa hiệu năng (Zero-Allocation) của tệp tin vừa chỉnh sửa.
+ANTI-CHEAT: Packet di chuyển phải được kiểm tra khoảng cách qua gmath.InRangeInt với MaxMoveDistance theo tick trước khi cập nhật vào Registry.
 
-## II. CORE ARCHITECTURE GUARDRAILS (Hàng rào kiến trúc bắt buộc)
-You are working on a High-Performance, Zero-Allocation MMORPG Go Server. Never violate these rules:
+REUSE UTILITIES: CẤM viết lại hoặc dùng thư viện ngoài cho A*, RNG, Heap, Pool, Math... BẮT BUỘC tái sử dụng các package tối ưu trong server/peakgo/ (ví dụ: astar, rng, pool, gmath, threat, combat).
 
-1. NETWORK LAYER (peakgo/codec & netio):
-   - ALWAYS use 'peakgo/codec' for binary parsing. Manual bit shifting or 'encoding/binary' on hot-paths is FORBIDDEN.
-   - Guard against DoS: Ensure packet length validations have a hard restriction ceiling (e.g., MaxPacketSize = 1024 or 4096).
-   - Zero-Alloc Broadcast: Broadcast movement or combat updates using raw binary frames from 'netio.DefaultPool', casted safely via unsafe zero-copy pointers. NO 'fmt.Sprintf' text broadcasting.
+ZERO-ALLOC TARGET & BENCHMARK (0 ns/op, 0 B/op, 0 allocs/op): Mỗi khi chỉnh sửa bất kỳ file nào trong server/peakgo/, BẮT BUỘC chạy benchmark riêng cho gói đó bằng cú pháp Pipe an toàn bảo vệ nháy đơn:
 
-2. ECS REGISTRY LAYER (ecs/ecs.go):
-   - Store components as inline flat values (NO pointers) to enforce CPU cache-locality and zero GC pressure.
-   - Hot-Path Reads: Use 'ComponentStore.Range()' (Single-Lock pattern). NEVER acquire/release locks inside the loop per entity.
-   - Mutate Paths: Use 'ComponentStore.RangeMutate()' when adding/deleting entities inside loops to fetch safe pooled slice buffers.
-   - No Entity Removals in Single-locks: Deletions/Cleanups must be single-threaded or handled atomically via RangeMutate.
+PowerShell
+powershell -Command "Start-Job -ScriptBlock { go test -bench=. -benchmem ./peakgo/tên_gói/... } -WorkingDirectory 'c:\Minnsun''s Adventure\server' | Wait-Job -Timeout 45 | Receive-Job; Get-Job | Remove-Job -Force"
+Lặp lại việc tối ưu cho đến khi đạt chỉ số Zero-Allocation mới được coi là hoàn thành tác vụ.
 
-3. SPATIAL PROXIMITY GRID (world/spatial.go):
-   - NO raw 'sync.Pool' allocations for generic slices.
-   - ALWAYS use 'pool.SlicePool[T]' with an anti-pollution guard to automatically drop oversized slices (>4x capacity) under heavy crowd load.
-   - Synchronous Writes: Any registry modification regarding coordinates MUST immediately trigger 'world.GlobalSpatialGrid.UpdateEntityPosition()' to prevent spatial de-synchronization.
+II. WINDOWS POWERSHELL & BUILD/TEST LIFECYCLE CONTROLS
+File Locking & Redundant Builds: Tuyệt đối KHÔNG chạy go build hoặc go test nếu code đã được xác nhận đúng cú pháp bởi static phân tích/MCP compiler, hoặc khi server.exe đang chạy/MCP Bridge port đang xanh (Tránh File Locking gây crash hệ thống trên Windows - tỉ lệ 70%). Ưu tiên dùng code_get_outline hoặc go vet để check cú pháp nhẹ. Chỉ chạy go test khi người dùng yêu cầu hoặc cần chạy benchmark tối ưu hóa.
 
-4. TICK TIME SYSTEM (systems/gameloop.go):
-   - TIME IS ATOMIC: Inside game loops and hot-paths, NEVER call 'time.Now()' or 'time.Since()' (Eliminate System Calls).
-   - ALWAYS track cooldowns and durations by subtracting frame counts using 'systems.CurrentTick()' against a saved tick number.
-   - Use 'timer.TickTimer' for FSM AI state delays and action cooldowns.
+TUYỆT ĐỐI CẤM TOÁN TỬ &&: PowerShell 5.1 không hỗ trợ && (gây lỗi ParserError hoặc đứng im đóng băng câu lệnh). Sử dụng dấu chấm phẩy ; hoặc xuống dòng để tách các câu lệnh độc lập.
 
-5. ANTI-CHEAT REGIME:
-   - Absolute Distance Verification: Player movement packets MUST validate target distance against a tick constraint ('gmath.InRangeInt' with MaxMoveDistance) before committing coordinates to the Registry. Teleporting without valid state is a critical breach.
+CẤM CHẠY LỆNH CD THỦ CÔNG: Do thư mục chứa dấu nháy đơn (Minnsun's), việc chạy lệnh cd trần hoặc bọc nháy sai cách sẽ kích hoạt dấu >> (PowerShell bị nuốt ký tự và đứng im đợi nhập tiếp) gây đơ tiến trình 100%.
 
-6. REUSE PEAKGO UTILITIES (Ưu tiên tái sử dụng thư viện/package từ peakgo):
-   - Khi viết code logic mới hoặc bổ sung tính năng (như A* Pathfinding, Random số, Heap/Priority Queue, Slices Pool, Math helper,...), KHÔNG tự viết lại hoặc sử dụng các thư viện ngoài chuẩn.
-   - BẮT BUỘC phải tìm kiếm và tái sử dụng các package tối ưu hóa hiệu năng cao nằm trong `server/peakgo/` (ví dụ: `peakgo/astar`, `peakgo/rng`, `peakgo/pool`, `peakgo/gmath`, `peakgo/threat`, `peakgo/combat`).
+III. MANDATORY MCP TOOLS & RECOVERY PROCESS
+Nghiêm cấm dùng tool tích hợp read_file / search_files cho các tệp .go, .sql, .json trong thư mục server/. Vi phạm sẽ bị hệ thống tự động DENY.
 
-7. ZERO-ALLOCATION TARGET & BENCHMARK VERIFICATION (BẮT BUỘC):
-   - Mục tiêu tối ưu hiệu năng của dự án đối với tất cả các package thuộc `server/peakgo/` và các hàm xử lý trên hot-paths là **0 ns/op (hoặc cực kỳ tối ưu)** và **0 B/op, 0 allocs/op** (hoàn toàn không cấp phát trên Heap).
-   - Mỗi lần thực hiện chỉnh sửa/bổ sung bất kỳ file code nào trong các thư mục này, Agent **BẮT BUỘC** phải chạy benchmark test riêng cho gói vừa chỉnh sửa (`go test -bench=. -benchmem ./peakgo/tên_gói/...`).
-   - Phải lặp lại quá trình tối ưu và chạy benchmark cho đến khi đạt được mục tiêu Zero-Allocation (0 B/op và 0 allocs/op) mới được coi là hoàn thành tác vụ.
+Bắt buộc dùng MCP Token-Savers:
 
-## III. REFACTORING WORKFLOW
-- When editing, output the complete file or the precise git diff if requested.
-- STOP immediately after providing the file contents. DO NOT attempt to run compilers, linters, or test suites to check your work.
-- Ensure all logs are safely wrapped inside condition guards (e.g., 'if loggate.DebugEnabled()') to prevent useless string allocations on Production mode.
+Xem cấu trúc tổng quát: Gọi code_get_outline.
 
-## IV WINDOWS PATH RULES (MANDATORY)
-The project directory contains single quotes "Minnsun's Adventure". When executing the `cd` command or any command involving paths, it is MANDATORY to enclose the entire path in DOUBLE QUOTATION MARKS `""`.
+Trích xuất chi tiết code Go (struct, func, method...): Gọi code_extract (với list_classes, extract_member,...).
 
-Standard example: `cd "c:\Minnsun's Adventure\server" && go vet ./...`
-Absolutely do not write the path without quotation marks, as this will cause a PowerShell syntax crash (>> error).
+Tìm kiếm & thay thế: Gọi replace.
 
-## V WINDOWS POWERSHELL & GO WORKSPACE RULES (CRITICAL)
+Xem DB Schema: Gọi db_get_schema.
 
-1. **Do not use the `&&` operator:** The default PowerShell 5.1 version on the host machine does NOT support the `&&` operator. Absolutely do not use `&&` to concatenate commands (this will cause a `ParserError`). Use a semicolon `;` or a newline if you need to separate independent commands.
+Quy trình sửa lỗi công cụ (CẤM CHẠY TRỐN): Nếu gọi MCP tool bị lỗi/mismatch, NGHIÊM CẤM dùng các lệnh tự chế qua Terminal để đối phó. Khi lỗi đến lần thứ 3, Agent BẮT BUỘC phải mở file server/cmd/mcp-bridge/main.go để kiểm tra logic (khoảng trắng, newline, CRLF/LF...), sửa code, build lại bridge (go build -o ../../mcp-bridge.exe), khởi động lại server và thử lại cho tới khi công cụ MCP chạy chính xác hoàn toàn. Vi phạm sẽ bị DENY ngay lập tức.
 
-2. **Handling single quotes in paths (`Minnsun's Adventure`)**:
+IV. REFACTORING, FILE PATCHING & TERMINAL SAFETY
+CẤM DÙNG TERMINAL ĐỂ TẠO/SỬA FILE: Nghiêm cấm dùng echo, cat, Set-Content, Out-File, >, >> để tạo hoặc vá code (tránh lỗi "Double Interpolation" với các ký tự đặc biệt như $, \, `, * trên PowerShell). BẮT BUỘC dùng MCP File System Tools (write_to_file, edit_file_multi, patch).
 
-- The project folder name contains a single quote in the word `Minnsun's`.
+Go Assembly (Plan 9 ASM): Các hằng số/phép toán (như NodeSZ*4) phải được tự tính toán ra giá trị số cụ thể (Immediate Constant, ví dụ: $96) trước khi ghi vào file .s để tránh xung đột cú pháp với compiler.
 
-- ANY time a command involving a path is executed, the entire path MUST be enclosed in DOUBLE QUOTATION MARKS `""` (Example: `"c:\Minnsun's Adventure\server"`).
+Refactoring Workflow: Xuất toàn bộ file hoặc chính xác git diff nếu được yêu cầu. DỪNG LẠI NGAY sau khi cung cấp nội dung file, không tự ý chạy trình biên dịch/linter. Đảm bảo mọi log được bọc trong guard condition (ví dụ: if loggate.DebugEnabled()) để tránh cấp phát chuỗi vô ích trên Production.
 
-- Absolutely do not use bare paths or parentheses, as this will break PowerShell syntax and cause system crashes (the `>>` symbol error).
+V. COMMAND TIMEOUT & HUNG PROCESS RECOVERY (FIXED FOR PS 5.1)
+CÚ PHÁP MẪU BẮT BUỘC (TƯƠNG THÍCH POWERSHELL 5.1): Để tránh lỗi thiếu tham số WorkingDirectory trên PS 5.1 và không bị kẹt dấu nháy đơn, bắt buộc sử dụng cờ -ArgumentList để truyền path an toàn vào trong Job:
 
-3. **Forcing Working Directory for Go Modules**:
+Khi chạy go vet (Giới hạn tối đa 20 giây - Chuẩn PS 5.1):
 
-- The root directory of VS Code is `C:\Minnsun's Adventure`, but the `go.mod` file is located in the `server/` subdirectory.
+PowerShell
+powershell -Command "Start-Job -ScriptBlock { param($p); Set-Location $p; go vet ./... } -ArgumentList 'c:\Minnsun''s Adventure\server' | Wait-Job -Timeout 20 | Receive-Job; Get-Job | Remove-Job -Force"
+     *(Giải thích: Dùng `param($p)` và `Set-Location $p` kết hợp với nháy đơn kép `''` ở `-ArgumentList` giúp cô lập hoàn toàn đường dẫn, chạy mượt mà trên mọi phiên bản PowerShell)*.
 
-- To avoid the compiler reporting the `cannot find main module` error, all Go-related commands (`go build`, `go vet`, `go test`) MUST NOT be run directly using the normal `cd` command.
+   * **Khi build Game Server (`server.exe`):**
+     ```powershell
+     powershell -Command "Start-Job -ScriptBlock { param($p); Set-Location $p; go build -o server.exe . } -ArgumentList 'c:\Minnsun''s Adventure\server' | Wait-Job -Timeout 30 | Receive-Job; Get-Job | Remove-Job -Force"
+Khi build MCP Bridge (mcp-bridge.exe):
 
-- It is MANDATORY to use the `-WorkingDirectory` flag explicitly through the child PowerShell to ensure proper execution environment isolation.
+PowerShell
+powershell -Command "Start-Job -ScriptBlock { param($p); Set-Location $p; go build -o mcp-bridg
 
-4. **Standard Execution Syntax (Required Pattern)**:
-
-- When running `go vet`:
-
-`powershell -WorkingDirectory "c:\Minnsun's Adventure\server" -Command "go vet ./..."`
-
-- When building `server.exe`:
-
-`powershell -WorkingDirectory "c:\Minnsun's Adventure\server" -Command "go build -o server.exe ."`
-
-- When building `mcp-bridge.exe`:
-
-`powershell -WorkingDirectory "c:\Minnsun's Adventure\server" -Command "go build -o mcp-bridge.exe ./cmd/mcp-bridge/"`
-
-5. **Preventing Freezing and File Locking (70% of Freezing Errors)**:
-
-- Absolutely DO NOT restart the build step or run the test suite if the changes just made have been confirmed as correct syntax by the static analysis tool.
-
-- Do not perform an overwrite build while the Game Server (`server.exe`) is running or the MCP Bridge port is showing green to avoid Windows File Locking errors.
-
-# VI. PROHIBITED USE OF BUILT-IN READ_FILE (MANDATORY)
-
-1. **Absolute prohibition of built-in tools**: It is STRICTLY PROHIBITED to use the built-in `read_file` or `search_files` tools for any file with the extensions `.go`, `.sql`, or `.json` in the `server/` directory.
-
-2. **Forced use of MCP Token-Savers & Code Modifiers**:
-
-- Khi muốn xem cấu trúc tổng quát của file, BẮT BUỘC gọi MCP tool `code_get_outline`.
-
-- Khi muốn trích xuất chi tiết code (struct, interface, function, method, variable) trong file hoặc thư mục Go, BẮT BUỘC sử dụng MCP tool `code_extract` với các hành động phù hợp (`list_classes`, `list_class_members`, `find_member_class`, `extract_member`) để tiết kiệm token và định vị code chính xác.
-
-- Khi muốn tìm kiếm và thay thế chuỗi văn bản hoặc regex trong các file, BẮT BUỘC gọi MCP tool `replace` để thực hiện hàng loạt một cách nhanh chóng và an toàn.
-
-- Khi kiểm tra bảng DB, BẮT BUỘC gọi MCP tool `db_get_schema`.
-
-3. **Hình phạt khi vi phạm**: Nếu cố tình dùng tool tích hợp `read_file` để đọc toàn bộ tệp Go lớn, người dùng sẽ nhấn DENY và tiến trình sẽ đóng lập tức. Hãy tuân thủ để tiết kiệm token hệ thống.
-
-4. **Quy định khắc phục lỗi Tool (TUYỆT ĐỐI BẮT BUỘC - NGHIÊM CẤM CHẠY TRỐN)**: Nếu gọi MCP tool (ví dụ: `replace`, `code_extract`,...) mà bị lỗi hoặc không khớp nội dung (mismatch), **TUYỆT ĐỐI NGHIÊM CẤM** tự ý chuyển sang dùng các công cụ built-in / mặc định của IDE như `replace_in_file`, `replace_file_content`, `read_file` để đối phó. Khi xảy ra lỗi hoặc gọi tới lần thứ 3 không thành công, Agent **BẮT BUỘC** phải vào tệp [main.go](file:///c:/Minnsun's Adventure/server/cmd/mcp-bridge/main.go) để kiểm tra logic công cụ, sửa lỗi (ví dụ: lỗi khoảng trắng, newline, CRLF/LF,...), build lại bridge (`go build -o ../../mcp-bridge.exe`), khởi động lại server và thử lại cho tới khi công cụ MCP chạy thành công và chính xác thì thôi. Vi phạm quy tắc này sẽ bị từ chối phê duyệt (DENY) ngay lập tức.
-
-[CRITICAL RULE: NO TERMINAL FOR FILE CREATION/PATCHING]
-1. Absolutely DO NOT use Terminal commands (such as `echo`, `cat`, `Set-Content`, `Out-File`) or navigation keys (`>`, `>>`) to create or modify source code files. Since the system is running on Windows PowerShell, this will trigger a "Double Interpolation" error with special characters like $, \, `, (, ), * and cause the file to freeze/corrupt.
-
-2. You MUST use internal file system tools (File System MCP Tools such as `write_to_file`, `edit_file_multi`, `patch`) to write content directly to the hard drive.
-3. When writing Go Assembly code (Plan 9 ASM), constants or mathematical operations (e.g., `NodeSZ*4`) must be flat-calculated to a specific numerical value (Immediate Constant, e.g., $96) before writing to the .s file to avoid syntax conflicts with the compiler and shell.
-
-[CRITICAL RULE: COMMAND TIMEOUT & HUNG PROCESS RECOVERY]
-1. TIMEOUT IS MANDATORY: Every Terminal command (especially go test, go build, powershell) must have a time limit flag or proactively check for responses within a short time. Commands must never run indefinitely.
-
-2. ANTI-INFINITE LOOP RULE:
-
-- If a command timeouts or hangs more than once, it is ABSOLUTELY NOT allowed to run the exact same command again.
-
-- The AI ​​must immediately activate the self-reflection process: Analyze why the freeze occurred (Was the file locked? Was PowerShell waiting for input stdin? Was there incorrect syntax causing blocking?).
-
-3. RECOVERY STRATEGY (RECOVERY PIVOT):
-
-- If you experience repeated freezes/timeouts, you MUST FIND ANOTHER WAY to handle it:
-
-* Example 1 (File Stuck/Locked File): Run a command to check and release the process occupying the file (use `Get-Process` or `Stop-Process` if necessary).
-
-* Example 2 (Terminal Stuck): Switch to writing a separate script file (like a short `.ps1` file), configure it to run in the background without blocking, then read the output log file.
-
-* Example 3 (Too stupid to realize): If trying both methods still results in timeouts, stop, clearly report the hardware freeze to the User to request assistance, and absolutely do not automatically loop and waste tokens.
-
-4. TIMEOUT FOR TERMINAL
-
-- If you run any command in cli ( cmd or powershell), "YOU MUST" set timeout for this command. DO not pass any way.
+Mọi hành vi vi phạm các quy tắc trên sẽ dẫn đến việc tiến trình bị đóng (DENY) ngay lập tức.

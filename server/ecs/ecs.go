@@ -2,6 +2,7 @@ package ecs
 
 import (
 	"net"
+	"server/peakgo/threat"
 	"server/peakgo/timer" // Tích hợp chặt chẽ hệ thống TickTimer lõi
 	"sync"
 	"sync/atomic"
@@ -68,7 +69,15 @@ type StatsComponent struct {
 	MaxHP int
 	MP    int
 	MaxMP int
-	Dam   int
+	Dam           int
+	Attack        int
+	MagicAttack   int
+	Defense       int
+	MagicDefense  int
+	HitRate       int
+	DodgeRate     int
+	CritRate      int
+	CritDamage    int
 }
 
 type ItemTemplateComponent struct {
@@ -118,6 +127,10 @@ type AIComponent struct {
 	PathTimer   timer.TickTimer
 	RoamTargetX int
 	RoamTargetZ int
+
+	// ThreatTable tracks aggro values (peakgo/threat). Pointer for lazy init.
+	// Only monsters chasing/attacking players need this — idle monsters waste nothing.
+	ThreatTable *threat.ThreatTable
 }
 
 type InventoryComponent struct {

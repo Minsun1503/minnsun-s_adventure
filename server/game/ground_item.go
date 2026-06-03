@@ -47,10 +47,10 @@ func SpawnItemOnGround(itemTemplateID uint64, mapID int, x int, z int) ecs.Entit
 		Duration:  60 * time.Second,
 	})
 
-	// 6. Broadcast packet notice to local area map witnesses only (no emojis)
+	// 6. Broadcast packet notice to nearby players using AOI-aware neighbor broadcast.
 	notice := fmt.Sprintf("[DROP]: A %s dropped on the ground at position (%d, %d) [ID: %d]\r\n",
 		name, x, z, itemEntity)
-	protocol.BroadcastToMap(mapID, notice)
+	protocol.BroadcastToNeighbors(pos, []byte(notice), itemEntity)
 
 	return itemEntity
 }
@@ -80,7 +80,7 @@ func RunGroundItemDecaySystem() {
 			if posOk && metaOk {
 				decayNotice := fmt.Sprintf("[DECAY]: The %s sitting at (%d, %d) faded away into dust.\r\n",
 					meta.Name, pos.X, pos.Z)
-				protocol.BroadcastToMap(pos.MapID, decayNotice)
+				protocol.BroadcastToNeighbors(pos, []byte(decayNotice), snap.ID)
 			}
 
 			// 3. PURGE TRANSACTION: Clean up spatial grid and parallel memory tables completely

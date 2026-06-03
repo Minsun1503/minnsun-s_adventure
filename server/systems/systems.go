@@ -6,12 +6,14 @@ import (
 	"server/ecs"
 	"server/game"
 	"server/peakgo/netio"
+	"server/peakgo/broadcast"
 )
 
 // BroadcastSystem sends a raw byte payload to every entity with an active connection.
 func BroadcastSystem(data []byte) {
+	frame := broadcast.BuildNotice(broadcast.NoticePayload{Message: string(data)})
 	ecs.GlobalRegistry.RangeConnections(func(_ ecs.Entity, conn ecs.ConnectionComponent) bool {
-		writeConn(conn.Conn, data)
+		writeConn(conn.Conn, frame)
 		return true
 	})
 }

@@ -1,10 +1,8 @@
 package game
 
 import (
-	"fmt"
 	"server/ecs"
 	"server/peakgo/gmath"
-	"server/peakgo/loggate"
 	"server/peakgo/rng"
 	"server/peakgo/spatial"
 	"server/world"
@@ -43,10 +41,25 @@ func TickAI(id ecs.Entity) {
 // ─── STATE HANDLERS ──────────────────────────────────────────────────────────
 
 func tickIdle(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
-	// Sử dụng Semantic API mới từ gói spatial: Không lặp code quét mảng thủ công
+	// 1. Check threat-based aggro: if a player has accumulated threat, chase them
+	if ai.ThreatTable != nil && ai.ThreatTable.Len() > 0 {
+		if topPlayerID, topThreat := ai.ThreatTable.Top(); topThreat > 0 {
+			if targetPos, ok := ecs.GlobalRegistry.GetPosition(ecs.Entity(topPlayerID)); ok {
+				if myPos, ok := ecs.GlobalRegistry.GetPosition(id); ok {
+					if gmath.InRangeInt(myPos.X, myPos.Z, targetPos.X, targetPos.Z, int(ai.AggroRadius)) {
+						ai.TargetID = ecs.Entity(topPlayerID)
+						MonsterFSMSend(id, &ai, MonsterEvAggro)
+						return ai
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Fallback: nearest player in aggro range
 	if target, found := spatial.GetNearestPlayer(id, ai.AggroRadius); found {
 		ai.TargetID = target.ID
-		transition(id, &ai, ecs.AIStateChasing)
+		MonsterFSMSend(id, &ai, MonsterEvAggro)
 		return ai
 	}
 
@@ -59,7 +72,7 @@ func tickIdle(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 		if found {
 			ai.RoamTargetX = nextX
 			ai.RoamTargetZ = nextZ
-			transition(id, &ai, ecs.AIStateRoaming)
+			MonsterFSMSend(id, &ai, MonsterEvTick)
 		}
 	}
 
@@ -69,19 +82,19 @@ func tickIdle(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 func tickRoaming(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 	if target, found := spatial.GetNearestPlayer(id, ai.AggroRadius); found {
 		ai.TargetID = target.ID
-		transition(id, &ai, ecs.AIStateChasing)
+		MonsterFSMSend(id, &ai, MonsterEvAggro)
 		return ai
 	}
 
 	pos, ok := ecs.GlobalRegistry.GetPosition(id)
 	if !ok {
-		transition(id, &ai, ecs.AIStateIdle)
+		MonsterFSMSend(id, &ai, MonsterEvPathDone)
 		return ai
 	}
 
 	// Nếu đã chạm chân tới điểm đích Roaming mục tiêu -> Quay về trạng thái Idle nghỉ ngơi
 	if pos.X == ai.RoamTargetX && pos.Z == ai.RoamTargetZ {
-		transition(id, &ai, ecs.AIStateIdle)
+		MonsterFSMSend(id, &ai, MonsterEvPathDone)
 		ai.IdleTimer.Reset()
 		return ai
 	}
@@ -95,7 +108,7 @@ func tickRoaming(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 
 		// Nếu bị kẹt đường hoặc tile mục tiêu bị chặn đột ngột -> Hủy roam, đứng nghỉ
 		if (nextX == pos.X && nextZ == pos.Z) || world.IsTileBlocked(pos.MapID, nextX, nextZ) {
-			transition(id, &ai, ecs.AIStateIdle)
+			MonsterFSMSend(id, &ai, MonsterEvPathDone)
 			ai.IdleTimer.Reset()
 			return ai
 		}
@@ -108,14 +121,25 @@ func tickRoaming(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 
 func tickChasing(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 	if ai.TargetID == 0 {
-		transition(id, &ai, ecs.AIStateReturning)
+		MonsterFSMSend(id, &ai, MonsterEvLostTarget)
 		return ai
+	}
+
+	// Decay threat each tick so aggro naturally fades
+	if ai.ThreatTable != nil {
+		ai.ThreatTable.Decay()
+		// Switch target if another player has higher threat
+		if topID, topThreat := ai.ThreatTable.Top(); topThreat > 0 && ecs.Entity(topID) != ai.TargetID {
+			if _, ok := ecs.GlobalRegistry.GetPosition(ecs.Entity(topID)); ok {
+				ai.TargetID = ecs.Entity(topID)
+			}
+		}
 	}
 
 	targetPos, ok := ecs.GlobalRegistry.GetPosition(ai.TargetID)
 	if !ok {
 		ai.TargetID = 0
-		transition(id, &ai, ecs.AIStateReturning)
+		MonsterFSMSend(id, &ai, MonsterEvLostTarget)
 		return ai
 	}
 
@@ -129,13 +153,13 @@ func tickChasing(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 	// Chạy bằng InRangeInt hệ số nguyên, không dính bất kỳ một phép toán float nào.
 	if !gmath.InRangeInt(myPos.X, myPos.Z, ai.SpawnX, ai.SpawnZ, ai.LeashRadius) {
 		ai.TargetID = 0
-		transition(id, &ai, ecs.AIStateReturning)
+		MonsterFSMSend(id, &ai, MonsterEvLostTarget)
 		return ai
 	}
 
 	// Đug Đã Vá (Melee Range Check): Sử dụng InRangeInt hệ số nguyên sạch sẽ, triệt tiêu magic code
 	if gmath.InRangeInt(myPos.X, myPos.Z, targetPos.X, targetPos.Z, ai.MeleeRange) {
-		transition(id, &ai, ecs.AIStateAttacking)
+		MonsterFSMSend(id, &ai, MonsterEvInRange)
 		return ai
 	}
 
@@ -151,7 +175,7 @@ func tickChasing(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 
 func tickAttacking(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 	if ai.TargetID == 0 {
-		transition(id, &ai, ecs.AIStateReturning)
+		MonsterFSMSend(id, &ai, MonsterEvLostTarget)
 		return ai
 	}
 
@@ -159,13 +183,13 @@ func tickAttacking(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 	myPos, myOk := ecs.GlobalRegistry.GetPosition(id)
 	if !targetOk || !myOk {
 		ai.TargetID = 0
-		transition(id, &ai, ecs.AIStateReturning)
+		MonsterFSMSend(id, &ai, MonsterEvLostTarget)
 		return ai
 	}
 
 	// Nếu người chơi dùng tốc biến hoặc chạy giật lùi thoát khỏi tầm đánh -> Quay lại trạng thái Chasing
 	if !gmath.InRangeInt(myPos.X, myPos.Z, targetPos.X, targetPos.Z, ai.MeleeRange) {
-		transition(id, &ai, ecs.AIStateChasing)
+		MonsterFSMSend(id, &ai, MonsterEvOutOfRange)
 		return ai
 	}
 
@@ -174,18 +198,29 @@ func tickAttacking(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 		return ai
 	}
 
+	// Decay threat before attacking so past damagers can overtake
+	if ai.ThreatTable != nil {
+		ai.ThreatTable.Decay()
+	}
+
 	result, errMsg := AttackSystem(id, ai.TargetID)
 	if errMsg != "" {
+		if ai.ThreatTable != nil {
+			ai.ThreatTable.Remove(uint64(ai.TargetID))
+		}
 		ai.TargetID = 0
-		transition(id, &ai, ecs.AIStateReturning)
+		MonsterFSMSend(id, &ai, MonsterEvLostTarget)
 		return ai
 	}
 
 	ai.AttackTimer.Reset() // Reset hồi chiêu đòn đánh về 0 ngay sau khi tung chiêu
 
 	if result.Killed {
+		if ai.ThreatTable != nil {
+			ai.ThreatTable.Remove(uint64(ai.TargetID))
+		}
 		ai.TargetID = 0
-		transition(id, &ai, ecs.AIStateReturning)
+		MonsterFSMSend(id, &ai, MonsterEvLostTarget)
 	}
 
 	return ai
@@ -197,9 +232,27 @@ func tickReturning(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 		return ai
 	}
 
+	// Check aggro while returning: player may follow monster back
+	if ai.ThreatTable != nil && ai.ThreatTable.Len() > 0 {
+		if topPlayerID, topThreat := ai.ThreatTable.Top(); topThreat > 0 {
+			if targetPos, ok := ecs.GlobalRegistry.GetPosition(ecs.Entity(topPlayerID)); ok {
+				if gmath.InRangeInt(pos.X, pos.Z, targetPos.X, targetPos.Z, int(ai.AggroRadius)) {
+					ai.TargetID = ecs.Entity(topPlayerID)
+					MonsterFSMSend(id, &ai, MonsterEvAggro)
+					return ai
+				}
+			}
+		}
+	}
+	if target, found := spatial.GetNearestPlayer(id, ai.AggroRadius); found {
+		ai.TargetID = target.ID
+		MonsterFSMSend(id, &ai, MonsterEvAggro)
+		return ai
+	}
+
 	// Đã lọt về điểm Neo Spawn cũ (bán kính <= 1 ô) -> Reset trạng thái đứng nghỉ Idle
 	if gmath.InRangeInt(pos.X, pos.Z, ai.SpawnX, ai.SpawnZ, 1) {
-		transition(id, &ai, ecs.AIStateIdle)
+		MonsterFSMSend(id, &ai, MonsterEvAtSpawn)
 		ai.IdleTimer.Reset()
 		return ai
 	}
@@ -219,20 +272,7 @@ func tickReturning(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 
 // transition quản lý tập trung việc chuyển đổi trạng thái AI.
 // Gom toàn bộ logic gán biến và Debug Log rườm rà trước đây vào đúng 1 nguồn sự thật duy nhất.
-func transition(id ecs.Entity, ai *ecs.AIComponent, next ecs.AIState) {
-	if ai.State == next {
-		return
-	}
-	old := ai.State
-	ai.State = next
 
-	// Hệ thống logging an toàn của loggate: Tự động hủy variadic slice rác khi debug=false
-	name := fmt.Sprintf("entity_%d", id)
-	if meta, ok := ecs.GlobalRegistry.GetMetadata(id); ok {
-		name = meta.Name
-	}
-	loggate.Debugf("[AI] %s: %s → %s", name, old, next)
-}
 
 // pickRoamTarget tính toán tọa độ di chuyển ngẫu nhiên tự nhiên quanh vùng spawn.
 func pickRoamTarget(id ecs.Entity, ai ecs.AIComponent) (int, int, bool) {

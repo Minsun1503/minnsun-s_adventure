@@ -59,7 +59,7 @@ func HandleItemPickupSystem(playerID ecs.Entity, itemEntityID ecs.Entity) (strin
 		playerMeta.Name, itemMeta.Name)
 
 	// Notify all local area map witnesses that the item has been picked up
-	protocol.BroadcastToMap(itemPos.MapID, successBroadcast)
+	protocol.BroadcastToNeighbors(itemPos, []byte(successBroadcast), playerID)
 
 	personalFeedback := fmt.Sprintf("You successfully stowed %s in your backpack!\r\n", itemMeta.Name)
 	return personalFeedback, true

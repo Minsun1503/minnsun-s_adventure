@@ -16,6 +16,7 @@ import (
 	"server/peakgo/netio"
 	"server/protocol"
 	"server/systems"
+	"server/peakgo/broadcast"
 	"server/world"
 )
 
@@ -176,6 +177,8 @@ func processLogin(conn net.Conn) {
 		systems.BroadcastSystem(
 			[]byte(fmt.Sprintf("Player %s has logged into the game!\r\n", snap.Meta.Name)),
 		)
+		// Register the player as an AOI watcher for delta enter/leave broadcasts.
+		world.RegisterPlayerAOI(playerEntity)
 		go handleClient(conn, playerEntity, snap)
 
 	case protocol.OpcodeC2SRegister: // REGISTER
@@ -288,6 +291,8 @@ func main() {
 	defer lis.Close()
 	logger.Info("[BOOT] Server listening on %s", lis.Addr())
 
+	world.InitAOIManager()
+
 	systems.StartGameLoop()
 	StartLoginWorkerPool(4) // Start 4 connection login workers to process db queue
 
@@ -331,6 +336,7 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		game.GlobalTradeRegistry.CancelTradeSession(playerEntity)
 		game.RemovePlayerFromParty(playerEntity)
 		db.QueuePlayerSave(playerEntity)
+		world.UnregisterPlayerAOI(playerEntity)
 		world.GlobalSpatialGrid.RemoveEntity(playerEntity)
 		ecs.GlobalRegistry.RemoveEntity(playerEntity)
 		models.ActivePlayers.Delete(conn.RemoteAddr().String())
@@ -403,7 +409,8 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 			return
 		}
 		inventoryTextPacket := game.RunInventoryQuerySystem(playerEntity)
-		conn.Write([]byte(inventoryTextPacket))
+		frame := broadcast.BuildNotice(broadcast.NoticePayload{Message: inventoryTextPacket})
+		conn.Write(frame)
 
 	case protocol.OpcodeC2SUse: // USE
 		noticePacket, success := game.HandleItemUsageSystem(playerEntity, payload)
@@ -484,7 +491,8 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 		feedback, success := game.HandleEquipmentSystem(playerEntity, itemID)
 		if success {
 			pos, _ := ecs.GlobalRegistry.GetPosition(playerEntity)
-			protocol.BroadcastToMap(pos.MapID, feedback)
+			frame := broadcast.BuildNotice(broadcast.NoticePayload{Message: feedback})
+			protocol.BroadcastToNeighbors(pos, frame, playerEntity)
 		} else {
 			systems.SendNoticeSystem(playerEntity, []byte(feedback))
 		}

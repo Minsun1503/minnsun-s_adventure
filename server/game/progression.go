@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"server/ecs"
+	"server/peakgo/eventbus"
 	"server/protocol"
 )
 
@@ -62,7 +63,15 @@ func AddExperienceSystem(playerID ecs.Entity, xpGained uint64) {
 		
 		// Broadcast the event notification to local area map witnesses only
 		pos, _ := ecs.GlobalRegistry.GetPosition(playerID)
-		protocol.BroadcastToMap(pos.MapID, levelNotice)
+		protocol.BroadcastToNeighbors(pos, []byte(levelNotice), playerID)
+
+		// Publish level-up event
+		eventbus.GlobalBus.Publish(eventbus.TopicPlayerLevelUp, eventbus.PlayerLevelUpEvent{
+			PlayerID:   uint64(playerID),
+			PlayerName: meta.Name,
+			NewLevel:   stats.Level,
+			MapID:      pos.MapID,
+		})
 	} else {
 		// Send a small personal ticker notice update instead
 		SendNoticeSystem(playerID, []byte(fmt.Sprintf("+%d XP gained.\r\n", xpGained)))

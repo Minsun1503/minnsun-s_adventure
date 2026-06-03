@@ -35,6 +35,7 @@ func RecalculateActiveStats(playerID ecs.Entity) {
 	// 3. Overwrite upper limitations and active attributes safely
 	currentStats.MaxHP = baseMaxHP
 	currentStats.Dam = baseDamage
+	currentStats.Attack = baseDamage
 
 	// Guardrail: If item swaps lowered MaxHP below current health pools, clamp it
 	if currentStats.HP > currentStats.MaxHP {

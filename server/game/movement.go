@@ -7,6 +7,7 @@ import (
 	"server/peakgo/gmath"
 	"server/peakgo/loggate"
 	"server/peakgo/netio"
+	"server/peakgo/broadcast"
 	"server/protocol"
 	"server/world"
 )
@@ -35,6 +36,11 @@ func HandlePlayerMovementSystem(playerID ecs.Entity, payload []byte) (string, bo
 	if !MovementSystem(playerID, int(p.X), int(p.Z)) {
 		return "Error: Movement validation rejected.\r\n", false
 	}
+
+	// After successful movement, process AOI events to detect enter/leave neighbors.
+	if pos, ok := ecs.GlobalRegistry.GetPosition(playerID); ok {
+		world.ProcessAOIEvents(playerID, pos)
+	}
 	return "", true
 }
 
@@ -42,7 +48,15 @@ func HandlePlayerMovementSystem(playerID ecs.Entity, payload []byte) (string, bo
 func SendNoticeSystem(entity ecs.Entity, data []byte) {
 	conn, ok := ecs.GlobalRegistry.GetConnection(entity)
 	if ok && conn.Conn != nil {
-		writeConn(conn.Conn, data)
+		frame := broadcast.BuildNotice(broadcast.NoticePayload{Message: string(data)})
+		writeConn(conn.Conn, frame)
+	}
+}
+
+func SendNoticeBinary(entity ecs.Entity, frame []byte) {
+	conn, ok := ecs.GlobalRegistry.GetConnection(entity)
+	if ok && conn.Conn != nil {
+		writeConn(conn.Conn, frame)
 	}
 }
 
@@ -105,28 +119,18 @@ func MovementSystem(entity ecs.Entity, x, z int) bool {
 
 // broadcastBinaryMovement thực hiện đóng gói nhị phân không cấp phát và phát sóng diện rộng.
 func broadcastBinaryMovement(entity ecs.Entity, pos ecs.PositionComponent) {
-	// Bước đi tối cao: Mượn một bộ đệm nhị phân sạch từ kiến trúc lõi netio DefaultPool (1KB)
 	pBuf := netio.DefaultPool.Get()
 	defer netio.DefaultPool.Put(pBuf)
 
-	// Khai báo kích thước chính xác cho khung gói tin phát sóng:
-	// Khung packet = [Length uint16 (2B)] + [Opcode uint8 (1B)] + [Payload (16B)] -> Tổng 19 bytes.
-	// Chi tiết Payload: [EntityID uint64 (8B)] + [X int32 (4B)] + [Z int32 (4B)]
-	buf := (*pBuf)[:19]
+	payload := broadcast.PositionSyncPayload{
+		EntityID: uint64(entity),
+		X:        int32(pos.X),
+		Z:        int32(pos.Z),
+	}
+	buf := broadcast.WritePositionSync((*pBuf)[:0], payload)
 
-	const OpcodePlayerMoved uint8 = 2 // Mã Opcode định danh sự kiện thực thể di chuyển
-
-	// Ghi trực tiếp lên vùng nhớ con trỏ thông qua package codec, triệt tiêu overhead dịch chuỗi
-	codec.WriteUint16(buf[0:2], 17) // Độ dài Payload = 1 byte Opcode + 16 bytes Data dữ liệu = 17
-	codec.WriteUint8(buf[2:3], OpcodePlayerMoved)
-	codec.WriteUint64(buf[3:11], uint64(entity))
-	codec.WriteInt32(buf[11:15], int32(pos.X))
-	codec.WriteInt32(buf[15:19], int32(pos.Z))
-
-	// Phát sóng theo vùng AOI: chỉ gửi gói tin đến các thực thể lân cận, triệt tiêu O(N)
 	protocol.BroadcastToNeighbors(pos, buf, entity)
 
-	// Đạt mốc 0 alloc hoàn hảo cho hệ thống Debug: Chỉ truy vết Metadata khi chế độ Debug thực sự bật
 	if loggate.DebugEnabled() {
 		if meta, ok := ecs.GlobalRegistry.GetMetadata(entity); ok {
 			loggate.Debugf("[MOVEMENT] %s → (%d, %d) on Map %d", meta.Name, pos.X, pos.Z, pos.MapID)

@@ -36,7 +36,7 @@ func RunStatusEffectsSystem() {
 					forceStatRecalc = true
 				}
 				if posOk {
-					protocol.BroadcastToMap(pos.MapID, fmt.Sprintf("[STATUS] The %s effect worn off from %s (#%d).\r\n", effect.Type, meta.Name, id))
+					protocol.BroadcastToNeighbors(pos, []byte(fmt.Sprintf("[STATUS] The %s effect worn off from %s (#%d).\r\n", effect.Type, meta.Name, id)), id)
 				}
 				continue // Skip appending to remaining active list
 			}
@@ -58,14 +58,14 @@ func RunStatusEffectsSystem() {
 						effect.LastTickTime = now
 
 						if posOk {
-							protocol.BroadcastToMap(pos.MapID, fmt.Sprintf("[STATUS] %s (#%d) suffered -%d %s damage! (HP: %d/%d)\r\n",
-								meta.Name, id, effect.Value, effect.Type, stats.HP, stats.MaxHP))
+							protocol.BroadcastToNeighbors(pos, []byte(fmt.Sprintf("[STATUS] %s (#%d) suffered -%d %s damage! (HP: %d/%d)\r\n",
+								meta.Name, id, effect.Value, effect.Type, stats.HP, stats.MaxHP)), id)
 						}
 
 						// Handle death transition logic safely if DoT dealt a killing blow
 						if stats.HP == 0 {
 							if posOk {
-								protocol.BroadcastToMap(pos.MapID, fmt.Sprintf("[DEATH] %s (#%d) succumbed to %s.\r\n", meta.Name, id, effect.Type))
+								protocol.BroadcastToNeighbors(pos, []byte(fmt.Sprintf("[DEATH] %s (#%d) succumbed to %s.\r\n", meta.Name, id, effect.Type)), id)
 							}
 
 							DeathSystem(id, 0, meta, ecs.MetadataComponent{Name: effect.Type, Type: ecs.EntityMonster}) // status_effect not in EntityType enum; fallback to monster for logging

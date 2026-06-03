@@ -29,12 +29,12 @@ func TestAttackSystemValidations(t *testing.T) {
 
 	// 1. Setup stats & metadata
 	registry.SetMetadata(playerID, ecs.MetadataComponent{Name: "Hero", Type: ecs.EntityPlayer})
-	registry.SetStats(playerID, ecs.StatsComponent{Level: 1, HP: 100, MaxHP: 100, XP: 0, Dam: 15})
+	registry.SetStats(playerID, ecs.StatsComponent{Level: 1, HP: 100, MaxHP: 100, XP: 0, Dam: 15, Attack: 15, HitRate: 800, DodgeRate: 100, CritRate: 50, CritDamage: 1500})
 	registry.SetPosition(playerID, ecs.PositionComponent{MapID: 1, X: 10, Z: 10})
 	world.GlobalSpatialGrid.UpdateEntityPosition(playerID, ecs.PositionComponent{MapID: 1, X: 10, Z: 10})
 
 	registry.SetMetadata(monsterID, ecs.MetadataComponent{Name: "Orc", Type: ecs.EntityMonster})
-	registry.SetStats(monsterID, ecs.StatsComponent{Level: 1, HP: 100, MaxHP: 100, Dam: 5})
+	registry.SetStats(monsterID, ecs.StatsComponent{Level: 1, HP: 100, MaxHP: 100, Dam: 5, Attack: 5, HitRate: 700, DodgeRate: 80, CritRate: 30, CritDamage: 1500})
 	registry.SetPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 11, Z: 11}) // Melee range
 	world.GlobalSpatialGrid.UpdateEntityPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 11, Z: 11})
 
@@ -79,7 +79,7 @@ func TestAttackSystemKillingBlow(t *testing.T) {
 
 	// Initialize entities
 	registry.SetMetadata(playerID, ecs.MetadataComponent{Name: "Hero", Type: ecs.EntityPlayer})
-	registry.SetStats(playerID, ecs.StatsComponent{Level: 1, HP: 100, MaxHP: 100, XP: 0, Dam: 15})
+	registry.SetStats(playerID, ecs.StatsComponent{Level: 1, HP: 100, MaxHP: 100, XP: 0, Dam: 15, Attack: 15, HitRate: 800, DodgeRate: 100, CritRate: 50, CritDamage: 1500})
 	registry.SetPosition(playerID, ecs.PositionComponent{MapID: 1, X: 10, Z: 10})
 	world.GlobalSpatialGrid.UpdateEntityPosition(playerID, ecs.PositionComponent{MapID: 1, X: 10, Z: 10})
 

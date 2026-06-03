@@ -61,14 +61,14 @@ func HandleSkillCastingSystem(casterID ecs.Entity, skillID uint64, targetID ecs.
 		combatNotice = fmt.Sprintf("[SPELL] Player %s unleashed %s on %s dealing %d damage and DEFEATED them!\r\n",
 			casterMeta.Name, skill.Name, targetMeta.Name, damageCalculated)
 		// Sync local map witnesses visually
-		protocol.BroadcastToMap(pos.MapID, combatNotice)
+		protocol.BroadcastToNeighbors(pos, []byte(combatNotice), casterID)
 
 		DeathSystem(targetID, casterID, targetMeta, casterMeta)
 	} else {
 		combatNotice = fmt.Sprintf("[SPELL] Player %s casted %s on %s for %d damage! (%s HP: %d)\r\n",
 			casterMeta.Name, skill.Name, targetMeta.Name, damageCalculated, targetMeta.Name, remainingHP)
 		// Sync local map witnesses visually
-		protocol.BroadcastToMap(pos.MapID, combatNotice)
+		protocol.BroadcastToNeighbors(pos, []byte(combatNotice), casterID)
 	}
 
 	personalFeedback := fmt.Sprintf("Spent -%d MP. (Current Reserves: %d/%d MP)\r\n", skill.ManaCost, casterStats.MP, casterStats.MaxMP)
