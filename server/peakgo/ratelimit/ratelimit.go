@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"net"
 	"server/peakgo/config"
+	"sync"
 	"sync/atomic"
 )
 
@@ -17,8 +18,9 @@ type TokenBucket struct {
 }
 
 // RateLimiter manages per-connection token buckets.
-// Must be created with NewRateLimiter().
+// Thread-safe: Allow uses RLock, Register/Unregister uses Lock.
 type RateLimiter struct {
+	mu      sync.RWMutex
 	buckets map[net.Conn]*TokenBucket
 }
 
@@ -32,46 +34,73 @@ func NewRateLimiter() *RateLimiter {
 // RegisterConnection adds a new connection with a token bucket.
 func (rl *RateLimiter) RegisterConnection(conn net.Conn) {
 	cfg := config.C()
+	rl.mu.Lock()
 	rl.buckets[conn] = &TokenBucket{
 		tokens:    cfg.RateLimitMaxTokens,
 		maxTokens: cfg.RateLimitMaxTokens,
 	}
+	rl.mu.Unlock()
 }
 
 // UnregisterConnection removes a connection's bucket.
 func (rl *RateLimiter) UnregisterConnection(conn net.Conn) {
+	rl.mu.Lock()
 	delete(rl.buckets, conn)
+	rl.mu.Unlock()
 }
 
 // Allow checks if a packet is allowed for the given connection.
-// If false, the packet should be dropped (DoS prevention).
+// Thread-safe: atomic CAS for refillTick exclusivity + token consume.
 func (rl *RateLimiter) Allow(conn net.Conn, currentTick uint64) bool {
+	rl.mu.RLock()
 	tb, ok := rl.buckets[conn]
+	rl.mu.RUnlock()
 	if !ok {
 		return true // not registered, allow (shouldn't happen)
 	}
 
 	cfg := config.C()
-	// Refill based on elapsed ticks
-	lastTick := atomic.LoadUint64(&tb.refillTick)
-	if currentTick > lastTick {
+
+	// Phase 1: Refill — only one goroutine wins the CAS on refillTick
+	for {
+		lastTick := atomic.LoadUint64(&tb.refillTick)
+		if currentTick <= lastTick {
+			break // no refill needed
+		}
+		// Try to claim refillTick advancement
+		if !atomic.CompareAndSwapUint64(&tb.refillTick, lastTick, currentTick) {
+			continue // another goroutine refilled, re-check
+		}
+		// We won — do the actual refill
 		elapsed := currentTick - lastTick
 		if elapsed > 0 {
-			refill := int32(elapsed) * cfg.RateLimitRefillPerTick
-			// atomic add with cap
-			newTokens := atomic.LoadInt32(&tb.tokens) + refill
-			if newTokens > tb.maxTokens {
-				newTokens = tb.maxTokens
+			var refill int32
+			// Overflow guard: cap refill at maxTokens
+			if elapsed >= uint64(tb.maxTokens)/uint64(cfg.RateLimitRefillPerTick) {
+				refill = tb.maxTokens
+			} else {
+				refill = int32(elapsed) * cfg.RateLimitRefillPerTick
 			}
-			atomic.StoreInt32(&tb.tokens, newTokens)
-			atomic.StoreUint64(&tb.refillTick, currentTick)
+
+			// Add tokens atomically with cap
+			for {
+				current := atomic.LoadInt32(&tb.tokens)
+				newTokens := current + refill
+				if newTokens > tb.maxTokens {
+					newTokens = tb.maxTokens
+				}
+				if atomic.CompareAndSwapInt32(&tb.tokens, current, newTokens) {
+					break
+				}
+			}
 		}
+		break
 	}
 
-	// Try to consume one token (atomic decrement if > 0)
+	// Phase 2: Consume one token (CAS loop)
 	for {
 		current := atomic.LoadInt32(&tb.tokens)
-		if current <= 0 {
+		if current < 1 {
 			return false
 		}
 		if atomic.CompareAndSwapInt32(&tb.tokens, current, current-1) {
@@ -83,7 +112,10 @@ func (rl *RateLimiter) Allow(conn net.Conn, currentTick uint64) bool {
 // Reset resets a connection's bucket to full tokens.
 func (rl *RateLimiter) Reset(conn net.Conn) {
 	cfg := config.C()
-	if tb, ok := rl.buckets[conn]; ok {
+	rl.mu.RLock()
+	tb, ok := rl.buckets[conn]
+	rl.mu.RUnlock()
+	if ok {
 		atomic.StoreInt32(&tb.tokens, cfg.RateLimitMaxTokens)
 		atomic.StoreUint64(&tb.refillTick, 0)
 	}
@@ -91,5 +123,7 @@ func (rl *RateLimiter) Reset(conn net.Conn) {
 
 // ConnCount returns the number of registered connections.
 func (rl *RateLimiter) ConnCount() int {
+	rl.mu.RLock()
+	defer rl.mu.RUnlock()
 	return len(rl.buckets)
 }

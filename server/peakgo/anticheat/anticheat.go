@@ -75,10 +75,9 @@ func (v *Validator) ValidateSequence(seq uint32) bool {
 }
 
 // ValidateAction checks if an action (attack, skill, etc.) is in range of a target.
+// Uses gmath.InRange tile-based, sub-tile maxRange is truncated to int.
 func (v *Validator) ValidateAction(entityPos, targetPos ecs.PositionComponent, maxRange float64) bool {
-	dx := float64(entityPos.X - targetPos.X)
-	dz := float64(entityPos.Z - targetPos.Z)
-	return dx*dx+dz*dz <= maxRange*maxRange
+	return gmath.InRange(entityPos.X, entityPos.Z, targetPos.X, targetPos.Z, maxRange)
 }
 
 // ValidateMapAction checks if the entity is on the same map as the target.

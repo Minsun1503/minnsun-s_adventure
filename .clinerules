@@ -139,3 +139,7 @@ Absolutely do not write the path without quotation marks, as this will cause a P
 * Example 2 (Terminal Stuck): Switch to writing a separate script file (like a short `.ps1` file), configure it to run in the background without blocking, then read the output log file.
 
 * Example 3 (Too stupid to realize): If trying both methods still results in timeouts, stop, clearly report the hardware freeze to the User to request assistance, and absolutely do not automatically loop and waste tokens.
+
+4. TIMEOUT FOR TERMINAL
+
+- If you run any command in cli ( cmd or powershell), "YOU MUST" set timeout for this command. DO not pass any way.

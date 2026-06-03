@@ -154,7 +154,11 @@ func (cm *ConfigManager) Watch(interval time.Duration, stop <-chan struct{}) {
 var GlobalConfigManager *ConfigManager
 
 // C is a shorthand for GlobalConfigManager.Get()
+// Safe to call before InitConfig — returns defaults if not initialized.
 func C() *GameConfig {
+	if GlobalConfigManager == nil {
+		return DefaultConfig()
+	}
 	return GlobalConfigManager.Get()
 }
 

@@ -229,8 +229,8 @@ func (cb *CircuitBreaker) recordSuccess() {
 	case StateHalfOpen:
 		if cb.successes >= cb.cfg.SuccessThreshold {
 			cb.state = StateClosed
-			cb.successes = 0
 			log.Printf("[circuitbreaker] circuit CLOSED after %d successes", cb.successes)
+			cb.successes = 0
 		}
 	}
 }
