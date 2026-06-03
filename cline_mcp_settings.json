@@ -1,0 +1,36 @@
+{
+    "mcpServers": {
+        "minnsun-adventure": {
+            "command": "c:\\Minnsun's Adventure\\server\\mcp-bridge.exe",
+            "args": [],
+            "autoApprove": [
+                "ecs_list_entities",
+                "ecs_get_entity",
+                "ecs_get_stats",
+                "ecs_get_position",
+                "ecs_get_inventory",
+                "ecs_get_ai",
+                "ecs_get_equipment",
+                "ecs_get_party",
+                "ecs_get_effects",
+                "world_chunk_info",
+                "world_query_radius",
+                "world_collision_map",
+                "world_grid_stats",
+                "game_online_players",
+                "game_player_detail",
+                "game_monster_list",
+                "game_item_registry",
+                "game_skill_registry",
+                "game_loot_table",
+                "game_config",
+                "server_stats",
+                "code_get_outline",
+                "code_extract",
+                "replace"
+            ],
+            "disabled": false,
+            "alwaysAllow": []
+        }
+    }
+}
