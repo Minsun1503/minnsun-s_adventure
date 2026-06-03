@@ -410,9 +410,10 @@ func BenchmarkPublishConcurrent(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 
+	var val int64 = 42
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			bus.Publish("parallel", struct{}{})
+			bus.Publish("parallel", val)
 		}
 	})
 }

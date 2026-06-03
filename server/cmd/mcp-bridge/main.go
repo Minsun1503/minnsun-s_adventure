@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -165,16 +166,47 @@ func main() {
 							},
 						},
 						{
-							"name":        "code_read_lines",
-							"description": "Đọc một khoảng dòng cụ thể từ file (start_line đến end_line), chỉ trả về đúng phân đoạn đó để tiết kiệm token.",
+							"name":        "code_extract",
+							"description": "Trích xuất thông tin cấu trúc code Go (struct, interface, function, method, variable). Hỗ trợ liệt kê class, liệt kê member, tìm class chứa member, hoặc trích xuất nội dung chi tiết.",
 							"inputSchema": map[string]any{
 								"type": "object",
 								"properties": map[string]any{
-									"file_path":  map[string]any{"type": "string", "description": "Đường dẫn tới file cần đọc"},
-									"start_line": map[string]any{"type": "number", "description": "Dòng bắt đầu (1-based)"},
-									"end_line":   map[string]any{"type": "number", "description": "Dòng kết thúc (inclusive)"},
+									"path":        map[string]any{"type": "string", "description": "Đường dẫn tới file hoặc thư mục Go"},
+									"action":      map[string]any{"type": "string", "description": "Hành động: list_classes, list_class_members, find_member_class, extract_member"},
+									"class_name":  map[string]any{"type": "string", "description": "Tên class/struct/interface (bắt buộc cho list_class_members, tùy chọn cho extract_member)"},
+									"member_name": map[string]any{"type": "string", "description": "Tên function/method/field/variable cần tìm/trích xuất"},
 								},
-								"required": []string{"file_path", "start_line", "end_line"},
+								"required": []string{"path", "action"},
+							},
+						},
+						{
+							"name":        "replace",
+							"description": "Thay thế chuỗi văn bản trong file hoặc các file trong thư mục (tương tự Ctrl+H trên VS Code).",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"path":         map[string]any{"type": "string", "description": "Đường dẫn tới file hoặc thư mục chứa các file cần thay thế"},
+									"search_text":  map[string]any{"type": "string", "description": "Chuỗi văn bản cần tìm kiếm"},
+									"replace_text": map[string]any{"type": "string", "description": "Chuỗi văn bản dùng để thay thế"},
+									"glob":         map[string]any{"type": "string", "description": "Glob pattern để lọc file nếu path là thư mục (mặc định: *.go)"},
+									"use_regex":    map[string]any{"type": "boolean", "description": "Sử dụng Regular Expression để tìm kiếm và thay thế (mặc định: false)"},
+									"start_line":   map[string]any{"type": "number", "description": "Dòng bắt đầu giới hạn thay thế (tùy chọn, 1-based)"},
+									"end_line":     map[string]any{"type": "number", "description": "Dòng kết thúc giới hạn thay thế (tùy chọn, inclusive)"},
+								},
+								"required": []string{"path", "search_text", "replace_text"},
+							},
+						},
+						{
+							"name":        "list_files",
+							"description": "Liệt kê danh sách các tệp và thư mục con trong một thư mục cụ thể.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"path":      map[string]any{"type": "string", "description": "Đường dẫn tới thư mục cần liệt kê"},
+									"recursive": map[string]any{"type": "boolean", "description": "Liệt kê đệ quy toàn bộ thư mục con (mặc định: false)"},
+									"glob":      map[string]any{"type": "string", "description": "Glob pattern để lọc tên file (tùy chọn, ví dụ: *.go)"},
+								},
+								"required": []string{"path"},
 							},
 						},
 						{
@@ -198,7 +230,7 @@ func main() {
 			// DỊCH GIAO THỨC: Chuyển tools/call của MCP thành hàm gốc của Go Server
 			var callParams MCPToolCallParams
 			if err := json.Unmarshal(req.Params, &callParams); err != nil {
-				sendError(req.ID, -32602, "Invalid tools/call params")
+				sendError(req.ID, -32602, fmt.Sprintf("Invalid tools/call params: %v (raw: %s)", err, string(req.Params)))
 				continue
 			}
 
@@ -224,10 +256,28 @@ func main() {
 				sendMCPTextResult(req.ID, result)
 				handled = true
 
-			case "code_read_lines":
-				result, err := handleReadLines(callParams.Arguments)
+			case "code_extract":
+				result, err := handleCodeExtract(callParams.Arguments)
 				if err != nil {
-					sendError(req.ID, -32603, fmt.Sprintf("read_lines error: %v", err))
+					sendError(req.ID, -32603, fmt.Sprintf("extract error: %v", err))
+					continue
+				}
+				sendMCPTextResult(req.ID, result)
+				handled = true
+
+			case "replace":
+				result, err := handleReplace(callParams.Arguments)
+				if err != nil {
+					sendError(req.ID, -32603, fmt.Sprintf("replace error: %v", err))
+					continue
+				}
+				sendMCPTextResult(req.ID, result)
+				handled = true
+
+			case "list_files":
+				result, err := handleListFiles(callParams.Arguments)
+				if err != nil {
+					sendError(req.ID, -32603, fmt.Sprintf("list_files error: %v", err))
 					continue
 				}
 				sendMCPTextResult(req.ID, result)
@@ -372,27 +422,50 @@ func handleCodeOutline(args json.RawMessage) (string, error) {
 }
 
 // handleReadLines reads a specific range of lines from a file.
-func handleReadLines(args json.RawMessage) (string, error) {
-	var p struct {
-		FilePath  string `json:"file_path"`
-		StartLine int    `json:"start_line"`
-		EndLine   int    `json:"end_line"`
-	}
+// CodeExtractParams holds input arguments for code_extract tool.
+type CodeExtractParams struct {
+	Path       string `json:"path"`
+	Action     string `json:"action"`
+	ClassName  string `json:"class_name"`
+	MemberName string `json:"member_name"`
+}
+
+// ClassInfo represents information about an extracted struct or interface.
+type ClassInfo struct {
+	Name string `json:"name"`
+	Type string `json:"type"` // "struct" or "interface"
+	File string `json:"file"`
+}
+
+// MemberInfo represents information about a struct field/method or interface method.
+type MemberInfo struct {
+	Name string `json:"name"`
+	Type string `json:"type"` // "field", "method", "interface_method", or "embedded_interface"
+	Sig  string `json:"signature,omitempty"`
+}
+
+// FindResult represents search results tracing back from a member name to its class.
+type FindResult struct {
+	ClassName  string `json:"class_name"`
+	Type       string `json:"type"`        // "struct" or "interface"
+	MemberType string `json:"member_type"` // "field", "method", or "interface_method"
+	File       string `json:"file"`
+}
+
+func handleCodeExtract(args json.RawMessage) (string, error) {
+	var p CodeExtractParams
 	if err := json.Unmarshal(args, &p); err != nil {
-		return "", fmt.Errorf("invalid params: %w", err)
+		return "", fmt.Errorf("invalid json arguments: %w", err)
 	}
-	if p.FilePath == "" {
-		return "", fmt.Errorf("file_path is required")
+	if p.Path == "" {
+		return "", fmt.Errorf("path is required")
 	}
-	if p.StartLine < 1 {
-		return "", fmt.Errorf("start_line must be >= 1")
-	}
-	if p.EndLine < p.StartLine {
-		return "", fmt.Errorf("end_line must be >= start_line")
+	if p.Action == "" {
+		return "", fmt.Errorf("action is required")
 	}
 
 	// Path Sanitizer: normalize slashes and strip duplicate "server/" prefix
-	cleanPath := filepath.ToSlash(p.FilePath)
+	cleanPath := filepath.ToSlash(p.Path)
 	cleanPath = strings.TrimPrefix(cleanPath, "server/")
 	cleanPath = filepath.FromSlash(cleanPath)
 
@@ -401,31 +474,396 @@ func handleReadLines(args json.RawMessage) (string, error) {
 		fullPath = filepath.Join(serverDir, fullPath)
 	}
 
-	f, err := os.Open(fullPath)
+	// Determine if path is file or directory
+	info, err := os.Stat(fullPath)
 	if err != nil {
-		return "", fmt.Errorf("open error: %w", err)
+		return "", fmt.Errorf("stat path error: %w", err)
 	}
-	defer f.Close()
 
-	var b strings.Builder
-	scanner := bufio.NewScanner(f)
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		if lineNum > p.EndLine {
-			break
+	var files []string
+	if info.IsDir() {
+		err = filepath.WalkDir(fullPath, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if !d.IsDir() && strings.HasSuffix(path, ".go") {
+				files = append(files, path)
+			}
+			return nil
+		})
+		if err != nil {
+			return "", fmt.Errorf("walk dir error: %w", err)
 		}
-		if lineNum >= p.StartLine {
-			b.WriteString(scanner.Text())
-			b.WriteString("\n")
+	} else {
+		files = append(files, fullPath)
+	}
+
+	switch p.Action {
+	case "list_classes":
+		return actionListClasses(files)
+	case "list_class_members":
+		if p.ClassName == "" {
+			return "", fmt.Errorf("class_name is required for action list_class_members")
+		}
+		return actionListClassMembers(files, p.ClassName)
+	case "find_member_class":
+		if p.MemberName == "" {
+			return "", fmt.Errorf("member_name is required for action find_member_class")
+		}
+		return actionFindMemberClass(files, p.MemberName)
+	case "extract_member":
+		if p.MemberName == "" {
+			return "", fmt.Errorf("member_name is required for action extract_member")
+		}
+		return actionExtractMember(files, p.ClassName, p.MemberName)
+	default:
+		return "", fmt.Errorf("unknown action: %s", p.Action)
+	}
+}
+
+func actionListClasses(files []string) (string, error) {
+	var classes []ClassInfo
+	fset := token.NewFileSet()
+	for _, file := range files {
+		f, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
+		if err != nil {
+			continue // skip files with syntax errors
+		}
+		relFile, _ := filepath.Rel(serverDir, file)
+		for _, decl := range f.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				classType := "other"
+				switch ts.Type.(type) {
+				case *ast.StructType:
+					classType = "struct"
+				case *ast.InterfaceType:
+					classType = "interface"
+				}
+				if classType == "struct" || classType == "interface" {
+					classes = append(classes, ClassInfo{
+						Name: ts.Name.Name,
+						Type: classType,
+						File: filepath.ToSlash(relFile),
+					})
+				}
+			}
+		}
+	}
+	out, err := json.MarshalIndent(classes, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func actionListClassMembers(files []string, className string) (string, error) {
+	var members []MemberInfo
+	fset := token.NewFileSet()
+	foundClass := false
+
+	for _, file := range files {
+		f, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
+		if err != nil {
+			continue
+		}
+
+		// Check if the class is defined in this file
+		var structType *ast.StructType
+		var interfaceType *ast.InterfaceType
+		for _, decl := range f.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok || ts.Name.Name != className {
+					continue
+				}
+				foundClass = true
+				if st, ok := ts.Type.(*ast.StructType); ok {
+					structType = st
+				} else if it, ok := ts.Type.(*ast.InterfaceType); ok {
+					interfaceType = it
+				}
+			}
+		}
+
+		if structType != nil {
+			if structType.Fields != nil {
+				for _, field := range structType.Fields.List {
+					typeStr := typeExprStr(field.Type)
+					if len(field.Names) == 0 {
+						members = append(members, MemberInfo{
+							Name: typeStr,
+							Type: "field",
+							Sig:  typeStr,
+						})
+					} else {
+						for _, name := range field.Names {
+							members = append(members, MemberInfo{
+								Name: name.Name,
+								Type: "field",
+								Sig:  typeStr,
+							})
+						}
+					}
+				}
+			}
+		}
+
+		if interfaceType != nil {
+			if interfaceType.Methods != nil {
+				for _, field := range interfaceType.Methods.List {
+					typeStr := typeExprStr(field.Type)
+					if len(field.Names) == 0 {
+						members = append(members, MemberInfo{
+							Name: typeStr,
+							Type: "embedded_interface",
+							Sig:  typeStr,
+						})
+					} else {
+						for _, name := range field.Names {
+							members = append(members, MemberInfo{
+								Name: name.Name,
+								Type: "interface_method",
+								Sig:  typeStr,
+							})
+						}
+					}
+				}
+			}
 		}
 	}
 
-	if lineNum < p.StartLine {
-		return "", fmt.Errorf("file has only %d lines, requested start=%d", lineNum, p.StartLine)
+	if !foundClass {
+		return "", fmt.Errorf("class %s not found in the specified path", className)
 	}
 
-	return b.String(), scanner.Err()
+	// Scan all files to find methods belonging to className
+	for _, file := range files {
+		f, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
+		if err != nil {
+			continue
+		}
+		for _, decl := range f.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv == nil || len(fd.Recv.List) == 0 {
+				continue
+			}
+			recvType := typeExprStr(fd.Recv.List[0].Type)
+			recvType = strings.TrimPrefix(recvType, "*")
+			if recvType == className {
+				params := formatFieldList(fd.Type.Params)
+				results := formatFieldList(fd.Type.Results)
+				if results != "" {
+					results = " " + results
+				}
+				members = append(members, MemberInfo{
+					Name: fd.Name.Name,
+					Type: "method",
+					Sig:  fmt.Sprintf("func (%s) (%s)%s", typeExprStr(fd.Recv.List[0].Type), params, results),
+				})
+			}
+		}
+	}
+
+	out, err := json.MarshalIndent(members, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func actionFindMemberClass(files []string, memberName string) (string, error) {
+	var results []FindResult
+	fset := token.NewFileSet()
+
+	for _, file := range files {
+		f, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
+		if err != nil {
+			continue
+		}
+		relFile, _ := filepath.Rel(serverDir, file)
+
+		for _, decl := range f.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				className := ts.Name.Name
+				if st, ok := ts.Type.(*ast.StructType); ok {
+					if st.Fields != nil {
+						for _, field := range st.Fields.List {
+							for _, name := range field.Names {
+								if name.Name == memberName {
+									results = append(results, FindResult{
+										ClassName:  className,
+										Type:       "struct",
+										MemberType: "field",
+										File:       filepath.ToSlash(relFile),
+									})
+								}
+							}
+						}
+					}
+				} else if it, ok := ts.Type.(*ast.InterfaceType); ok {
+					if it.Methods != nil {
+						for _, field := range it.Methods.List {
+							for _, name := range field.Names {
+								if name.Name == memberName {
+									results = append(results, FindResult{
+										ClassName:  className,
+										Type:       "interface",
+										MemberType: "interface_method",
+										File:       filepath.ToSlash(relFile),
+									})
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		for _, decl := range f.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv == nil || len(fd.Recv.List) == 0 || fd.Name.Name != memberName {
+				continue
+			}
+			recvType := typeExprStr(fd.Recv.List[0].Type)
+			recvType = strings.TrimPrefix(recvType, "*")
+			results = append(results, FindResult{
+				ClassName:  recvType,
+				Type:       "struct",
+				MemberType: "method",
+				File:       filepath.ToSlash(relFile),
+			})
+		}
+	}
+
+	out, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func actionExtractMember(files []string, className, memberName string) (string, error) {
+	fset := token.NewFileSet()
+
+	for _, file := range files {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+
+		f, err := parser.ParseFile(fset, file, src, parser.ParseComments)
+		if err != nil {
+			continue
+		}
+
+		relFile, _ := filepath.Rel(serverDir, file)
+
+		for _, decl := range f.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Name.Name != memberName {
+				continue
+			}
+
+			if fd.Recv != nil && len(fd.Recv.List) > 0 {
+				recvType := typeExprStr(fd.Recv.List[0].Type)
+				recvType = strings.TrimPrefix(recvType, "*")
+				if className != "" && recvType != className {
+					continue
+				}
+			} else {
+				if className != "" {
+					continue
+				}
+			}
+
+			start := fset.Position(fd.Pos()).Offset
+			end := fset.Position(fd.End()).Offset
+			return fmt.Sprintf("Source file: %s\n\n%s", filepath.ToSlash(relFile), string(src[start:end])), nil
+		}
+
+		for _, decl := range f.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok {
+				continue
+			}
+
+			if gd.Tok == token.TYPE {
+				for _, spec := range gd.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					if className != "" && ts.Name.Name != className {
+						continue
+					}
+
+					if st, ok := ts.Type.(*ast.StructType); ok && st.Fields != nil {
+						for _, field := range st.Fields.List {
+							for _, name := range field.Names {
+								if name.Name == memberName {
+									start := fset.Position(field.Pos()).Offset
+									end := fset.Position(field.End()).Offset
+									return fmt.Sprintf("Source file: %s (Struct: %s)\nLine content: %s", filepath.ToSlash(relFile), ts.Name.Name, strings.TrimSpace(string(src[start:end]))), nil
+								}
+							}
+						}
+					} else if it, ok := ts.Type.(*ast.InterfaceType); ok && it.Methods != nil {
+						for _, field := range it.Methods.List {
+							for _, name := range field.Names {
+								if name.Name == memberName {
+									start := fset.Position(field.Pos()).Offset
+									end := fset.Position(field.End()).Offset
+									return fmt.Sprintf("Source file: %s (Interface: %s)\nLine content: %s", filepath.ToSlash(relFile), ts.Name.Name, strings.TrimSpace(string(src[start:end]))), nil
+								}
+							}
+						}
+					}
+				}
+			}
+
+			if className == "" && (gd.Tok == token.VAR || gd.Tok == token.CONST) {
+				for _, spec := range gd.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for _, name := range vs.Names {
+						if name.Name == memberName {
+							start := fset.Position(spec.Pos()).Offset
+							end := fset.Position(spec.End()).Offset
+							varType := "VAR"
+							if gd.Tok == token.CONST {
+								varType = "CONST"
+							}
+							return fmt.Sprintf("Source file: %s (%s)\nLine content: %s", filepath.ToSlash(relFile), varType, strings.TrimSpace(string(src[start:end]))), nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("member %s (class: %s) not found", memberName, className)
 }
 
 // ─── AST Helpers ──────────────────────────────────────────────────────────────
@@ -620,4 +1058,261 @@ func sendError(id json.RawMessage, code int, msg string) {
 	}
 	out, _ := json.Marshal(errResp)
 	fmt.Println(string(out))
+}
+
+type ReplaceParams struct {
+	Path        string `json:"path"`
+	SearchText  string `json:"search_text"`
+	ReplaceText string `json:"replace_text"`
+	Glob        string `json:"glob"`
+	UseRegex    bool   `json:"use_regex"`
+	StartLine   int    `json:"start_line"`
+	EndLine     int    `json:"end_line"`
+}
+
+func handleReplace(args json.RawMessage) (string, error) {
+	var p ReplaceParams
+	if err := json.Unmarshal(args, &p); err != nil {
+		return "", fmt.Errorf("invalid json arguments: %w", err)
+	}
+	if p.Path == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if p.SearchText == "" {
+		return "", fmt.Errorf("search_text is required")
+	}
+
+	// Path Sanitizer: normalize slashes and strip duplicate "server/" prefix
+	cleanPath := filepath.ToSlash(p.Path)
+	cleanPath = strings.TrimPrefix(cleanPath, "server/")
+	cleanPath = filepath.FromSlash(cleanPath)
+
+	fullPath := cleanPath
+	if !filepath.IsAbs(fullPath) {
+		fullPath = filepath.Join(serverDir, fullPath)
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("stat path error: %w", err)
+	}
+
+	var files []string
+	if info.IsDir() {
+		pattern := p.Glob
+		if pattern == "" {
+			pattern = "*.go"
+		}
+		err = filepath.WalkDir(fullPath, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				return nil
+			}
+			match, err := filepath.Match(pattern, d.Name())
+			if err == nil && match {
+				files = append(files, path)
+			}
+			return nil
+		})
+		if err != nil {
+			return "", fmt.Errorf("walk dir error: %w", err)
+		}
+	} else {
+		files = append(files, fullPath)
+	}
+
+	searchTextNorm := strings.ReplaceAll(p.SearchText, "\r\n", "\n")
+	replaceTextNorm := strings.ReplaceAll(p.ReplaceText, "\r\n", "\n")
+
+	var re *regexp.Regexp
+	if p.UseRegex {
+		var err error
+		re, err = regexp.Compile(searchTextNorm)
+		if err != nil {
+			return "", fmt.Errorf("invalid regex pattern: %w", err)
+		}
+	}
+
+	replacedCount := 0
+	filesModified := 0
+
+	for _, file := range files {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		strContent := string(content)
+		// Normalize CRLF to LF
+		strContent = strings.ReplaceAll(strContent, "\r\n", "\n")
+		var newContent string
+		var totalReplaced int
+
+		// Line constraints
+		lines := strings.Split(strContent, "\n")
+		numLines := len(lines)
+
+		startIdx := p.StartLine - 1
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		endIdx := p.EndLine - 1
+		if p.EndLine <= 0 || endIdx >= numLines {
+			endIdx = numLines - 1
+		}
+
+		if startIdx > endIdx || startIdx >= numLines {
+			continue
+		}
+
+		// Perform replacement only on segment
+		segment := strings.Join(lines[startIdx:endIdx+1], "\n")
+		var newSegment string
+		var count int
+
+		if p.UseRegex {
+			matches := re.FindAllStringIndex(segment, -1)
+			if len(matches) > 0 {
+				count = len(matches)
+				newSegment = re.ReplaceAllString(segment, replaceTextNorm)
+			}
+		} else {
+			if strings.Contains(segment, searchTextNorm) {
+				count = strings.Count(segment, searchTextNorm)
+				newSegment = strings.ReplaceAll(segment, searchTextNorm, replaceTextNorm)
+			}
+		}
+
+		if count > 0 {
+			newSegmentLines := strings.Split(newSegment, "\n")
+			resultLines := append([]string{}, lines[:startIdx]...)
+			resultLines = append(resultLines, newSegmentLines...)
+			resultLines = append(resultLines, lines[endIdx+1:]...)
+			newContent = strings.Join(resultLines, "\n")
+			totalReplaced = count
+		}
+
+		if totalReplaced > 0 {
+			err = os.WriteFile(file, []byte(newContent), 0644)
+			if err != nil {
+				return "", fmt.Errorf("failed to write to file %s: %w", file, err)
+			}
+			replacedCount += totalReplaced
+			filesModified++
+		}
+	}
+
+	return fmt.Sprintf("Successfully replaced %d occurrences across %d files.", replacedCount, filesModified), nil
+}
+
+type ListFilesParams struct {
+	Path      string `json:"path"`
+	Recursive bool   `json:"recursive"`
+	Glob      string `json:"glob"`
+}
+
+type FileEntry struct {
+	Name  string `json:"name"`
+	IsDir bool   `json:"is_dir"`
+	Path  string `json:"path"`
+	Size  int64  `json:"size,omitempty"`
+}
+
+func handleListFiles(args json.RawMessage) (string, error) {
+	var p ListFilesParams
+	if err := json.Unmarshal(args, &p); err != nil {
+		return "", fmt.Errorf("invalid json arguments: %w", err)
+	}
+	if p.Path == "" {
+		return "", fmt.Errorf("path is required")
+	}
+
+	cleanPath := filepath.ToSlash(p.Path)
+	cleanPath = strings.TrimPrefix(cleanPath, "server/")
+	cleanPath = filepath.FromSlash(cleanPath)
+
+	fullPath := cleanPath
+	if !filepath.IsAbs(fullPath) {
+		fullPath = filepath.Join(serverDir, fullPath)
+	}
+
+	var results []FileEntry
+	if p.Recursive {
+		err := filepath.WalkDir(fullPath, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if path == fullPath {
+				return nil
+			}
+			rel, _ := filepath.Rel(serverDir, path)
+			rel = filepath.ToSlash(rel)
+
+			if p.Glob != "" {
+				match, err := filepath.Match(p.Glob, d.Name())
+				if err != nil || !match {
+					if !d.IsDir() {
+						return nil
+					}
+				}
+			}
+
+			info, _ := d.Info()
+			size := int64(0)
+			if info != nil {
+				size = info.Size()
+			}
+
+			results = append(results, FileEntry{
+				Name:  d.Name(),
+				IsDir: d.IsDir(),
+				Path:  rel,
+				Size:  size,
+			})
+			return nil
+		})
+		if err != nil {
+			return "", fmt.Errorf("walk dir error: %w", err)
+		}
+	} else {
+		entries, err := os.ReadDir(fullPath)
+		if err != nil {
+			return "", fmt.Errorf("read dir error: %w", err)
+		}
+		for _, d := range entries {
+			if p.Glob != "" {
+				match, err := filepath.Match(p.Glob, d.Name())
+				if err != nil || !match {
+					continue
+				}
+			}
+			path := filepath.Join(fullPath, d.Name())
+			rel, _ := filepath.Rel(serverDir, path)
+			rel = filepath.ToSlash(rel)
+
+			info, _ := d.Info()
+			size := int64(0)
+			if info != nil {
+				size = info.Size()
+			}
+
+			results = append(results, FileEntry{
+				Name:  d.Name(),
+				IsDir: d.IsDir(),
+				Path:  rel,
+				Size:  size,
+			})
+		}
+	}
+
+	if results == nil {
+		results = []FileEntry{}
+	}
+
+	out, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }

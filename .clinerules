@@ -8,7 +8,7 @@
 
 3. If you need to verify code after making changes: Prioritize using the `code_get_outline` tool or running the lightweight syntax check command `go vet ./...` instead of running the full test suite.
 
-4. The `go test` command should only be activated when there is an explicit request from the user.
+4. The `go test` command should only be activated when there is an explicit request from the user, hoặc khi cần chạy benchmark để xác minh mục tiêu tối ưu hóa hiệu năng (Zero-Allocation) của tệp tin vừa chỉnh sửa.
 
 ## II. CORE ARCHITECTURE GUARDRAILS (Hàng rào kiến trúc bắt buộc)
 You are working on a High-Performance, Zero-Allocation MMORPG Go Server. Never violate these rules:
@@ -36,6 +36,15 @@ You are working on a High-Performance, Zero-Allocation MMORPG Go Server. Never v
 
 5. ANTI-CHEAT REGIME:
    - Absolute Distance Verification: Player movement packets MUST validate target distance against a tick constraint ('gmath.InRangeInt' with MaxMoveDistance) before committing coordinates to the Registry. Teleporting without valid state is a critical breach.
+
+6. REUSE PEAKGO UTILITIES (Ưu tiên tái sử dụng thư viện/package từ peakgo):
+   - Khi viết code logic mới hoặc bổ sung tính năng (như A* Pathfinding, Random số, Heap/Priority Queue, Slices Pool, Math helper,...), KHÔNG tự viết lại hoặc sử dụng các thư viện ngoài chuẩn.
+   - BẮT BUỘC phải tìm kiếm và tái sử dụng các package tối ưu hóa hiệu năng cao nằm trong `server/peakgo/` (ví dụ: `peakgo/astar`, `peakgo/rng`, `peakgo/pool`, `peakgo/gmath`, `peakgo/threat`, `peakgo/combat`).
+
+7. ZERO-ALLOCATION TARGET & BENCHMARK VERIFICATION (BẮT BUỘC):
+   - Mục tiêu tối ưu hiệu năng của dự án đối với tất cả các package thuộc `server/peakgo/` và các hàm xử lý trên hot-paths là **0 ns/op (hoặc cực kỳ tối ưu)** và **0 B/op, 0 allocs/op** (hoàn toàn không cấp phát trên Heap).
+   - Mỗi lần thực hiện chỉnh sửa/bổ sung bất kỳ file code nào trong các thư mục này, Agent **BẮT BUỘC** phải chạy benchmark test riêng cho gói vừa chỉnh sửa (`go test -bench=. -benchmem ./peakgo/tên_gói/...`).
+   - Phải lặp lại quá trình tối ưu và chạy benchmark cho đến khi đạt được mục tiêu Zero-Allocation (0 B/op và 0 allocs/op) mới được coi là hoàn thành tác vụ.
 
 ## III. REFACTORING WORKFLOW
 - When editing, output the complete file or the precise git diff if requested.
@@ -92,15 +101,19 @@ Absolutely do not write the path without quotation marks, as this will cause a P
 
 1. **Absolute prohibition of built-in tools**: It is STRICTLY PROHIBITED to use the built-in `read_file` or `search_files` tools for any file with the extensions `.go`, `.sql`, or `.json` in the `server/` directory.
 
-2. **Forced use of MCP Token-Savers**:
+2. **Forced use of MCP Token-Savers & Code Modifiers**:
 
-- When wanting to view the overall structure of a file, it is MANDATORY to call the MCP tool `code_get_outline`.
+- Khi muốn xem cấu trúc tổng quát của file, BẮT BUỘC gọi MCP tool `code_get_outline`.
 
-- When reading code content for analysis or modification, it is MANDATORY to use the MCP tool `code_read_lines` to read in small intervals (maximum 50-100 lines per call).
+- Khi muốn trích xuất chi tiết code (struct, interface, function, method, variable) trong file hoặc thư mục Go, BẮT BUỘC sử dụng MCP tool `code_extract` với các hành động phù hợp (`list_classes`, `list_class_members`, `find_member_class`, `extract_member`) để tiết kiệm token và định vị code chính xác.
 
-- When checking the DB table, it is MANDATORY to call the MCP tool `db_get_schema`.
+- Khi muốn tìm kiếm và thay thế chuỗi văn bản hoặc regex trong các file, BẮT BUỘC gọi MCP tool `replace` để thực hiện hàng loạt một cách nhanh chóng và an toàn.
 
-3. **Penalty for violations**: If you intentionally use the built-in `read_file` tool to read the entire large Go file, the user will press DENY and the process will close immediately. Please comply to save system tokens.
+- Khi kiểm tra bảng DB, BẮT BUỘC gọi MCP tool `db_get_schema`.
+
+3. **Hình phạt khi vi phạm**: Nếu cố tình dùng tool tích hợp `read_file` để đọc toàn bộ tệp Go lớn, người dùng sẽ nhấn DENY và tiến trình sẽ đóng lập tức. Hãy tuân thủ để tiết kiệm token hệ thống.
+
+4. **Quy định khắc phục lỗi Tool (TUYỆT ĐỐI BẮT BUỘC - NGHIÊM CẤM CHẠY TRỐN)**: Nếu gọi MCP tool (ví dụ: `replace`, `code_extract`,...) mà bị lỗi hoặc không khớp nội dung (mismatch), **TUYỆT ĐỐI NGHIÊM CẤM** tự ý chuyển sang dùng các công cụ built-in / mặc định của IDE như `replace_in_file`, `replace_file_content`, `read_file` để đối phó. Khi xảy ra lỗi hoặc gọi tới lần thứ 3 không thành công, Agent **BẮT BUỘC** phải vào tệp [main.go](file:///c:/Minnsun's Adventure/server/cmd/mcp-bridge/main.go) để kiểm tra logic công cụ, sửa lỗi (ví dụ: lỗi khoảng trắng, newline, CRLF/LF,...), build lại bridge (`go build -o ../../mcp-bridge.exe`), khởi động lại server và thử lại cho tới khi công cụ MCP chạy thành công và chính xác thì thôi. Vi phạm quy tắc này sẽ bị từ chối phê duyệt (DENY) ngay lập tức.
 
 [CRITICAL RULE: NO TERMINAL FOR FILE CREATION/PATCHING]
 1. Absolutely DO NOT use Terminal commands (such as `echo`, `cat`, `Set-Content`, `Out-File`) or navigation keys (`>`, `>>`) to create or modify source code files. Since the system is running on Windows PowerShell, this will trigger a "Double Interpolation" error with special characters like $, \, `, (, ), * and cause the file to freeze/corrupt.

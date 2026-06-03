@@ -1,67 +1,58 @@
-// Package combat provides a zero-allocation combat resolution engine
-// for the Minnsun's Adventure 2.5D MMORPG server.
-//
-// # Why this package exists
-//
-// Combat logic involves damage formulas, hit/miss/dodge/crit resolution,
-// elemental modifiers, and status effect applications. Centralizing this
-// into a single package ensures consistency, testability, and zero-alloc
-// hot-path performance.
-//
-// # Peak Go Contract
-//
-// Every resolve function produces zero heap allocations. Results are
-// returned as inline value types. All lookup tables use pre-computed
-// arrays indexed by level delta.
 package combat
 
 import (
 	"server/peakgo/rng"
 )
 
-// ─── Combatant Stats ──────────────────────────────────────────────────────────
+// ─── Stats ──────────────────────────────────────────────────────────────────
 
-// Stats represents the combat-relevant attributes of an entity.
-// Embedded into ECS components for each player/monster.
-// All values are inline — no heap allocation.
+// Stats holds the combat-relevant attributes of an entity (player or monster).
 type Stats struct {
-	Level            int
-	MaxHP, CurrentHP int
-	MaxMP, CurrentMP int
-	Attack           int // Physical attack power
-	MagicAttack      int // Magical attack power
-	Defense          int // Physical defense
-	MagicDefense     int // Magical defense
-	HitRate          int // Base hit chance (0-1000, per-mille)
-	DodgeRate        int // Base dodge chance (0-1000, per-mille)
-	CritRate         int // Base crit chance (0-1000, per-mille)
-	CritDamage       int // Crit damage multiplier (1000 = 100%, 1500 = 150%)
+	Level        int
+	MaxHP        int
+	CurrentHP    int
+	MaxMP        int
+	CurrentMP    int
+	Attack       int
+	MagicAttack  int
+	Defense      int
+	MagicDefense int
+	HitRate      int
+	DodgeRate    int
+	CritRate     int
+	CritDamage   int
 }
 
-// NewStats creates default stats for a given level.
+// NewStats creates a Stats with default per-level values.
 func NewStats(level int) Stats {
+	baseHP := 100 + (level-1)*25
+	baseMP := 50 + (level-1)*10
+
 	return Stats{
 		Level:        level,
+		MaxHP:        baseHP,
+		CurrentHP:    baseHP,
+		MaxMP:        baseMP,
+		CurrentMP:    baseMP,
 		Attack:       10 + level*2,
 		MagicAttack:  10 + level*2,
 		Defense:      5 + level,
 		MagicDefense: 5 + level,
-		HitRate:      850,  // 85% base
-		DodgeRate:    50,   // 5% base
-		CritRate:     50,   // 5% base
-		CritDamage:   1500, // 150% crit damage
+		HitRate:      850,
+		DodgeRate:    50,
+		CritRate:     50,
+		CritDamage:   1500,
 	}
 }
 
-// ─── Damage Types ─────────────────────────────────────────────────────────────
+// ─── Damage Type ────────────────────────────────────────────────────────────
 
-// DamageType classifies the source of damage.
 type DamageType uint8
 
 const (
 	DamagePhysical DamageType = iota
 	DamageMagical
-	DamagePure // True damage (ignores all defense)
+	DamagePure
 )
 
 // ─── Element Types ────────────────────────────────────────────────────────────
@@ -80,7 +71,6 @@ const (
 )
 
 // Element effectiveness table: [attacker][defender] -> multiplier (per-mille)
-// 1000 = normal, 2000 = 2x weak, 500 = 0.5x resist, 0 = immune
 var elementEffectiveness = [7][7]int16{
 	// None  Fire  Water Wind  Earth Light Dark
 	{1000, 1000, 1000, 1000, 1000, 1000, 1000}, // None
@@ -93,70 +83,59 @@ var elementEffectiveness = [7][7]int16{
 }
 
 // GetElementEffectiveness returns the multiplier for attacker element vs defender element.
-// Returns value in per-mille (1000 = 100% normal damage).
 func GetElementEffectiveness(attacker, defender Element) int {
 	return int(elementEffectiveness[attacker][defender])
 }
 
-// ─── Status Effects ───────────────────────────────────────────────────────────
+// ─── Status Effects ─────────────────────────────────────────────────────────
 
-// StatusEffect represents a temporary combat condition.
 type StatusEffect uint8
 
 const (
-	StatusNone    StatusEffect = iota
-	StatusStun                 // Cannot act
-	StatusBurn                 // Take damage over time (fire)
-	StatusPoison               // Take damage over time (toxic)
-	StatusSlow                 // Reduced movement speed
-	StatusFreeze               // Cannot move or act
-	StatusSilence              // Cannot cast magic
-	StatusBerserk              // Increased attack, decreased defense
+	StatusNone StatusEffect = iota
+	StatusStun
+	StatusBurn
+	StatusPoison
+	StatusSlow
+	StatusFreeze
+	StatusSilence
+	StatusBerserk
 )
 
-// StatusEffectInstance is a concrete active status effect on an entity.
+// StatusEffectInstance represents a single active status effect on an entity.
 type StatusEffectInstance struct {
 	Type           StatusEffect
-	Stacks         int // Number of stacks (for stacking effects)
-	RemainingTicks int // Remaining duration in game ticks
+	Stacks         int
+	RemainingTicks int
 }
 
-// ─── Resolution ───────────────────────────────────────────────────────────────
+// ─── Damage Modifiers & Combat Result ───────────────────────────────────────
 
-// DamageModifiers carries optional parameters for a damage calculation.
-// Zero value = default behavior.
+// DamageModifiers provides parameters for damage resolution.
 type DamageModifiers struct {
-	IsCrit          bool       // Force critical hit (default: calculated)
-	IsGuaranteed    bool       // Ignore dodge/block (default: calculated)
-	DamageType      DamageType // Override damage type (default: physical)
-	Element         Element    // Element of the attack
-	SkillMultiplier int        // Per-mille multiplier for skill (1000 = 100%)
+	IsCrit          bool // Force critical hit (default: calculated)
+	IsGuaranteed    bool // Bypasses hit/dodge check
+	DamageType      DamageType
+	Element         Element // Element of the attack
+	DefenderElement Element // Element of the defender (used for effectiveness calc)
+	SkillMultiplier int     // Per-mille multiplier for skill (1000 = 100%)
 }
 
-// CombatResult holds the complete result of a single attack resolution.
-// Value type — zero heap allocation.
+// CombatResult holds the resolved outcome of a damage calculation.
 type CombatResult struct {
 	Hit           bool
 	Dodged        bool
 	IsCrit        bool
 	DamageDealt   int
-	RawDamage     int                  // Before defense reduction
-	Mitigated     int                  // Amount reduced by defense
-	ElementMulti  int                  // Element effectiveness multiplier (per-mille)
-	StatusApplied StatusEffectInstance // Status effect applied (if any)
+	RawDamage     int
+	Mitigated     int
+	ElementMulti  int // Element effectiveness multiplier (per-mille)
+	StatusApplied StatusEffectInstance
 }
 
-// ResolvePhysical resolves a physical attack from attacker to defender.
-// Zero alloc per call. Results are returned as a value type.
-//
-// Formula:
-//
-//	raw = AttackerATK * skillMulti / 1000
-//	mitigated = DefenderDEF * 0.5 (half DEF applies to physical)
-//	final = max(1, raw - mitigated) * elementMulti / 1000
-//	crit = roll crit, if crit: final = final * critDamage / 1000
-//
-// Returns CombatResult with all fields populated.
+// ─── Damage Resolution ──────────────────────────────────────────────────────
+
+// ResolvePhysical resolves physical damage between attacker and defender.
 func ResolvePhysical(attacker, defender *Stats, modifiers DamageModifiers) CombatResult {
 	var result CombatResult
 
@@ -194,8 +173,8 @@ func ResolvePhysical(attacker, defender *Stats, modifiers DamageModifiers) Comba
 	}
 	afterDef := result.RawDamage - result.Mitigated
 
-	// Element multiplier
-	result.ElementMulti = GetElementEffectiveness(modifiers.Element, ElementNone)
+	// Element multiplier (uses defender's element for effectiveness)
+	result.ElementMulti = GetElementEffectiveness(modifiers.Element, modifiers.DefenderElement)
 	afterElement := (afterDef * result.ElementMulti) / 1000
 	if afterElement < 1 {
 		afterElement = 1
@@ -222,8 +201,7 @@ func ResolvePhysical(attacker, defender *Stats, modifiers DamageModifiers) Comba
 	return result
 }
 
-// ResolveMagical resolves a magical attack from attacker to defender.
-// Similar to physical but uses MagicAttack vs MagicDefense.
+// ResolveMagical resolves magical damage between attacker and defender.
 func ResolveMagical(attacker, defender *Stats, modifiers DamageModifiers) CombatResult {
 	var result CombatResult
 
@@ -260,8 +238,8 @@ func ResolveMagical(attacker, defender *Stats, modifiers DamageModifiers) Combat
 	}
 	afterDef := result.RawDamage - result.Mitigated
 
-	// Element multiplier
-	result.ElementMulti = GetElementEffectiveness(modifiers.Element, ElementNone)
+	// Element multiplier (uses defender's element for effectiveness)
+	result.ElementMulti = GetElementEffectiveness(modifiers.Element, modifiers.DefenderElement)
 	afterElement := (afterDef * result.ElementMulti) / 1000
 	if afterElement < 1 {
 		afterElement = 1
@@ -288,8 +266,7 @@ func ResolveMagical(attacker, defender *Stats, modifiers DamageModifiers) Combat
 	return result
 }
 
-// ResolvePure resolves true damage that ignores all defenses.
-// Uses only skill multiplier and element modifier.
+// ResolvePure resolves pure (unmitigated) damage. Pure damage ignores all defenses.
 func ResolvePure(attacker *Stats, modifiers DamageModifiers) CombatResult {
 	var result CombatResult
 	result.Hit = true
@@ -304,6 +281,7 @@ func ResolvePure(attacker *Stats, modifiers DamageModifiers) CombatResult {
 		result.RawDamage = 1
 	}
 
+	// Pure damage still uses element effectiveness but without defender element
 	result.ElementMulti = GetElementEffectiveness(modifiers.Element, ElementNone)
 	result.DamageDealt = (result.RawDamage * result.ElementMulti) / 1000
 	if result.DamageDealt < 1 {
@@ -313,69 +291,65 @@ func ResolvePure(attacker *Stats, modifiers DamageModifiers) CombatResult {
 	return result
 }
 
-// ─── Damage Over Time ─────────────────────────────────────────────────────────
+// ─── DoT (Damage over Time) ──────────────────────────────────────────────────
 
-// DoTInstance represents a damage-over-time effect applied to an entity.
+// DoTInstance handles damage-over-time effects (burn, poison).
 type DoTInstance struct {
 	DamagePerTick  int
 	RemainingTicks int
 	TotalTicks     int
 	Element        Element
-	SourceEntityID uint64 // For kill credit
+	SourceEntityID uint64
 }
 
-// Tick returns the damage for this tick and decrements the remaining ticks.
-// Returns 0 if the DoT has expired.
-func (dot *DoTInstance) Tick() int {
-	if dot.RemainingTicks <= 0 {
+// Tick processes one tick of damage and returns the amount dealt.
+func (d *DoTInstance) Tick() int {
+	if d.RemainingTicks <= 0 {
 		return 0
 	}
-	dot.RemainingTicks--
-	return dot.DamagePerTick
+	d.RemainingTicks--
+	return d.DamagePerTick
 }
 
-// Expired reports whether this DoT has completed.
-func (dot *DoTInstance) Expired() bool {
-	return dot.RemainingTicks <= 0
+// Expired checks whether the DoT effect has expired.
+func (d *DoTInstance) Expired() bool {
+	return d.RemainingTicks <= 0
 }
 
-// ─── Healing ──────────────────────────────────────────────────────────────────
+// ─── Healing ────────────────────────────────────────────────────────────────
 
-// HealResult holds the result of a healing action.
+// HealResult holds the resolved outcome of a healing operation.
 type HealResult struct {
 	Amount   int
 	Overheal int
 	IsCrit   bool
 }
 
-// CalculateHealing computes healing from source to target.
-// Formula: baseHeal * skillMulti / 1000, optionally crit.
+// CalculateHealing computes a healing amount from source level, base healing,
+// skill multiplier, and optional crit.
 func CalculateHealing(sourceLevel, baseHeal, skillMulti int, canCrit bool) HealResult {
 	if skillMulti <= 0 {
 		skillMulti = 1000
 	}
 
-	amount := (baseHeal * skillMulti) / 1000
-	if amount < 1 {
-		amount = 1
+	heal := (baseHeal * skillMulti) / 1000
+	if heal < 1 {
+		heal = 1
 	}
 
-	result := HealResult{Amount: amount}
+	var result HealResult
+	result.Amount = heal
 
-	if canCrit {
-		critRoll := rng.Intn(1000)
-		if critRoll < 50 { // 5% heal crit chance
-			result.IsCrit = true
-			result.Amount = (result.Amount * 1500) / 1000 // 150% heal crit
-		}
+	if canCrit && rng.Intn(1000) < 50 { // 5% crit rate for heals
+		result.IsCrit = true
+		result.Amount = (heal * 1500) / 1000 // 1.5x crit multiplier
 	}
 
 	return result
 }
 
-// ApplyHealing applies healing to a target's HP, respecting max HP.
-// Returns the actual amount healed and any overheal.
-func ApplyHealing(currentHP, maxHP int, heal HealResult) (newHP int, overheal int) {
+// ApplyHealing applies a HealResult to current HP, clamping to max HP.
+func ApplyHealing(currentHP, maxHP int, heal HealResult) (newHP, overheal int) {
 	newHP = currentHP + heal.Amount
 	if newHP > maxHP {
 		overheal = newHP - maxHP

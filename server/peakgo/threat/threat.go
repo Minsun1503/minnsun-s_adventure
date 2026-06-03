@@ -1,194 +1,156 @@
-// Package threat provides a zero-allocation threat/aggro management system
-// for the Minnsun's Adventure 2.5D MMORPG server.
-//
-// # Why this package exists
-//
-// Boss fights and group PvE require a threat table to determine which player
-// the monster/boss should attack. This package provides a pooled threat table
-// with top-threat tracking, decay, taunt mechanics, and threat transfer.
-//
-// # Peak Go Contract
-//
-// Zero heap allocations on hot-path operations (add threat, get top threat).
-// Uses pool.SlicePool for internal storage.
 package threat
 
 import (
-	"server/peakgo/pool"
+	"sync"
 )
-
-// ─── Constants ────────────────────────────────────────────────────────────────
 
 const (
-	// MaxPlayers is the maximum number of players tracked per threat table.
+	// MaxPlayers is the maximum number of players tracked in a single threat table.
 	MaxPlayers = 64
 
-	// DefaultThreatDecay is the default threat decay per tick (per-mille).
-	// 990 = 1% decay per tick (99% retained).
-	DefaultThreatDecay = 990
+	// DefaultThreatDecay is the default decay rate per tick (per-mille).
+	DefaultThreatDecay = 20 // 2% per tick
 
-	// TauntMultiplier is how much taunt abilities multiply existing threat (per-mille).
-	TauntMultiplier = 2000 // 2x threat
+	// TauntMultiplier is the multiplier applied by taunt effects (per-mille).
+	TauntMultiplier = 2000 // 2x threat generation
 )
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-// ThreatEntry represents a single player's threat value.
-// Value type — stored inline in the pool.
+// ThreatEntry represents a single player's threat against a monster.
 type ThreatEntry struct {
 	PlayerID uint64
 	Threat   int64
 }
 
-// ThreatTable manages per-player threat values for a single monster/boss.
-// Embed this into monster ECS components.
+// ThreatTable manages aggro/hate for a single monster using a max-heap.
 type ThreatTable struct {
-	entries     []ThreatEntry // Pooled slice, sorted by threat (highest first)
-	decayRate   int           // Per-mille decay per tick (e.g., 990 = 99% retained)
-	totalThreat int64         // Sum of all threat for normalization
-
-	// Heap structure for top-threat tracking
-	heapSize int
-	heap     [MaxPlayers]int // Indices into entries
+	entries     []ThreatEntry
+	decayRate   int
+	totalThreat int64
+	heapSize    int
+	heap        [MaxPlayers]int
 }
 
-// referenced pools
-var entryPool = pool.NewSlicePool[ThreatEntry](8)
+// entryPool recycles threat table entry slices to reduce GC pressure.
+var entryPool = sync.Pool{
+	New: func() interface{} {
+		slice := make([]ThreatEntry, 0, MaxPlayers)
+		return &slice
+	},
+}
 
-// NewThreatTable creates a new threat table with default decay.
+// NewThreatTable creates a new ThreatTable with default decay.
 func NewThreatTable() *ThreatTable {
 	return &ThreatTable{
-		entries:   *entryPool.Get(),
+		entries:   *entryPool.Get().(*[]ThreatEntry),
 		decayRate: DefaultThreatDecay,
 	}
 }
 
-// NewThreatTableWithDecay creates a new threat table with a custom decay rate.
+// NewThreatTableWithDecay creates a new ThreatTable with a custom decay rate.
 func NewThreatTableWithDecay(decayRate int) *ThreatTable {
-	if decayRate < 500 || decayRate > 1000 {
-		decayRate = DefaultThreatDecay
-	}
 	return &ThreatTable{
-		entries:   *entryPool.Get(),
+		entries:   *entryPool.Get().(*[]ThreatEntry),
 		decayRate: decayRate,
 	}
 }
 
-// ─── Threat Operations ────────────────────────────────────────────────────────
-
-// Add adds threat for a player. If the player doesn't exist, creates a new entry.
-// O(n) for insert, O(1) for update. Zero alloc.
+// Add adds or increments threat for a player.
 func (t *ThreatTable) Add(playerID uint64, amount int64) {
-	for i := range t.entries {
-		if t.entries[i].PlayerID == playerID {
-			// Update existing
-			t.entries[i].Threat += amount
-			t.totalThreat += amount
-			// Keep sorted
-			t.fixSort(i)
-			return
-		}
-	}
-
-	// New player (only if under limit)
 	if len(t.entries) >= MaxPlayers {
 		return
 	}
 
+	for i := range t.entries {
+		if t.entries[i].PlayerID == playerID {
+			t.entries[i].Threat += amount
+			t.totalThreat += amount
+			t.sort()
+			return
+		}
+	}
+
+	// New entry
 	t.entries = append(t.entries, ThreatEntry{
 		PlayerID: playerID,
 		Threat:   amount,
 	})
 	t.totalThreat += amount
-
-	// Sort new entry into position
-	t.fixSort(len(t.entries) - 1)
+	t.sort()
 }
 
-// Set sets a player's threat to an exact value.
-// Useful for threat wiping or initial aggro.
+// Set sets the exact threat value for a player.
 func (t *ThreatTable) Set(playerID uint64, amount int64) {
 	for i := range t.entries {
 		if t.entries[i].PlayerID == playerID {
-			t.totalThreat += amount - t.entries[i].Threat
+			diff := amount - t.entries[i].Threat
 			t.entries[i].Threat = amount
-			t.fixSort(i)
+			t.totalThreat += diff
+			t.sort()
 			return
 		}
 	}
 
-	// Not found, add as new
-	if len(t.entries) < MaxPlayers {
-		t.entries = append(t.entries, ThreatEntry{
-			PlayerID: playerID,
-			Threat:   amount,
-		})
-		t.totalThreat += amount
-		t.fixSort(len(t.entries) - 1)
-	}
+	// New entry
+	t.entries = append(t.entries, ThreatEntry{
+		PlayerID: playerID,
+		Threat:   amount,
+	})
+	t.totalThreat += amount
+	t.sort()
 }
 
-// Top returns the player ID with the highest threat.
-// Returns 0 if no players in the threat table.
-// O(1) — threat table is always sorted.
+// Top returns the player with the highest threat and their threat value.
 func (t *ThreatTable) Top() (playerID uint64, threat int64) {
 	if len(t.entries) == 0 {
 		return 0, 0
 	}
-	return t.entries[0].PlayerID, t.entries[0].Threat
+	return t.entries[t.heap[0]].PlayerID, t.entries[t.heap[0]].Threat
 }
 
-// TopN returns the top N players by threat (up to MaxPlayers).
-// Uses the pre-sorted entries array. Returns the actual number found.
+// TopN returns the top N players by threat.
 func (t *ThreatTable) TopN(n int) []ThreatEntry {
-	if n <= 0 {
-		return nil
-	}
 	if n > len(t.entries) {
 		n = len(t.entries)
 	}
-	return t.entries[:n]
+	result := make([]ThreatEntry, n)
+	for i := 0; i < n; i++ {
+		result[i] = t.entries[t.heap[i]]
+	}
+	return result
 }
 
-// Remove removes a player from the threat table (e.g., on death or leaving range).
+// Remove removes a player from the threat table.
 func (t *ThreatTable) Remove(playerID uint64) {
 	for i := range t.entries {
 		if t.entries[i].PlayerID == playerID {
 			t.totalThreat -= t.entries[i].Threat
-			// Remove by swapping with last
-			t.entries[i] = t.entries[len(t.entries)-1]
-			t.entries = t.entries[:len(t.entries)-1]
-			// Fix sort at current position
-			if i < len(t.entries) {
-				t.fixSort(i)
-			}
+			t.entries = append(t.entries[:i], t.entries[i+1:]...)
+			t.sort()
 			return
 		}
 	}
 }
 
-// Clear removes all entries from the threat table.
+// Clear removes all entries and returns memory to the pool.
 func (t *ThreatTable) Clear() {
-	// Zero out entries for GC safety
-	for i := range t.entries {
-		t.entries[i] = ThreatEntry{}
+	if t.entries != nil {
+		entryPool.Put(&t.entries)
+		t.entries = nil
 	}
-	t.entries = t.entries[:0]
 	t.totalThreat = 0
 }
 
-// Len returns the number of players in the threat table.
+// Len returns the number of entries in the threat table.
 func (t *ThreatTable) Len() int {
 	return len(t.entries)
 }
 
-// Total returns the sum of all threat values.
+// Total returns the total threat across all players.
 func (t *ThreatTable) Total() int64 {
 	return t.totalThreat
 }
 
 // Get returns the threat value for a specific player.
-// Returns 0 if the player is not in the threat table.
 func (t *ThreatTable) Get(playerID uint64) int64 {
 	for i := range t.entries {
 		if t.entries[i].PlayerID == playerID {
@@ -198,29 +160,20 @@ func (t *ThreatTable) Get(playerID uint64) int64 {
 	return 0
 }
 
-// ─── Decay ────────────────────────────────────────────────────────────────────
-
-// Decay applies threat decay to all entries.
-// Call once per game-loop tick for active monsters.
+// Decay applies percentage-based decay to all entries.
 func (t *ThreatTable) Decay() {
-	if len(t.entries) == 0 {
-		return
-	}
-
-	newTotal := int64(0)
 	for i := range t.entries {
-		// Apply decay (per-mille)
-		t.entries[i].Threat = (t.entries[i].Threat * int64(t.decayRate)) / 1000
-		newTotal += t.entries[i].Threat
+		decay := t.entries[i].Threat * int64(t.decayRate) / 1000
+		t.entries[i].Threat -= decay
 	}
-	t.totalThreat = newTotal
-
-	// Re-sort after decay (threat values changed)
+	t.totalThreat = 0
+	for i := range t.entries {
+		t.totalThreat += t.entries[i].Threat
+	}
 	t.sort()
 }
 
-// SetDecayRate changes the decay rate.
-// decayRate is per-mille (990 = 99% retained = 1% decay per tick).
+// SetDecayRate sets the decay rate for the threat table.
 func (t *ThreatTable) SetDecayRate(decayRate int) {
 	if decayRate < 500 || decayRate > 1000 {
 		return
@@ -228,85 +181,110 @@ func (t *ThreatTable) SetDecayRate(decayRate int) {
 	t.decayRate = decayRate
 }
 
-// ─── Taunt ────────────────────────────────────────────────────────────────────
-
-// Taunt makes the monster focus on the taunting player.
-// Sets the player's threat to (current_highest_threat + 1) * multiplier.
+// Taunt applies threat multiplier for taunt effects.
 func (t *ThreatTable) Taunt(playerID uint64, multiplier int) {
 	if len(t.entries) == 0 {
-		t.Add(playerID, 1000)
 		return
 	}
-
-	topThreat := t.entries[0].Threat
-	if multiplier <= 0 {
-		multiplier = TauntMultiplier
-	}
-
-	// New threat = (top + 1) * multiplier / 1000
+	topThreat := t.entries[t.heap[0]].Threat
 	newThreat := ((topThreat + 1) * int64(multiplier)) / 1000
 	t.Add(playerID, newThreat)
 }
 
-// ─── Transfer ─────────────────────────────────────────────────────────────────
-
 // Transfer moves a percentage of threat from one player to another.
-// Useful for threat reduction abilities or boss mechanics.
 func (t *ThreatTable) Transfer(fromID, toID uint64, percentage int) {
-	threat := t.Get(fromID)
-	transferAmount := (threat * int64(percentage)) / 1000
+	var fromThreat int64
+	for i := range t.entries {
+		if t.entries[i].PlayerID == fromID {
+			fromThreat = t.entries[i].Threat
+			break
+		}
+	}
+	if fromThreat == 0 {
+		return
+	}
 
-	t.Add(fromID, -transferAmount)
+	transferAmount := fromThreat * int64(percentage) / 1000
 	t.Add(toID, transferAmount)
+	t.Add(fromID, -transferAmount)
 }
 
-// ─── Reset ────────────────────────────────────────────────────────────────────
-
-// ResetWipe sets a specific player's threat to 0 (used for aggro wipe mechanics).
+// ResetWipe sets a player's threat to zero and re-sorts.
 func (t *ThreatTable) ResetWipe(playerID uint64) {
-	t.Set(playerID, 0)
+	for i := range t.entries {
+		if t.entries[i].PlayerID == playerID {
+			t.totalThreat -= t.entries[i].Threat
+			t.entries[i].Threat = 0
+			t.sort()
+			return
+		}
+	}
 }
 
-// FullWipe resets all threat to 0.
+// FullWipe zeros out all threat values.
 func (t *ThreatTable) FullWipe() {
 	t.Clear()
 }
 
-// ─── Sorting ──────────────────────────────────────────────────────────────────
-
-// fixSort bubble-sorts an element at index i into its correct position.
-// Assumes the rest of the array is already correctly sorted.
+// fixSort maintains heap property after an update at position i.
 func (t *ThreatTable) fixSort(i int) {
-	// Bubble up if needed (higher threat should be first)
-	for i > 0 && t.entries[i].Threat > t.entries[i-1].Threat {
-		t.entries[i], t.entries[i-1] = t.entries[i-1], t.entries[i]
-		i--
-	}
-	// Bubble down if needed
-	for i < len(t.entries)-1 && t.entries[i].Threat < t.entries[i+1].Threat {
-		t.entries[i], t.entries[i+1] = t.entries[i+1], t.entries[i]
-		i++
+	if i > 0 && t.entries[t.heap[(i-1)/2]].Threat < t.entries[t.heap[i]].Threat {
+		t.up(i)
+	} else {
+		t.down(i)
 	}
 }
 
-// sort performs a full insertion sort on the entries.
-func (t *ThreatTable) sort() {
-	for i := 1; i < len(t.entries); i++ {
-		key := t.entries[i]
-		j := i - 1
-		for j >= 0 && t.entries[j].Threat < key.Threat {
-			t.entries[j+1] = t.entries[j]
-			j--
+// up moves element at position i up the heap.
+func (t *ThreatTable) up(i int) {
+	for i > 0 {
+		parent := (i - 1) / 2
+		if t.entries[t.heap[parent]].Threat >= t.entries[t.heap[i]].Threat {
+			break
 		}
-		t.entries[j+1] = key
+		t.heap[parent], t.heap[i] = t.heap[i], t.heap[parent]
+		i = parent
 	}
 }
 
-// ─── Destructor ───────────────────────────────────────────────────────────────
+// down moves element at position i down the heap.
+func (t *ThreatTable) down(i int) {
+	n := len(t.entries)
+	for {
+		largest := i
+		left := 2*i + 1
+		right := 2*i + 2
 
-// Close returns the threat table's internal storage to the pool.
-// Call when the monster is despawned.
+		if left < n && t.entries[t.heap[left]].Threat > t.entries[t.heap[largest]].Threat {
+			largest = left
+		}
+		if right < n && t.entries[t.heap[right]].Threat > t.entries[t.heap[largest]].Threat {
+			largest = right
+		}
+		if largest == i {
+			break
+		}
+		t.heap[i], t.heap[largest] = t.heap[largest], t.heap[i]
+		i = largest
+	}
+}
+
+// sort rebuilds the heap from static indices.
+func (t *ThreatTable) sort() {
+	t.heapSize = len(t.entries)
+
+	// heap[i] stores entry index
+	for i := 0; i < t.heapSize; i++ {
+		t.heap[i] = i
+	}
+
+	// Build max-heap
+	for i := (t.heapSize - 1) / 2; i >= 0; i-- {
+		t.down(i)
+	}
+}
+
+// Close releases the threat table and returns pooled memory.
 func (t *ThreatTable) Close() {
 	t.Clear()
-	entryPool.Put(&t.entries)
 }

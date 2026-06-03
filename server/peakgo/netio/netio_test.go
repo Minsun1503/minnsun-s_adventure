@@ -202,29 +202,30 @@ func BenchmarkReadHeader(b *testing.B) {
 	defer client.Close()
 	defer server.Close()
 
-	header := []byte{0x00, 0x09} // Length mặc định bằng 9
+	var header [2]byte
+	header[0] = 0x00
+	header[1] = 0x09
 	done := make(chan struct{})
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	// Đã sửa: Sử dụng channel 'done' kiểm soát vòng đời Goroutine ghi dữ liệu, chống rò rỉ nền
+	// Sử dụng stack-allocated array thay vì slice escape qua goroutine closure
 	go func() {
 		defer close(done)
 		for i := 0; i < b.N; i++ {
-			_, _ = client.Write(header)
+			_, _ = client.Write(header[:])
 		}
 	}()
 
 	for i := 0; i < b.N; i++ {
 		_, err := netio.ReadHeader(server)
-		// Đã sửa: Dừng tiến trình và báo lỗi ngay lập tức nếu Benchmark dính lỗi nghẽn mạch mạng
 		if err != nil {
 			b.Fatalf("Benchmark ReadHeader failed at loop %d: %v", i, err)
 		}
 	}
 
-	<-done // Đợi Goroutine ghi kết thúc sạch sẽ trước khi chuyển bài test
+	<-done
 }
 
 func BenchmarkReadPayload(b *testing.B) {
@@ -263,18 +264,18 @@ func BenchmarkWritePacket(b *testing.B) {
 	defer client.Close()
 	defer server.Close()
 
-	packetData := make([]byte, 64)
-	sinkBuf := make([]byte, 64)
+	var packetData [64]byte
+	var sinkBuf [64]byte
 	done := make(chan struct{})
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	// Kích hoạt Goroutine ngầm liên tục dọn sạch hàng đợi socket (Flush) để giải phóng hàng ghi
+	// Sử dụng stack-allocated arrays thay vì slice escape qua goroutine closure
 	go func() {
 		defer close(done)
 		for i := 0; i < b.N; i++ {
-			_, err := io.ReadFull(server, sinkBuf)
+			_, err := io.ReadFull(server, sinkBuf[:])
 			if err != nil {
 				return
 			}
@@ -282,7 +283,7 @@ func BenchmarkWritePacket(b *testing.B) {
 	}()
 
 	for i := 0; i < b.N; i++ {
-		err := netio.WritePacket(client, packetData)
+		err := netio.WritePacket(client, packetData[:])
 		if err != nil {
 			b.Fatalf("Benchmark WritePacket failed at loop %d: %v", i, err)
 		}

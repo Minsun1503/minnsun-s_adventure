@@ -348,7 +348,7 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 	)
 	systems.SendNoticeSystem(playerEntity, []byte(spawnMsg))
 
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Minute))
+	_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 
 	for {
 		// Zero-alloc header read: stack [2]byte + BigEndian.Uint16, no reflection.
@@ -373,7 +373,7 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		handleBinaryPacket(conn, playerEntity, opcode, payload)
 
 		packetPool.Put(pBuf)
-		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Minute))
+		_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 	}
 }
 

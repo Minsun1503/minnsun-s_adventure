@@ -36,7 +36,8 @@ import (
 )
 
 // Event represents an arbitrary type-safe payload transmitted across the bus.
-type Event any
+// Event defines a generic event type constraint.
+type Event interface{}
 
 // Handler is the callback function executed concurrently for each incoming event.
 // Safe to perform blocking operations (I/O, database writes, sleep).
@@ -129,11 +130,12 @@ func (b *Bus) Subscribe(
 // Warning: Do NOT use for handlers that perform blocking operations (DB/network).
 func (b *Bus) PublishSync(topic string, event Event) {
 	b.mu.RLock()
-	defer b.mu.RUnlock()
 	if b.closed {
+		b.mu.RUnlock()
 		return
 	}
 	subs := b.subscribers[topic]
+	b.mu.RUnlock()
 	for _, sub := range subs {
 		sub.handler(event)
 	}
