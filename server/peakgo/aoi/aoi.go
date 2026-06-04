@@ -20,12 +20,13 @@ type AOIEvent struct {
 	Target ecs.Entity
 }
 
-// aoiEventPool caches slices of AOIEvent to avoid per-tick allocations.
 // EntityListPool recycles *[]ecs.Entity slices for AOI spatial queries.
 // Used by aoiSpatialQuery in world/aoi_bridge.go to avoid per-frame slice allocation.
 var EntityListPool = pool.NewSlicePool[ecs.Entity](32)
 
-var aoiEventPool = pool.NewSlicePool[AOIEvent](32)
+// AOIEventPool recycles *[]AOIEvent slices for enter/leave delta results.
+// Callers of UpdateOne must Put the returned pointer back after processing.
+var AOIEventPool = pool.NewSlicePool[AOIEvent](32)
 
 // neighborSet is a small set of entity IDs for fast lookup.
 type neighborSet map[ecs.Entity]struct{}
@@ -68,6 +69,8 @@ func (m *AOIManager) UnregisterWatcher(entity ecs.Entity) {
 
 // UpdateAll computes enter/leave events for all registered watchers.
 // posGetter provides the position for each entity (decoupled from ecs.GlobalRegistry for testability).
+// Each watcher's events are deep-copied from the pool before the pool slice is returned,
+// so the caller owns the returned map and its slices fully.
 func (m *AOIManager) UpdateAll(posGetter func(ecs.Entity) (ecs.PositionComponent, bool), query SpatialQueryFunc) map[ecs.Entity][]AOIEvent {
 	results := make(map[ecs.Entity][]AOIEvent, len(m.watchers))
 	for id, w := range m.watchers {
@@ -75,16 +78,24 @@ func (m *AOIManager) UpdateAll(posGetter func(ecs.Entity) (ecs.PositionComponent
 		if !ok {
 			continue
 		}
-		events := m.updateOne(id, w, pos, query)
-		if len(events) > 0 {
+		eventsPtr := m.updateOne(id, w, pos, query)
+		if eventsPtr != nil && len(*eventsPtr) > 0 {
+			// Deep copy: the caller owns these slices independently of the pool.
+			events := make([]AOIEvent, len(*eventsPtr))
+			copy(events, *eventsPtr)
 			results[id] = events
+		}
+		if eventsPtr != nil {
+			AOIEventPool.Put(eventsPtr)
 		}
 	}
 	return results
 }
 
 // updateOne computes enter/leave events for a single watcher given its position.
-func (m *AOIManager) updateOne(entity ecs.Entity, w *Watcher, pos ecs.PositionComponent, query SpatialQueryFunc) []AOIEvent {
+// Returns a pointer to a pooled []AOIEvent slice, or nil if no changes.
+// The caller MUST Put the returned pointer back into AOIEventPool after use.
+func (m *AOIManager) updateOne(entity ecs.Entity, w *Watcher, pos ecs.PositionComponent, query SpatialQueryFunc) *[]AOIEvent {
 	raw := query(pos, w.radius, entity)
 	if raw == nil {
 		return nil
@@ -99,14 +110,14 @@ func (m *AOIManager) updateOne(entity ecs.Entity, w *Watcher, pos ecs.PositionCo
 	}
 
 	// Detect leaves: in old set but not in new set
-	var events []AOIEvent
+	var events *[]AOIEvent
 	for old := range w.neighbor {
 		if _, exists := current[old]; !exists {
 			if events == nil {
-				events = *aoiEventPool.Get()
-				events = events[:0]
+				events = AOIEventPool.Get()
+				*events = (*events)[:0]
 			}
-			events = append(events, AOIEvent{Type: EventLeave, Target: old})
+			*events = append(*events, AOIEvent{Type: EventLeave, Target: old})
 		}
 	}
 
@@ -114,10 +125,10 @@ func (m *AOIManager) updateOne(entity ecs.Entity, w *Watcher, pos ecs.PositionCo
 	for newID := range current {
 		if _, exists := w.neighbor[newID]; !exists {
 			if events == nil {
-				events = *aoiEventPool.Get()
-				events = events[:0]
+				events = AOIEventPool.Get()
+				*events = (*events)[:0]
 			}
-			events = append(events, AOIEvent{Type: EventEnter, Target: newID})
+			*events = append(*events, AOIEvent{Type: EventEnter, Target: newID})
 		}
 	}
 
@@ -133,7 +144,9 @@ func (m *AOIManager) updateOne(entity ecs.Entity, w *Watcher, pos ecs.PositionCo
 }
 
 // UpdateOne computes enter/leave events for a single entity given its position.
-func (m *AOIManager) UpdateOne(entity ecs.Entity, pos ecs.PositionComponent, query SpatialQueryFunc) []AOIEvent {
+// Returns a pointer to a pooled []AOIEvent slice, or nil if no changes.
+// The caller MUST Put the returned pointer back into AOIEventPool after use.
+func (m *AOIManager) UpdateOne(entity ecs.Entity, pos ecs.PositionComponent, query SpatialQueryFunc) *[]AOIEvent {
 	w, ok := m.watchers[entity]
 	if !ok {
 		return nil

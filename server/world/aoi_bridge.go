@@ -53,10 +53,14 @@ func aoiSpatialQuery(origin ecs.PositionComponent, worldRadius float64, excludeI
 // ProcessAOIEvents updates the AOI watcher for a single entity, producing enter/leave
 // events and sending corresponding SpawnEntity/DespawnEntity packets to the affected watcher.
 func ProcessAOIEvents(entity ecs.Entity, pos ecs.PositionComponent) {
-	events := GlobalAOIManager.UpdateOne(entity, pos, aoiSpatialQuery)
-	if len(events) == 0 {
+	eventsPtr := GlobalAOIManager.UpdateOne(entity, pos, aoiSpatialQuery)
+	if eventsPtr == nil || len(*eventsPtr) == 0 {
+		if eventsPtr != nil {
+			aoi.AOIEventPool.Put(eventsPtr)
+		}
 		return
 	}
+	defer aoi.AOIEventPool.Put(eventsPtr)
 
 	// Get the watcher's connection (only players have connections)
 	watcherConn, hasConn := ecs.GlobalRegistry.GetConnection(entity)
@@ -64,7 +68,7 @@ func ProcessAOIEvents(entity ecs.Entity, pos ecs.PositionComponent) {
 		return
 	}
 
-	for _, ev := range events {
+	for _, ev := range *eventsPtr {
 		switch ev.Type {
 		case aoi.EventEnter:
 			sendSpawnTo(watcherConn.Conn, ev.Target)
