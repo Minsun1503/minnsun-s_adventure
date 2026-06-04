@@ -94,11 +94,11 @@ func TestEntityLifecycle(t *testing.T) {
 		}
 	})
 
-	// Verify the entity ID counter is NOT rolled back (by design — ID is never reused).
-	t.Run("next_id_preserved", func(t *testing.T) {
+	// Verify the entity ID is recycled and reused.
+	t.Run("recycled_id_reused", func(t *testing.T) {
 		nextID := reg.NewEntity()
-		if nextID <= eid {
-			t.Errorf("new entity ID %d should be > removed ID %d (no ID reuse)", nextID, eid)
+		if nextID != eid {
+			t.Errorf("new entity ID %d should equal removed ID %d (ID recycling)", nextID, eid)
 		}
 	})
 }

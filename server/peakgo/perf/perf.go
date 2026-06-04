@@ -30,6 +30,24 @@ const (
 	NanosecondBuckets = 16
 )
 
+// ─── Global Monitor Instances ─────────────────────────────────────────────────
+//
+// Shared singleton monitors wired into the game loop, network layer, and
+// admin panel. Declared here for zero-import coupling — any package can
+// reference perf.GlobalTickMonitor, perf.GlobalPacketMonitor, etc.
+
+// GlobalTickMonitor records game loop tick durations.
+var GlobalTickMonitor = &TickMonitor{}
+
+// GlobalPacketMonitor tracks network packet throughput.
+var GlobalPacketMonitor = &PacketMonitor{}
+
+// GlobalMemMonitor samples memory usage every 10 calls (sample rate = 10).
+var GlobalMemMonitor = NewMemMonitor(10)
+
+// GlobalAlertMonitor watches thresholds and fires log warnings.
+var GlobalAlertMonitor = NewAlertMonitor()
+
 // ─── Tick Monitor ─────────────────────────────────────────────────────────────
 
 // TickMonitor tracks game loop tick durations using a lock-free ring buffer.

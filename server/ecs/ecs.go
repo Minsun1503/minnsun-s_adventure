@@ -2,6 +2,7 @@ package ecs
 
 import (
 	"net"
+	"server/peakgo/astar"
 	"server/peakgo/threat"
 	"server/peakgo/timer" // Tích hợp chặt chẽ hệ thống TickTimer lõi
 	"sync"
@@ -131,6 +132,28 @@ type AIComponent struct {
 	// ThreatTable tracks aggro values (peakgo/threat). Pointer for lazy init.
 	// Only monsters chasing/attacking players need this — idle monsters waste nothing.
 	ThreatTable *threat.ThreatTable
+
+	// PathCache is a reusable A* pathfinder for this monster.
+	// Created on first path request and recycled across ticks.
+	// Pointer for lazy init — idle monsters waste nothing.
+	PathCache *astar.PathCache
+
+	// CurrentPath stores the last computed A* path so the monster can
+	// step through waypoints one-by-one across multiple ticks.
+	// Value type with fixed-size array — zero alloc once embedded.
+	CurrentPath astar.PathResult
+
+	// PathFollowIdx is the current waypoint index in CurrentPath.
+	// -1 means no active path; 0+ means stepping toward CurrentPath.Points[followIdx].
+	PathFollowIdx int
+
+	// PathGoalX, PathGoalZ store the destination of the current A* path
+	// so we can detect when the monster needs to re-path.
+	PathGoalX int
+	PathGoalZ int
+
+	// PathMapID stores which map the current path was computed for.
+	PathMapID int
 }
 
 type InventoryComponent struct {
@@ -369,6 +392,47 @@ func (s *ComponentStore[T]) RangeMutate(f func(key Entity) bool) {
 	entitySlicePool.Put(pBuf)
 }
 
+// ─── ENTITY RECYCLING ────────────────────────────────────────────────────────
+//
+// Entity IDs are recycled after destruction to prevent unbounded growth during
+// long server uptimes. The recycledIDs queue stores IDs of destroyed entities
+// and hands them out before consuming fresh IDs from the atomic counter.
+//
+// The recycling pool is a lock-free CAS queue (built on a simple slice with a
+// mutex) since the volume is low — entity destrucations are rare compared to
+// movement ticks. The sync.Pool pattern is unnecessary here; a slice-based
+// freelist with a single mutex is simpler and sufficient.
+
+// entityFreelist is a pooled slice of recycled entity IDs protected by a mutex.
+type entityFreelist struct {
+	mu  sync.Mutex
+	ids []Entity
+}
+
+var recycledEntities entityFreelist
+
+// recycleEntityID adds a destroyed entity's ID back to the freelist for reuse.
+// Safe for concurrent callers (e.g. map goroutines recycling cross-map entities).
+func recycleEntityID(id Entity) {
+	recycledEntities.mu.Lock()
+	recycledEntities.ids = append(recycledEntities.ids, id)
+	recycledEntities.mu.Unlock()
+}
+
+// popRecycledID returns a recycled entity ID if one is available, or 0.
+func popRecycledID() Entity {
+	recycledEntities.mu.Lock()
+	if len(recycledEntities.ids) == 0 {
+		recycledEntities.mu.Unlock()
+		return 0
+	}
+	last := len(recycledEntities.ids) - 1
+	id := recycledEntities.ids[last]
+	recycledEntities.ids = recycledEntities.ids[:last]
+	recycledEntities.mu.Unlock()
+	return id
+}
+
 // ─── MASTER REGISTRY SYSTEM ──────────────────────────────────────────────────
 
 type Registry struct {
@@ -389,11 +453,20 @@ type Registry struct {
 
 var GlobalRegistry = &Registry{}
 
+// NewEntity returns a recycled entity ID if one is available, otherwise
+// allocates a fresh ID from the atomic counter. This prevents unbounded
+// growth of the entity ID space during long server uptimes.
 func (r *Registry) NewEntity() Entity {
+	if recycled := popRecycledID(); recycled != 0 {
+		return recycled
+	}
 	return Entity(r.nextID.Add(1))
 }
 
-// RemoveEntity thực hiện dọn dẹp tuần tự toàn bộ các thành phần của một Entity.
+// RemoveEntity cleans up all components for an entity and recycles its ID.
+// Callers MUST also remove the entity from the SpatialGrid separately
+// (via the CommandBuffer's Destroy path or a direct grid.RemoveEntity call).
+//
 // Cảnh báo Concurrency: Hàm này không mang tính Transaction nguyên tử liên vùng.
 // Hoạt động an toàn tuyệt đối dưới cấu trúc vòng lặp game loop đơn luồng (Single-threaded worker framework).
 func (r *Registry) RemoveEntity(id Entity) {
@@ -409,6 +482,23 @@ func (r *Registry) RemoveEntity(id Entity) {
 	r.parties.Delete(id)
 	r.partyMembers.Delete(id)
 	r.effects.Delete(id)
+
+	// Recycled the entity ID so it can be reused by a future NewEntity call.
+	recycleEntityID(id)
+}
+
+// TotalEntityIDs returns the current atomic ID counter value.
+// Useful for diagnostics and monitoring entity ID growth.
+func (r *Registry) TotalEntityIDs() uint64 {
+	return r.nextID.Load()
+}
+
+// RecycledEntityCount returns the number of recycled IDs currently in the freelist.
+func RecycledEntityCount() int {
+	recycledEntities.mu.Lock()
+	n := len(recycledEntities.ids)
+	recycledEntities.mu.Unlock()
+	return n
 }
 
 // ─── AI COMPONENT STORE PUBLIC APIS ──────────────────────────────────────────
@@ -514,6 +604,69 @@ func (r *Registry) QueryPositionStats(f func(id Entity, pos PositionComponent, s
 			return f(id, pos, stats)
 		}
 		return true // continue iteration
+	})
+}
+
+// QueryPositionAI iterates over all entities that have an AI component
+// (i.e. monsters) and looks up their Position + Stats components in O(1).
+// The AI store is the smallest store (only monsters), making this the most
+// efficient way to process monster AI ticks.
+//
+// The callback receives entity ID, AIComponent, PositionComponent, StatsComponent.
+// Return false to stop iteration early.
+func (r *Registry) QueryPositionAI(f func(id Entity, ai AIComponent, pos PositionComponent, stats StatsComponent) bool) {
+	r.ai.Range(func(id Entity, ai AIComponent) bool {
+		pos, okPos := r.positions.Get(id)
+		if !okPos {
+			return true // skip entities without position (shouldn't happen but be safe)
+		}
+		stats, okStats := r.stats.Get(id)
+		if !okStats {
+			return true // skip entities without stats
+		}
+		return f(id, ai, pos, stats)
+	})
+}
+
+// QueryPositionMetadata iterates over all entities that have Metadata
+// and looks up their Position in O(1). This is useful for the initial
+// snapshot pass in the game loop (hasPlayers check, monster state logging).
+//
+// The callback receives entity ID, MetadataComponent, PositionComponent.
+// Return false to stop iteration early.
+func (r *Registry) QueryPositionMetadata(f func(id Entity, meta MetadataComponent, pos PositionComponent) bool) {
+	r.metadata.Range(func(id Entity, meta MetadataComponent) bool {
+		pos, ok := r.positions.Get(id)
+		if !ok {
+			return true // skip entities without position
+		}
+		return f(id, meta, pos)
+	})
+}
+
+// QueryMonsterCombat iterates over AI store (monsters only) to process
+// combat-relevant iterations (AI + Position + Stats). This is the most
+// targeted query for the map tick when we need to run monster AI ticks
+// and perform combat logic.
+//
+// The callback receives entity ID, AIComponent, PositionComponent, StatsComponent.
+// Return false to stop iteration early.
+func (r *Registry) QueryMonsterCombat(f func(id Entity, ai AIComponent, pos PositionComponent, stats StatsComponent) bool) {
+	// Identical implementation to QueryPositionAI but semantically distinct.
+	// QueryPositionAI is for general AI ticking (roaming, pathfinding).
+	// QueryMonsterCombat is for combat-specific passes (damage, threat, aggro range).
+	// If performance of combined pass is ever needed, the caller merges both into
+	// a single QueryPositionAI pass — these aliases exist to make intent explicit.
+	r.ai.Range(func(id Entity, ai AIComponent) bool {
+		pos, okPos := r.positions.Get(id)
+		if !okPos {
+			return true
+		}
+		stats, okStats := r.stats.Get(id)
+		if !okStats {
+			return true
+		}
+		return f(id, ai, pos, stats)
 	})
 }
 

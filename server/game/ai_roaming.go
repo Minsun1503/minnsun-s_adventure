@@ -2,6 +2,7 @@ package game
 
 import (
 	"server/ecs"
+	"server/peakgo/astar"
 	"server/peakgo/gmath"
 	"server/peakgo/rng"
 	"server/peakgo/spatial"
@@ -36,6 +37,78 @@ func TickAI(id ecs.Entity) {
 
 	// Ghi đè trạng thái đột biến ngược trở lại Registry (Copy-Modify-Overwrite)
 	ecs.GlobalRegistry.SetAI(id, ai)
+}
+
+// ─── PATH FOLLOWING HELPERS ──────────────────────────────────────────────────
+
+// ensurePathCache creates a PathCache for this monster on first use.
+// Lazy init = zero cost for idle monsters.
+func ensurePathCache(ai *ecs.AIComponent) *astar.PathCache {
+	if ai.PathCache == nil {
+		ai.PathCache = astar.NewPathCache()
+	}
+	return ai.PathCache
+}
+
+// requestPath computes a full A* path from current position to (goalX, goalZ).
+// Stores the result in ai.CurrentPath and resets PathFollowIdx to 1 (skip start node).
+// Returns true if a valid path was found.
+func requestPath(ai *ecs.AIComponent, pos ecs.PositionComponent, goalX, goalZ int) bool {
+	pc := ensurePathCache(ai)
+
+	// Check if we already have a cached valid path for the same goal
+	if ai.CurrentPath.Found && ai.PathFollowIdx >= 0 &&
+		ai.PathFollowIdx < ai.CurrentPath.Len &&
+		ai.PathGoalX == goalX && ai.PathGoalZ == goalZ &&
+		ai.PathMapID == pos.MapID {
+		return true
+	}
+
+	walkable := world.IsWalkableForMap(pos.MapID)
+	ai.CurrentPath = astar.FindPathWithCache(pc, pos.X, pos.Z, goalX, goalZ, walkable, astar.MaxPathNodes)
+	if !ai.CurrentPath.Found {
+		ai.PathFollowIdx = -1
+		return false
+	}
+
+	// Start at index 1 (skip current position, which is Points[0])
+	ai.PathFollowIdx = 1
+	ai.PathGoalX = goalX
+	ai.PathGoalZ = goalZ
+	ai.PathMapID = pos.MapID
+	return true
+}
+
+// advancePath steps the monster one waypoint along its current path.
+// Returns (nextX, nextZ, arrived) where arrived=true if path is complete.
+func advancePath(pos ecs.PositionComponent, ai *ecs.AIComponent) (int, int, bool) {
+	if !ai.CurrentPath.Found || ai.PathFollowIdx < 0 {
+		return pos.X, pos.Z, true
+	}
+
+	// If we've reached the current waypoint, advance to the next one
+	if pos.X == ai.CurrentPath.Points[ai.PathFollowIdx].X &&
+		pos.Z == ai.CurrentPath.Points[ai.PathFollowIdx].Z {
+		ai.PathFollowIdx++
+	}
+
+	// Check if we've arrived at the final goal
+	if ai.PathFollowIdx >= ai.CurrentPath.Len {
+		ai.PathFollowIdx = -1
+		return pos.X, pos.Z, true
+	}
+
+	// Move toward the next waypoint
+	nextX := ai.CurrentPath.Points[ai.PathFollowIdx].X
+	nextZ := ai.CurrentPath.Points[ai.PathFollowIdx].Z
+
+	// Don't step onto blocked tiles
+	if world.IsTileBlocked(ai.PathMapID, nextX, nextZ) {
+		ai.PathFollowIdx = -1
+		return pos.X, pos.Z, true
+	}
+
+	return nextX, nextZ, false
 }
 
 // ─── STATE HANDLERS ──────────────────────────────────────────────────────────
@@ -103,17 +176,28 @@ func tickRoaming(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 	if ai.PathTimer.Ready() {
 		ai.PathTimer.Reset()
 
-		targetPos := ecs.PositionComponent{X: ai.RoamTargetX, Z: ai.RoamTargetZ, MapID: pos.MapID}
-		nextX, nextZ := world.FindPath(pos, targetPos)
-
-		// Nếu bị kẹt đường hoặc tile mục tiêu bị chặn đột ngột -> Hủy roam, đứng nghỉ
-		if (nextX == pos.X && nextZ == pos.Z) || world.IsTileBlocked(pos.MapID, nextX, nextZ) {
+		// Request a full A* path to the roam target
+		if !requestPath(&ai, pos, ai.RoamTargetX, ai.RoamTargetZ) {
+			// No path found — cancel roam
 			MonsterFSMSend(id, &ai, MonsterEvPathDone)
 			ai.IdleTimer.Reset()
 			return ai
 		}
+	}
 
+	// Advance along the path — move one waypoint per tick
+	if ai.PathFollowIdx >= 0 {
+		nextX, nextZ, arrived := advancePath(pos, &ai)
+		if arrived {
+			MonsterFSMSend(id, &ai, MonsterEvPathDone)
+			ai.IdleTimer.Reset()
+			return ai
+		}
 		MovementSystem(id, nextX, nextZ)
+	} else {
+		// No active path — cancel roam
+		MonsterFSMSend(id, &ai, MonsterEvPathDone)
+		ai.IdleTimer.Reset()
 	}
 
 	return ai
@@ -148,25 +232,29 @@ func tickChasing(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 		return ai
 	}
 
-	// ĐÃ VÁ LỖI CHÍ MẠNG (Leash Check): Kiểm tra khoảng cách giữa vị trí hiện tại của quái
-	// với điểm xuất phát ban đầu (ai.SpawnX, ai.SpawnZ) thay vì đuổi theo mục tiêu vô hạn!
-	// Chạy bằng InRangeInt hệ số nguyên, không dính bất kỳ một phép toán float nào.
+	// Leash Check: Kiểm tra khoảng cách giữa vị trí hiện tại của quái
+	// với điểm xuất phát ban đầu (ai.SpawnX, ai.SpawnZ)
 	if !gmath.InRangeInt(myPos.X, myPos.Z, ai.SpawnX, ai.SpawnZ, ai.LeashRadius) {
 		ai.TargetID = 0
 		MonsterFSMSend(id, &ai, MonsterEvLostTarget)
 		return ai
 	}
 
-	// Đug Đã Vá (Melee Range Check): Sử dụng InRangeInt hệ số nguyên sạch sẽ, triệt tiêu magic code
+	// Melee Range Check: Nếu đã trong tầm đánh thì chuyển sang Attacking
 	if gmath.InRangeInt(myPos.X, myPos.Z, targetPos.X, targetPos.Z, ai.MeleeRange) {
 		MonsterFSMSend(id, &ai, MonsterEvInRange)
 		return ai
 	}
 
-	// Chặn nghẽn CPU: Chỉ thực thi thuật toán tìm đường đuổi theo Player theo chu kỳ xả Timer
+	// Request full A* path to target position (throttled by PathTimer)
 	if ai.PathTimer.Ready() {
 		ai.PathTimer.Reset()
-		nextX, nextZ := world.FindPath(myPos, targetPos)
+		requestPath(&ai, myPos, targetPos.X, targetPos.Z)
+	}
+
+	// Advance along the path — one waypoint per tick
+	if ai.PathFollowIdx >= 0 {
+		nextX, nextZ, _ := advancePath(myPos, &ai)
 		MovementSystem(id, nextX, nextZ)
 	}
 
@@ -257,11 +345,15 @@ func tickReturning(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 		return ai
 	}
 
-	// Tìm đường rút lui an toàn theo chu kỳ bảo vệ CPU
+	// Request full A* path back to spawn (throttled by PathTimer)
 	if ai.PathTimer.Ready() {
 		ai.PathTimer.Reset()
-		spawnPos := ecs.PositionComponent{X: ai.SpawnX, Z: ai.SpawnZ, MapID: pos.MapID}
-		nextX, nextZ := world.FindPath(pos, spawnPos)
+		requestPath(&ai, pos, ai.SpawnX, ai.SpawnZ)
+	}
+
+	// Advance along the path — one waypoint per tick
+	if ai.PathFollowIdx >= 0 {
+		nextX, nextZ, _ := advancePath(pos, &ai)
 		MovementSystem(id, nextX, nextZ)
 	}
 
@@ -269,10 +361,6 @@ func tickReturning(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 }
 
 // ─── INTERNAL HELPERS ────────────────────────────────────────────────────────
-
-// transition quản lý tập trung việc chuyển đổi trạng thái AI.
-// Gom toàn bộ logic gán biến và Debug Log rườm rà trước đây vào đúng 1 nguồn sự thật duy nhất.
-
 
 // pickRoamTarget tính toán tọa độ di chuyển ngẫu nhiên tự nhiên quanh vùng spawn.
 func pickRoamTarget(id ecs.Entity, ai ecs.AIComponent) (int, int, bool) {

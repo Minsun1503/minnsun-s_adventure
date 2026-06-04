@@ -29,7 +29,16 @@ func StartSaveWorkerEngine() {
 		for snapshot := range SaveQueue {
 			executeWriteToSQL(snapshot)
 		}
+		logger.Info("[PERSISTENCE] Save queue worker exited (channel closed).")
 	}()
+}
+
+// FlushSaveQueue closes the save queue channel, causing the worker to
+// drain all remaining snapshots and exit. Call this during graceful
+// shutdown to ensure no data is lost.
+func FlushSaveQueue() {
+	logger.Info("[PERSISTENCE] Flushing save queue... (remaining: %d items)", len(SaveQueue))
+	close(SaveQueue)
 }
 
 // QueuePlayerSave captures a fast inline memory snapshot and pushes it to the worker buffer thread.

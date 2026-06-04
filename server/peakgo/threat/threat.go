@@ -38,20 +38,33 @@ var entryPool = sync.Pool{
 	},
 }
 
+// tablePool recycles ThreatTable struct allocations for lazy creation.
+var tablePool = sync.Pool{
+	New: func() interface{} {
+		return &ThreatTable{
+			decayRate: DefaultThreatDecay,
+		}
+	},
+}
+
 // NewThreatTable creates a new ThreatTable with default decay.
 func NewThreatTable() *ThreatTable {
-	return &ThreatTable{
-		entries:   *entryPool.Get().(*[]ThreatEntry),
-		decayRate: DefaultThreatDecay,
-	}
+	t := tablePool.Get().(*ThreatTable)
+	t.entries = *entryPool.Get().(*[]ThreatEntry)
+	t.decayRate = DefaultThreatDecay
+	t.totalThreat = 0
+	t.heapSize = 0
+	return t
 }
 
 // NewThreatTableWithDecay creates a new ThreatTable with a custom decay rate.
 func NewThreatTableWithDecay(decayRate int) *ThreatTable {
-	return &ThreatTable{
-		entries:   *entryPool.Get().(*[]ThreatEntry),
-		decayRate: decayRate,
-	}
+	t := tablePool.Get().(*ThreatTable)
+	t.entries = *entryPool.Get().(*[]ThreatEntry)
+	t.decayRate = decayRate
+	t.totalThreat = 0
+	t.heapSize = 0
+	return t
 }
 
 // Add adds or increments threat for a player.
@@ -287,4 +300,5 @@ func (t *ThreatTable) sort() {
 // Close releases the threat table and returns pooled memory.
 func (t *ThreatTable) Close() {
 	t.Clear()
+	tablePool.Put(t)
 }

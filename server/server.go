@@ -2,6 +2,10 @@ package main
 
 import (
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"server/auth"
 	"server/db"
@@ -10,6 +14,8 @@ import (
 	"server/logger"
 	"server/mcp"
 	"server/models"
+	"server/network"
+	"server/peakgo/perf"
 	"server/protocol"
 	"server/systems"
 	"server/transport"
@@ -97,10 +103,61 @@ func main() {
 	mcp.Start(mcp.Config{Port: 8080})
 	logger.Info("[BOOT] MCP admin interface available on http://localhost:8080/mcp")
 
+	// Start the Admin Dashboard HTTP server on port 9090 (isolated admin port).
+	// Serves a real-time HTML/JS metrics dashboard at / with JSON endpoints at
+	// /debug/state, /debug/perf, and /debug/entities.
+	adminServer := network.NewAdminServer(":9090")
+	adminServer.Start()
+	logger.Info("[BOOT] Admin dashboard available on http://localhost:9090/")
+
+	// Start the periodic background alert monitor goroutine.
+	// Samples memory and save queue every 5 seconds, checking thresholds.
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			// Sample memory and alert on threshold breach
+			if snap := perf.GlobalMemMonitor.Sample(); snap != nil {
+				perf.GlobalAlertMonitor.CheckHeapSize(snap.Alloc)
+			}
+
+			// Check save queue depth
+			queueLen := len(db.SaveQueue)
+			perf.GlobalAlertMonitor.CheckSaveQueue(queueLen)
+		}
+	}()
+	logger.Info("[BOOT] Performance alert monitor started (5s interval).")
+
 	// Start the WebSocket listener for WebGL clients on port 8081.
 	// Runs in its own goroutine — does not block the TCP accept loop.
 	go transport.StartWebSocketListener(":8081")
 	logger.Info("[BOOT] WebSocket transport listening on ws://localhost:8081/ws")
+
+	// Start the periodic world snapshot goroutine.
+	// Saves all active entities every 5 minutes (configurable via SnapshotInterval).
+	world.StartPeriodicSnapshot()
+	logger.Info("[BOOT] Periodic world snapshot started (interval: %v).", world.SnapshotInterval)
+
+	// Set up OS signal catching for graceful shutdown.
+	// On SIGINT (Ctrl+C) or SIGTERM, we flush the save queue and exit cleanly.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigCh
+		logger.Info("[SHUTDOWN] Received signal %v — starting graceful shutdown...", sig)
+
+		// Step 1: Flush the save queue — drain all pending snapshots to DB.
+		db.FlushSaveQueue()
+
+		// Step 2: Close the TCP listener to stop accepting new connections.
+		lis.Close()
+		logger.Info("[SHUTDOWN] TCP listener closed.")
+
+		// Step 3: Log shutdown complete.
+		logger.Info("[SHUTDOWN] Server shut down gracefully.")
+		os.Exit(0)
+	}()
 
 	for {
 		conn, err := lis.Accept()
