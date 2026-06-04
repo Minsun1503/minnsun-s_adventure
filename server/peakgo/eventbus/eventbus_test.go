@@ -328,6 +328,49 @@ func TestPublishWhileDrain(t *testing.T) {
 	wg.Wait()
 }
 
+// ─── TypedBus Tests ────────────────────────────────────────────────────────
+
+// TestTypedBusSubscribeAndPublish verifies the typed bus works correctly.
+func TestTypedBusSubscribeAndPublish(t *testing.T) {
+	bus := eventbus.NewTyped[string]()
+	defer bus.Drain()
+
+	received := make(chan string, 1)
+
+	bus.Subscribe("test.typed", func(e string) {
+		received <- e
+	}, 0)
+
+	bus.Publish("test.typed", "hello typed")
+
+	select {
+	case got := <-received:
+		if got != "hello typed" {
+			t.Fatalf("expected 'hello typed', got %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for typed event")
+	}
+}
+
+// TestTypedBusSync verifies PublishSync on TypedBus.
+func TestTypedBusSync(t *testing.T) {
+	bus := eventbus.NewTyped[int]()
+	defer bus.Drain()
+
+	var count int
+	bus.Subscribe("sync", func(e int) {
+		count += e
+	}, 0)
+
+	bus.PublishSync("sync", 10)
+	bus.PublishSync("sync", 20)
+
+	if count != 30 {
+		t.Fatalf("expected 30, got %d", count)
+	}
+}
+
 // ─── Benchmarks ───────────────────────────────────────────────────────────────
 
 // BenchmarkPublishNoSubscribers benchmarks the pure overhead of looking up a topic
@@ -469,5 +512,64 @@ func BenchmarkPublishSyncPeakGo(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		bus.PublishSync("syncbench", i)
+	}
+}
+
+// ─── TypedBus Benchmarks (Zero-Allocation) ───────────────────────────────────
+
+// BenchmarkTypedPublishOneSubscriber measures TypedBus sync publish with 1 subscriber.
+// Expected: 0 B/op, 0 allocs/op.
+func BenchmarkTypedPublishOneSubscriber(b *testing.B) {
+	bus := eventbus.NewTyped[int]()
+	bus.Subscribe("typed", func(e int) {}, 1<<20)
+	b.Cleanup(func() { bus.Drain() })
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bus.Publish("typed", i)
+	}
+}
+
+// BenchmarkTypedPublishSyncOneSubscriber measures TypedBus sync publish with 1 subscriber.
+// Expected: 0 B/op, 0 allocs/op.
+func BenchmarkTypedPublishSyncOneSubscriber(b *testing.B) {
+	bus := eventbus.NewTyped[int64]()
+	bus.Subscribe("sync", func(e int64) {}, 1<<20)
+	b.Cleanup(func() { bus.Drain() })
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bus.PublishSync("sync", int64(i))
+	}
+}
+
+// BenchmarkTypedPublishStruct measures TypedBus with a struct event type.
+// Expected: 0 B/op, 0 allocs/op.
+type testMoveEvent struct {
+	EntityID uint64
+	X, Z     int32
+}
+
+func BenchmarkTypedPublishStruct(b *testing.B) {
+	bus := eventbus.NewTyped[testMoveEvent]()
+	bus.Subscribe("move", func(e testMoveEvent) {}, 1<<20)
+	b.Cleanup(func() { bus.Drain() })
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bus.Publish("move", testMoveEvent{EntityID: 1, X: 100, Z: 200})
+	}
+}
+
+// BenchmarkTypedPublishSyncStruct measures TypedBus sync publish with a struct.
+// Expected: 0 B/op, 0 allocs/op.
+func BenchmarkTypedPublishSyncStruct(b *testing.B) {
+	bus := eventbus.NewTyped[testMoveEvent]()
+	bus.Subscribe("sync", func(e testMoveEvent) {}, 1<<20)
+	b.Cleanup(func() { bus.Drain() })
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bus.PublishSync("sync", testMoveEvent{EntityID: 1, X: 100, Z: 200})
 	}
 }

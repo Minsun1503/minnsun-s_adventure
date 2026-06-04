@@ -27,6 +27,16 @@ func fakeSpatialRadiusFactory(neighbors map[ecs.Entity][]ecs.Entity) SpatialQuer
 	}
 }
 
+// collectEvents is a helper that collects AOI events from the callback-based UpdateAll.
+func collectEvents(m *AOIManager, posGetter func(ecs.Entity) (ecs.PositionComponent, bool), query SpatialQueryFunc) map[ecs.Entity][]AOIEvent {
+	results := make(map[ecs.Entity][]AOIEvent)
+	m.UpdateAll(posGetter, query, func(watcher ecs.Entity, event AOIEvent) bool {
+		results[watcher] = append(results[watcher], event)
+		return true
+	})
+	return results
+}
+
 func TestRegisterAndUpdate(t *testing.T) {
 	m := NewAOIManager()
 	e1 := ecs.Entity(1)
@@ -41,7 +51,7 @@ func TestRegisterAndUpdate(t *testing.T) {
 		e1: {e2},
 		e2: {e1},
 	}
-	results := m.UpdateAll(testPosGetter, fakeSpatialRadiusFactory(neighbors))
+	results := collectEvents(m, testPosGetter, fakeSpatialRadiusFactory(neighbors))
 
 	// Both should have enter events for each other
 	e1Events := results[e1]
@@ -67,14 +77,14 @@ func TestLeaveEvent(t *testing.T) {
 		e1: {e2},
 		e2: {e1},
 	}
-	m.UpdateAll(testPosGetter, fakeSpatialRadiusFactory(neighbors))
+	collectEvents(m, testPosGetter, fakeSpatialRadiusFactory(neighbors))
 
 	// Second tick: e1 sees nothing, e2 sees nothing (e1 moved away)
 	neighbors2 := map[ecs.Entity][]ecs.Entity{
 		e1: {},
 		e2: {},
 	}
-	results := m.UpdateAll(testPosGetter, fakeSpatialRadiusFactory(neighbors2))
+	results := collectEvents(m, testPosGetter, fakeSpatialRadiusFactory(neighbors2))
 
 	// Both should have leave events
 	e1Events := results[e1]
@@ -98,8 +108,8 @@ func TestNoChange(t *testing.T) {
 	neighbors := map[ecs.Entity][]ecs.Entity{
 		e1: {e2},
 	}
-	m.UpdateAll(testPosGetter, fakeSpatialRadiusFactory(neighbors))
-	results := m.UpdateAll(testPosGetter, fakeSpatialRadiusFactory(neighbors))
+	collectEvents(m, testPosGetter, fakeSpatialRadiusFactory(neighbors))
+	results := collectEvents(m, testPosGetter, fakeSpatialRadiusFactory(neighbors))
 
 	if len(results) != 0 {
 		t.Fatalf("expected no events when state unchanged, got %+v", results)
@@ -115,14 +125,14 @@ func TestReenter(t *testing.T) {
 
 	// Tick 1: see e2
 	neighbors1 := map[ecs.Entity][]ecs.Entity{e1: {e2}}
-	m.UpdateAll(testPosGetter, fakeSpatialRadiusFactory(neighbors1))
+	collectEvents(m, testPosGetter, fakeSpatialRadiusFactory(neighbors1))
 
 	// Tick 2: e2 leaves
 	neighbors2 := map[ecs.Entity][]ecs.Entity{e1: {}}
-	m.UpdateAll(testPosGetter, fakeSpatialRadiusFactory(neighbors2))
+	collectEvents(m, testPosGetter, fakeSpatialRadiusFactory(neighbors2))
 
 	// Tick 3: e2 re-enters
-	results := m.UpdateAll(testPosGetter, fakeSpatialRadiusFactory(neighbors1))
+	results := collectEvents(m, testPosGetter, fakeSpatialRadiusFactory(neighbors1))
 
 	e1Events := results[e1]
 	if len(e1Events) != 1 || e1Events[0].Type != EventEnter || e1Events[0].Target != e2 {
@@ -155,10 +165,13 @@ func BenchmarkUpdateAll(b *testing.B) {
 		m.RegisterWatcher(e, 60.0)
 	}
 
+	// Collect sink prevents compiler from eliminating the callback
+	var sink int
+
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		results := m.UpdateAll(
+		m.UpdateAll(
 			func(id ecs.Entity) (ecs.PositionComponent, bool) {
 				return ecs.PositionComponent{MapID: 1, X: 10, Z: 10}, true
 			},
@@ -167,7 +180,11 @@ func BenchmarkUpdateAll(b *testing.B) {
 				*ps = (*ps)[:0]
 				return ps
 			},
+			func(watcher ecs.Entity, event AOIEvent) bool {
+				sink++
+				return true
+			},
 		)
-		_ = results
 	}
+	_ = sink
 }
