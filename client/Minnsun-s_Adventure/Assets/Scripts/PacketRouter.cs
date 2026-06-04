@@ -11,8 +11,9 @@ public class PacketRouter : MonoBehaviour
 
     private void Awake()
     {
-        entityManager = FindObjectOfType<EntityManager>();
-        uiManager     = FindObjectOfType<UIManager>();
+        // Use GetComponent instead of FindObjectOfType — all on same root GameObject
+        entityManager = GetComponent<EntityManager>();
+        uiManager     = GetComponentInChildren<UIManager>();
     }
 
     /// <summary>
@@ -25,6 +26,14 @@ public class PacketRouter : MonoBehaviour
     {
         switch (opcode)
         {
+            case Opcodes.S2CSuccess:
+            {
+                var packet = Decoders.DecodeSuccess(data);
+                if (packet.HasValue && entityManager != null)
+                    entityManager.SetLocalPlayerID(packet.Value.EntityID);
+                break;
+            }
+
             case Opcodes.S2CSpawnEntity:
             {
                 var packet = Decoders.DecodeSpawn(data);

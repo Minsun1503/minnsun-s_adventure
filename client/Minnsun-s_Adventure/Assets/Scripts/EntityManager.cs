@@ -11,13 +11,35 @@ public class EntityManager : MonoBehaviour
     /// <summary>All active entities keyed by server EntityID.</summary>
     public Dictionary<ulong, GameObject> Entities { get; private set; } = new Dictionary<ulong, GameObject>();
 
-    /// <summary>The local player's EntityID — set when first StatsSync arrives after login.</summary>
+    /// <summary>The local player's EntityID — set from S2CSuccess packet after login.</summary>
     public ulong LocalPlayerID { get; set; } = 0;
 
     /// <summary>Reference to the root transform that parents all entity GameObjects.</summary>
     public Transform EntityRoot { get; set; }
 
-    // ─── Spawn / Despawn ─────────────────────────────────────────────
+    private UIManager cachedUIManager;
+
+    private void Start()
+    {
+        // Cache UIManager reference once instead of FindObjectOfType on every stats update
+        cachedUIManager = GetComponentInChildren<UIManager>();
+    }
+
+    /// <summary>
+    /// Set LocalPlayerID from a trusted server source (S2CSuccess opcode 0x01 with EntityID).
+    /// Called by PacketRouter upon receiving the success packet after login.
+    /// </summary>
+    public void SetLocalPlayerID(ulong entityID)
+    {
+        if (LocalPlayerID != 0 && LocalPlayerID != entityID)
+        {
+            Debug.LogWarning($"[EntityMgr] LocalPlayerID override: {LocalPlayerID} → {entityID}");
+        }
+        LocalPlayerID = entityID;
+        Debug.Log($"[EntityMgr] LocalPlayerID set to {entityID} (from S2CSuccess)");
+    }
+
+    // ─── Spawn / Despawn ───────────────────────────────────────────────────────────
 
     /// <summary>
     /// Spawn a new entity GameObject. Tags: "Player" / "Monster" / "Item".
@@ -88,7 +110,7 @@ public class EntityManager : MonoBehaviour
         Destroy(go);
     }
 
-    // ─── Updates ────────────────────────────────────────────────────
+    // ─── Updates ───────────────────────────────────────────────────────────────────
 
     /// <summary>Update an entity's world position (immediate snap, no lerp yet).</summary>
     public void UpdatePosition(Decoders.PositionPacket packet)
@@ -125,19 +147,12 @@ public class EntityManager : MonoBehaviour
         stats.Dam   = packet.Dam;
         stats.Level = packet.Level;
 
-        // If this is the local player, set LocalPlayerID (first time)
-        if (LocalPlayerID == 0)
-        {
-            LocalPlayerID = packet.EntityID;
-            Debug.Log($"[EntityMgr] LocalPlayerID set to {packet.EntityID}");
-        }
-
         // Notify HUD if this is the local player
+        // LocalPlayerID is set by SetLocalPlayerID (from S2CSuccess), NOT guessed here
         if (packet.EntityID == LocalPlayerID)
         {
-            var ui = FindObjectOfType<UIManager>();
-            if (ui != null)
-                ui.UpdateHUD(packet);
+            if (cachedUIManager != null)
+                cachedUIManager.UpdateHUD(packet);
         }
     }
 

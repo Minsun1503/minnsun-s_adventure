@@ -8,9 +8,10 @@ using UnityEngine;
 /// </summary>
 public class Bootstrap : MonoBehaviour
 {
-    [Header("Dev Login (auto-send after connect)")]
-    [SerializeField] private string devUsername = "test";
-    [SerializeField] private string devPassword = "test";
+    // Dev login credentials — hardcoded constants since this is dev-only.
+    // There is no inspector; all configuration lives in code per project philosophy.
+    private const string DevUsername = "test";
+    private const string DevPassword = "test";
 
     private NetworkManager networkManager;
     private bool loginSent;
@@ -70,8 +71,8 @@ public class Bootstrap : MonoBehaviour
         if (loginSent) return;
         loginSent = true;
 
-        Debug.Log($"[Bootstrap] Connected! Sending login as '{devUsername}'...");
-        byte[] payload = BuildLoginPayload(devUsername, devPassword);
+        Debug.Log($"[Bootstrap] Connected! Sending login as '{DevUsername}'...");
+        byte[] payload = BuildLoginPayload(DevUsername, DevPassword);
         networkManager.SendPacket(Opcodes.C2SLogin, payload);
     }
 

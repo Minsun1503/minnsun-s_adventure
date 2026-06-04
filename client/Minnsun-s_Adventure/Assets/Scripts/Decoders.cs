@@ -83,6 +83,12 @@ public static class Decoders
         public string Message;
     }
 
+    public struct SuccessPacket
+    {
+        public ulong EntityID;
+        public string Message;
+    }
+
     // ─── Decoders ───────────────────────────────────────────────────────
 
     /// <summary>
@@ -235,6 +241,31 @@ public static class Decoders
         }
 
         p.Message = Encoding.UTF8.GetString(data, msgOffset + 2, msgLen);
+        return p;
+    }
+
+    /// <summary>
+    /// Decode Success payload (opcode 0x01).
+    /// Layout: EntityID(8) + MessageLen(2) + Message(N)
+    /// Used to set LocalPlayerID from a trusted server source.
+    /// </summary>
+    public static SuccessPacket? DecodeSuccess(byte[] data)
+    {
+        if (data == null || data.Length < 10) // 8 + 2 minimum
+        {
+            Debug.LogWarning("[Decode] Success payload too short");
+            return null;
+        }
+
+        SuccessPacket p;
+        p.EntityID = ReadUint64BE(data, 0);
+        ushort msgLen = ReadUint16BE(data, 8);
+        if (data.Length < 10 + msgLen)
+        {
+            Debug.LogWarning("[Decode] Success payload truncated");
+            return null;
+        }
+        p.Message = Encoding.UTF8.GetString(data, 10, msgLen);
         return p;
     }
 

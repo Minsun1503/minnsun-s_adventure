@@ -13,6 +13,8 @@ public static class Opcodes
     public const byte C2SHeartbeat    = 21;
 
     // Server → Client — these are actually used for packet routing
+    public const byte S2CSuccess       = 0x01;
+    public const byte S2CError         = 0xFF;
     public const byte S2CSpawnEntity   = 0x10;
     public const byte S2CDespawnEntity = 0x11;
     public const byte S2CPositionSync  = 0x12;

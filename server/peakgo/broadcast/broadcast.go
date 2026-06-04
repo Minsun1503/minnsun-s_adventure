@@ -92,6 +92,14 @@ func encodeSuccessPayload(dst []byte, message string) {
 	copy(dst[2:], message)
 }
 
+// encodeSuccessWithEntityIDPayload encodes a success payload that also carries
+// the local player's EntityID: [EntityID uint64 BE][MessageLen uint16 BE][Message UTF-8]
+func encodeSuccessWithEntityIDPayload(dst []byte, entityID uint64, message string) {
+	codec.WriteUint64(dst[0:8], entityID)
+	codec.WriteUint16(dst[8:10], uint16(len(message)))
+	copy(dst[10:], message)
+}
+
 func encodeDespawnEntityPayload(dst []byte, p DespawnPayload) {
 	codec.WriteUint64(dst[0:8], p.EntityID)
 }
@@ -131,6 +139,7 @@ func WriteError(dst []byte, errorCode uint16, message string) []byte {
 }
 
 // BuildSuccess constructs an S2C success packet (opcode 0x01).
+// Format: [Length 2B][Opcode 0x01][MessageLen 2B][Message UTF-8]
 func BuildSuccess(message string) []byte {
 	payloadLen := 2 + len(message)
 	pkt := make([]byte, 3+payloadLen)
@@ -152,6 +161,34 @@ func WriteSuccess(dst []byte, message string) []byte {
 	binary.BigEndian.PutUint16(dst[0:2], uint16(1+payloadLen))
 	dst[2] = OpcodeSuccess
 	encodeSuccessPayload(dst[3:], message)
+	return dst
+}
+
+// BuildSuccessWithEntityID constructs an S2C success packet (opcode 0x01) that
+// also carries the local player's EntityID so the client can set LocalPlayerID
+// from a trusted server source instead of guessing from StatsSync order.
+// Format: [Length 2B][Opcode 0x01][EntityID 8B][MessageLen 2B][Message UTF-8]
+func BuildSuccessWithEntityID(entityID uint64, message string) []byte {
+	payloadLen := 8 + 2 + len(message) // entityID + messageLen + message
+	pkt := make([]byte, 3+payloadLen)
+	binary.BigEndian.PutUint16(pkt[0:2], uint16(1+payloadLen))
+	pkt[2] = OpcodeSuccess
+	encodeSuccessWithEntityIDPayload(pkt[3:], entityID, message)
+	return pkt
+}
+
+// WriteSuccessWithEntityID writes an S2C success packet with EntityID into dst (0 allocs).
+func WriteSuccessWithEntityID(dst []byte, entityID uint64, message string) []byte {
+	payloadLen := 8 + 2 + len(message)
+	needed := 3 + payloadLen
+	if cap(dst) >= needed {
+		dst = dst[:needed]
+	} else {
+		dst = make([]byte, needed)
+	}
+	binary.BigEndian.PutUint16(dst[0:2], uint16(1+payloadLen))
+	dst[2] = OpcodeSuccess
+	encodeSuccessWithEntityIDPayload(dst[3:], entityID, message)
 	return dst
 }
 

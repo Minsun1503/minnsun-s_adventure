@@ -1,18 +1,18 @@
 using UnityEngine;
-using UnityEngine.UI;
+using TMPro;
 
 /// <summary>
 /// Manages all in-game UI: HUD, chat box, combat damage numbers, notices.
-/// All UI elements are created in code using uGUI (no Canvas prefabs).
+/// All UI elements are created in code using TextMeshPro (no Canvas prefabs).
 /// </summary>
 public class UIManager : MonoBehaviour
 {
-    // ─── HUD Elements ──────────────────────────────────────────────
-    private Text hudText;
-    private Text noticeText;
-    private Text chatText;
+    // ─── HUD Elements ─────────────────────────────────────────────────────
+    private TextMeshProUGUI hudText;
+    private TextMeshProUGUI noticeText;
+    private TextMeshProUGUI chatText;
 
-    // ─── Chat buffer ───────────────────────────────────────────────
+    // ─── Chat buffer ─────────────────────────────────────────────────────
     private readonly System.Collections.Generic.List<string> chatLines = new System.Collections.Generic.List<string>();
     private const int MaxChatLines = 50;
 
@@ -43,7 +43,7 @@ public class UIManager : MonoBehaviour
         hudRT.anchoredPosition = new Vector2(10, -10);
         hudRT.sizeDelta = new Vector2(300, 120);
 
-        hudText = MakeText(hudGO, "HP: - / -\nMP: - / -\nLv: -  ATK: -");
+        hudText = MakeTextMeshPro(hudGO, "HP: - / -\nMP: - / -\nLv: -  ATK: -");
 
         // ── Notice (center) ──
         GameObject noticeGO = new GameObject("Notice");
@@ -54,8 +54,8 @@ public class UIManager : MonoBehaviour
         noticeRT.pivot = new Vector2(0.5f, 0.5f);
         noticeRT.sizeDelta = new Vector2(600, 60);
 
-        noticeText = MakeText(noticeGO, "");
-        noticeText.alignment = TextAnchor.MiddleCenter;
+        noticeText = MakeTextMeshPro(noticeGO, "");
+        noticeText.alignment = TextAlignmentOptions.Center;
         noticeText.fontSize = 24;
         noticeText.color = Color.yellow;
 
@@ -69,8 +69,8 @@ public class UIManager : MonoBehaviour
         chatRT.anchoredPosition = new Vector2(10, 10);
         chatRT.sizeDelta = new Vector2(500, 200);
 
-        chatText = MakeText(chatGO, "");
-        chatText.alignment = TextAnchor.LowerLeft;
+        chatText = MakeTextMeshPro(chatGO, "");
+        chatText.alignment = TextAlignmentOptions.BottomLeft;
         chatText.fontSize = 14;
         chatText.color = Color.white;
 
@@ -79,8 +79,8 @@ public class UIManager : MonoBehaviour
         dmgRoot.transform.SetParent(canvasGO.transform, false);
     }
 
-    /// <summary>Helper to create a Text on a child GameObject.</summary>
-    private static Text MakeText(GameObject parent, string initialText)
+    /// <summary>Helper to create a TextMeshProUGUI on a child GameObject.</summary>
+    private static TextMeshProUGUI MakeTextMeshPro(GameObject parent, string initialText)
     {
         GameObject go = new GameObject("Text");
         go.transform.SetParent(parent.transform, false);
@@ -91,16 +91,15 @@ public class UIManager : MonoBehaviour
         rt.offsetMin = Vector2.zero;
         rt.offsetMax = Vector2.zero;
 
-        Text text = go.AddComponent<Text>();
+        TextMeshProUGUI text = go.AddComponent<TextMeshProUGUI>();
         text.text = initialText;
-        text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
         text.fontSize = 16;
         text.color = Color.white;
-        text.supportRichText = true;
+        text.richText = true;
         return text;
     }
 
-    // ─── Public API ────────────────────────────────────────────────
+    // ─── Public API ──────────────────────────────────────────────────────
 
     /// <summary>Update the HUD with the local player's latest stats.</summary>
     public void UpdateHUD(Decoders.StatsPacket stats)

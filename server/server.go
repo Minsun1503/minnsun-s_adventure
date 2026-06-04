@@ -185,6 +185,13 @@ func processLogin(conn net.Conn) {
 
 		logger.Info("[CONNECT] %s (entity %d) from %s", snap.Meta.Name, playerEntity, conn.RemoteAddr())
 
+		// Send S2CSuccess with EntityID so client can set LocalPlayerID from a trusted source.
+		successWithID := broadcast.BuildSuccessWithEntityID(
+			uint64(playerEntity),
+			"Login successful.",
+		)
+		_ = netio.WritePacket(conn, successWithID)
+
 		// Send the player's own SpawnEntity so the client can create their character.
 		selfSpawn := broadcast.BuildSpawnEntity(broadcast.SpawnPayload{
 			EntityID: uint64(playerEntity),
