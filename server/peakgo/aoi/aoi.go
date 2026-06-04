@@ -21,6 +21,10 @@ type AOIEvent struct {
 }
 
 // aoiEventPool caches slices of AOIEvent to avoid per-tick allocations.
+// EntityListPool recycles *[]ecs.Entity slices for AOI spatial queries.
+// Used by aoiSpatialQuery in world/aoi_bridge.go to avoid per-frame slice allocation.
+var EntityListPool = pool.NewSlicePool[ecs.Entity](32)
+
 var aoiEventPool = pool.NewSlicePool[AOIEvent](32)
 
 // neighborSet is a small set of entity IDs for fast lookup.
@@ -85,6 +89,7 @@ func (m *AOIManager) updateOne(entity ecs.Entity, w *Watcher, pos ecs.PositionCo
 	if raw == nil {
 		return nil
 	}
+	defer EntityListPool.Put(raw)
 	entries := *raw
 
 	// Build current neighbor set

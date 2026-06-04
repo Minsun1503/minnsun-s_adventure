@@ -81,3 +81,6 @@
 [2026-06-03 22:39:47.272] [INFO ] [BOOT] Connection login worker #3 active.
 [2026-06-03 22:39:47.272] [INFO ] [BOOT] MCP admin interface available on http://localhost:8080/mcp
 [2026-06-03 22:39:47.273] [INFO ] [MCP] JSON-RPC server listening on :8080
+[2026-06-03 22:46:28.990] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-03 22:46:49.526] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-03 22:49:12.615] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10

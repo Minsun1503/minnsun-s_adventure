@@ -41,12 +41,13 @@ func aoiSpatialQuery(origin ecs.PositionComponent, worldRadius float64, excludeI
 		FreeQueryCandidates(candidates)
 		return nil
 	}
-	ids := make([]ecs.Entity, len(*candidates))
-	for i, entry := range *candidates {
-		ids[i] = entry.ID
+	// Use pooled slice instead of allocating a fresh slice
+	ids := aoi.EntityListPool.Get()
+	for _, entry := range *candidates {
+		*ids = append(*ids, entry.ID)
 	}
 	FreeQueryCandidates(candidates)
-	return &ids
+	return ids
 }
 
 // ProcessAOIEvents updates the AOI watcher for a single entity, producing enter/leave
@@ -115,6 +116,10 @@ func sendDespawnTo(conn net.Conn, target ecs.Entity) {
 // watcher state to deliver delta (enter/leave) targeted packets.
 func BroadcastToNeighborsDelta(origin ecs.PositionComponent, data []byte, excludeID ecs.Entity) {
 	candidates := GlobalSpatialGrid.QueryRadius(origin, WatcherRadius, excludeID)
+	if candidates == nil {
+		return
+	}
+	defer FreeQueryCandidates(candidates)
 	for _, entry := range *candidates {
 		connComp, hasConn := ecs.GlobalRegistry.GetConnection(entry.ID)
 		if !hasConn || connComp.Conn == nil {
@@ -124,5 +129,4 @@ func BroadcastToNeighborsDelta(origin ecs.PositionComponent, data []byte, exclud
 			connComp.Conn.Close()
 		}
 	}
-	FreeQueryCandidates(candidates)
 }

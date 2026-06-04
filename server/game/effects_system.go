@@ -68,7 +68,7 @@ func RunStatusEffectsSystem() {
 								protocol.BroadcastToNeighbors(pos, []byte(fmt.Sprintf("[DEATH] %s (#%d) succumbed to %s.\r\n", meta.Name, id, effect.Type)), id)
 							}
 
-							DeathSystem(id, 0, meta, ecs.MetadataComponent{Name: effect.Type, Type: ecs.EntityMonster}) // status_effect not in EntityType enum; fallback to monster for logging
+							DeathSystem(id, 0, meta, ecs.MetadataComponent{Name: effect.Type, Type: ecs.EntityMonster}, effect.Value) // status_effect not in EntityType enum; fallback to monster for logging
 							continue                                                                                    // Stop processing an already erased row anchor
 						}
 					}

@@ -21,7 +21,9 @@ func testPosGetter(id ecs.Entity) (ecs.PositionComponent, bool) {
 func fakeSpatialRadiusFactory(neighbors map[ecs.Entity][]ecs.Entity) SpatialQueryFunc {
 	return func(pos ecs.PositionComponent, radius float64, excludeID ecs.Entity) *[]ecs.Entity {
 		n := neighbors[excludeID]
-		return &n
+		ps := EntityListPool.Get()
+		*ps = append(*ps, n...)
+		return ps
 	}
 }
 
@@ -161,8 +163,9 @@ func BenchmarkUpdateAll(b *testing.B) {
 				return ecs.PositionComponent{MapID: 1, X: 10, Z: 10}, true
 			},
 			func(pos ecs.PositionComponent, radius float64, excludeID ecs.Entity) *[]ecs.Entity {
-				empty := make([]ecs.Entity, 0)
-				return &empty
+				ps := EntityListPool.Get()
+				*ps = (*ps)[:0]
+				return ps
 			},
 		)
 		_ = results

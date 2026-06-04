@@ -117,7 +117,7 @@ func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
 
 	if remaining <= 0 {
 		result.Killed = true
-		DeathSystem(targetID, attackerID, targetMeta, attackerMeta)
+		DeathSystem(targetID, attackerID, targetMeta, attackerMeta, damage)
 
 		// Roll loot and spawn items on the ground if the killed target is a monster and attacker is a player.
 		if targetMeta.Type == ecs.EntityMonster && attackerMeta.Type == ecs.EntityPlayer {
@@ -218,14 +218,13 @@ func DamageSystem(targetID ecs.Entity, amount int) int {
 //   - killerID:    entity that killed the target (may be 0 for environmental/status effect deaths).
 //   - targetMeta:  pre-fetched metadata (entity is about to be removed).
 //   - killerMeta:  attacker's metadata for the kill broadcast message.
-func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.MetadataComponent) {
+func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.MetadataComponent, damage int) {
 	registry := ecs.GlobalRegistry
 
 	var killMsg string
 	if killerMeta.Type == ecs.EntityMonster {
-		stats, _ := registry.GetStats(killerID)
 		killMsg = fmt.Sprintf("[DEATH] %s (#%d) struck Player %s for %d damage and DEFEATED them!\r\n",
-			killerMeta.Name, killerID, targetMeta.Name, stats.Dam)
+			killerMeta.Name, killerID, targetMeta.Name, damage)
 	} else {
 		killMsg = fmt.Sprintf("[COMBAT] %s was slain by %s!\r\n",
 			targetMeta.Name, killerMeta.Name)

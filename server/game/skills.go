@@ -63,7 +63,7 @@ func HandleSkillCastingSystem(casterID ecs.Entity, skillID uint64, targetID ecs.
 		// Sync local map witnesses visually
 		protocol.BroadcastToNeighbors(pos, []byte(combatNotice), casterID)
 
-		DeathSystem(targetID, casterID, targetMeta, casterMeta)
+		DeathSystem(targetID, casterID, targetMeta, casterMeta, damageCalculated)
 	} else {
 		combatNotice = fmt.Sprintf("[SPELL] Player %s casted %s on %s for %d damage! (%s HP: %d)\r\n",
 			casterMeta.Name, skill.Name, targetMeta.Name, damageCalculated, targetMeta.Name, remainingHP)

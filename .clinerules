@@ -14,56 +14,37 @@ ANTI-CHEAT: Packet di chuyển phải được kiểm tra khoảng cách qua gma
 
 REUSE UTILITIES: CẤM viết lại hoặc dùng thư viện ngoài cho A*, RNG, Heap, Pool, Math... BẮT BUỘC tái sử dụng các package tối ưu trong server/peakgo/ (ví dụ: astar, rng, pool, gmath, threat, combat).
 
-ZERO-ALLOC TARGET & BENCHMARK (0 ns/op, 0 B/op, 0 allocs/op): Mỗi khi chỉnh sửa bất kỳ file nào trong server/peakgo/, BẮT BUỘC chạy benchmark riêng cho gói đó bằng cú pháp Pipe an toàn bảo vệ nháy đơn:
+ZERO-ALLOC TARGET & BENCHMARK (0 ns/op, 0 B/op, 0 allocs/op): Mỗi khi chỉnh sửa bất kỳ file nào trong server/peakgo/, BẮT BUỘC chạy benchmark riêng cho gói đó bằng cú pháp CMD (cmd /c) an toàn:
 
-PowerShell
-powershell -Command "Start-Job -ScriptBlock { go test -bench=. -benchmem ./peakgo/tên_gói/... } -WorkingDirectory 'c:\Minnsun''s Adventure\server' | Wait-Job -Timeout 45 | Receive-Job; Get-Job | Remove-Job -Force"
+cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && go test -bench=. -benchmem ./peakgo/tên_gói/..."
 Lặp lại việc tối ưu cho đến khi đạt chỉ số Zero-Allocation mới được coi là hoàn thành tác vụ.
 
-II. WINDOWS POWERSHELL & BUILD/TEST LIFECYCLE CONTROLS
+II. CMD/POWERSHELL & BUILD/TEST LIFECYCLE CONTROLS
 File Locking & Redundant Builds: Tuyệt đối KHÔNG chạy go build hoặc go test nếu code đã được xác nhận đúng cú pháp bởi static phân tích/MCP compiler, hoặc khi server.exe đang chạy/MCP Bridge port đang xanh (Tránh File Locking gây crash hệ thống trên Windows - tỉ lệ 70%). Ưu tiên dùng code_get_outline hoặc go vet để check cú pháp nhẹ. Chỉ chạy go test khi người dùng yêu cầu hoặc cần chạy benchmark tối ưu hóa.
 
-TUYỆT ĐỐI CẤM TOÁN TỬ &&: PowerShell 5.1 không hỗ trợ && (gây lỗi ParserError hoặc đứng im đóng băng câu lệnh). Sử dụng dấu chấm phẩy ; hoặc xuống dòng để tách các câu lệnh độc lập.
+BẮT BUỘC dùng CMD /C cho các lệnh phức tạp: Sử dụng CMD để di chuyển thư mục (cd) và chạy chuỗi lệnh thông qua toán tử && mà không sợ bị nuốt ký tự hay lỗi mở rộng biến trong PowerShell:
+cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && <lệnh_cần_chạy>"
 
-CẤM CHẠY LỆNH CD THỦ CÔNG: Do thư mục chứa dấu nháy đơn (Minnsun's), việc chạy lệnh cd trần hoặc bọc nháy sai cách sẽ kích hoạt dấu >> (PowerShell bị nuốt ký tự và đứng im đợi nhập tiếp) gây đơ tiến trình 100%.
+III. REFACTORING, FILE PATCHING & TERMINAL SAFETY
+CẤM DÙNG TERMINAL ĐỂ TẠO/SỬA FILE: Nghiêm cấm dùng echo, cat, Set-Content, Out-File, >, >> để tạo hoặc vá code (tránh lỗi "Double Interpolation" với các ký tự đặc biệt như $, \, `, * trên PowerShell). Hãy sử dụng các công cụ quản lý file tích hợp mặc định (write_to_file, replace_file_content, multi_replace_file_content).
 
-III. MANDATORY MCP TOOLS & RECOVERY PROCESS
-Nghiêm cấm dùng tool tích hợp read_file / search_files cho các tệp .go, .sql, .json trong thư mục server/. Vi phạm sẽ bị hệ thống tự động DENY.
+Go Assembly (Plan 9 ASM): Các hằng số/phép toán (như NodeSZ*4) phải được tự tính toán ra giá trị số cụ thể (Immediate Constant, vị dụ: $96) trước khi ghi vào file .s để tránh xung đột cú pháp với compiler.
 
-Bắt buộc dùng MCP Token-Savers:
+Refactoring Workflow: Xuất toàn bộ file hoặc chính xác git diff nếu được yêu cầu. DỪNG LẠI NGAY sau khi cung cấp nội dung file, không tự ý chạy trình biên dịch/linter. Đảm bảo mọi log được bọc trong guard condition (ví dụ: if loggate.DebugEnabled()) để tránh cấp phát chu ích trên Production.
 
-Xem cấu trúc tổng quát: Gọi code_get_outline.
+V. COMMAND TIMEOUT & RUNNING EXAMPLES (USING CMD)
+Mọi lệnh chạy test, vet, build phải dùng cú pháp CMD để đảm bảo tính tương thích và đơn giản:
 
-Trích xuất chi tiết code Go (struct, func, method...): Gọi code_extract (với list_classes, extract_member,...).
+* **Khi chạy go vet:**
+  cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && go vet ./..."
 
-Tìm kiếm & thay thế: Gọi replace.
+* **Khi chạy go test/benchmark:**
+  cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && go test -bench=BenchmarkUpdateAll -benchmem ./peakgo/aoi"
 
-Xem DB Schema: Gọi db_get_schema.
+* **Khi build Game Server (`server.exe`):**
+  cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && go build -o server.exe ."
 
-Quy trình sửa lỗi công cụ (CẤM CHẠY TRỐN): Nếu gọi MCP tool bị lỗi/mismatch, NGHIÊM CẤM dùng các lệnh tự chế qua Terminal để đối phó. Khi lỗi đến lần thứ 3, Agent BẮT BUỘC phải mở file server/cmd/mcp-bridge/main.go để kiểm tra logic (khoảng trắng, newline, CRLF/LF...), sửa code, build lại bridge (go build -o ../../mcp-bridge.exe), khởi động lại server và thử lại cho tới khi công cụ MCP chạy chính xác hoàn toàn. Vi phạm sẽ bị DENY ngay lập tức.
-
-IV. REFACTORING, FILE PATCHING & TERMINAL SAFETY
-CẤM DÙNG TERMINAL ĐỂ TẠO/SỬA FILE: Nghiêm cấm dùng echo, cat, Set-Content, Out-File, >, >> để tạo hoặc vá code (tránh lỗi "Double Interpolation" với các ký tự đặc biệt như $, \, `, * trên PowerShell). BẮT BUỘC dùng MCP File System Tools (write_to_file, edit_file_multi, patch).
-
-Go Assembly (Plan 9 ASM): Các hằng số/phép toán (như NodeSZ*4) phải được tự tính toán ra giá trị số cụ thể (Immediate Constant, ví dụ: $96) trước khi ghi vào file .s để tránh xung đột cú pháp với compiler.
-
-Refactoring Workflow: Xuất toàn bộ file hoặc chính xác git diff nếu được yêu cầu. DỪNG LẠI NGAY sau khi cung cấp nội dung file, không tự ý chạy trình biên dịch/linter. Đảm bảo mọi log được bọc trong guard condition (ví dụ: if loggate.DebugEnabled()) để tránh cấp phát chuỗi vô ích trên Production.
-
-V. COMMAND TIMEOUT & HUNG PROCESS RECOVERY (FIXED FOR PS 5.1)
-CÚ PHÁP MẪU BẮT BUỘC (TƯƠNG THÍCH POWERSHELL 5.1): Để tránh lỗi thiếu tham số WorkingDirectory trên PS 5.1 và không bị kẹt dấu nháy đơn, bắt buộc sử dụng cờ -ArgumentList để truyền path an toàn vào trong Job:
-
-Khi chạy go vet (Giới hạn tối đa 20 giây - Chuẩn PS 5.1):
-
-PowerShell
-powershell -Command "Start-Job -ScriptBlock { param($p); Set-Location $p; go vet ./... } -ArgumentList 'c:\Minnsun''s Adventure\server' | Wait-Job -Timeout 20 | Receive-Job; Get-Job | Remove-Job -Force"
-     *(Giải thích: Dùng `param($p)` và `Set-Location $p` kết hợp với nháy đơn kép `''` ở `-ArgumentList` giúp cô lập hoàn toàn đường dẫn, chạy mượt mà trên mọi phiên bản PowerShell)*.
-
-   * **Khi build Game Server (`server.exe`):**
-     ```powershell
-     powershell -Command "Start-Job -ScriptBlock { param($p); Set-Location $p; go build -o server.exe . } -ArgumentList 'c:\Minnsun''s Adventure\server' | Wait-Job -Timeout 30 | Receive-Job; Get-Job | Remove-Job -Force"
-Khi build MCP Bridge (mcp-bridge.exe):
-
-PowerShell
-powershell -Command "Start-Job -ScriptBlock { param($p); Set-Location $p; go build -o mcp-bridg
+* **Khi build MCP Bridge (mcp-bridge.exe):**
+  cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && go build -o mcp-bridge.exe ./cmd/mcp-bridge"
 
 Mọi hành vi vi phạm các quy tắc trên sẽ dẫn đến việc tiến trình bị đóng (DENY) ngay lập tức.
