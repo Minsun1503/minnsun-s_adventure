@@ -1,8 +1,38 @@
+using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Threading;
 using UnityEngine;
 
+/// <summary>
+/// Minimal main-thread action queue for Unity.
+/// Callbacks are flushed in Update() on the Unity main thread.
+/// </summary>
+public static class UnityMainThreadDispatcher
+{
+    private static readonly ConcurrentQueue<Action> queue = new ConcurrentQueue<Action>();
+
+    public static void Enqueue(Action action)
+    {
+        queue.Enqueue(action);
+    }
+
+    /// <summary>Call from MonoBehaviour.Update() once per frame.</summary>
+    public static void Flush()
+    {
+        while (queue.TryDequeue(out Action action))
+        {
+            try { action(); }
+            catch (Exception ex) { Debug.LogError($"[Dispatcher] {ex.Message}"); }
+        }
+    }
+}
+
+/// <summary>
+/// TCP network client with binary packet framing, heartbeat, and main-thread dispatch.
+/// Attach to a persistent GameObject; call StartHeartbeat() after login success.
+/// </summary>
 public class NetworkClient : MonoBehaviour
 {
     private TcpClient tcpClient;
@@ -29,6 +59,11 @@ public class NetworkClient : MonoBehaviour
 
         // Start heartbeat coroutine after login success
         // Call StartHeartbeat() when login succeeds
+    }
+
+    private void Update()
+    {
+        UnityMainThreadDispatcher.Flush();
     }
 
     public void StartHeartbeat()
@@ -62,7 +97,7 @@ public class NetworkClient : MonoBehaviour
                 if (payload.Length > 0)
                     stream.Write(payload, 0, payload.Length);
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 Debug.LogError($"[NET] Send error: {ex.Message}");
                 Disconnect();
@@ -109,14 +144,14 @@ public class NetworkClient : MonoBehaviour
                 // Process other opcodes on main thread
                 byte[] data = new byte[length - 1];
                 if (data.Length > 0)
-                    System.Buffer.BlockCopy(payload, 1, data, 0, data.Length);
+                    Buffer.BlockCopy(payload, 1, data, 0, data.Length);
 
                 UnityMainThreadDispatcher.Enqueue(() =>
                 {
                     HandlePacket(opcode, data);
                 });
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 if (connected)
                     Debug.LogError($"[NET] Receive error: {ex.Message}");
@@ -144,7 +179,8 @@ public class NetworkClient : MonoBehaviour
     private void OnDestroy()
     {
         Disconnect();
-        if (receiveThread != null && receiveThread.IsAlive)
-            receiveThread.Abort();
+        // receiveThread is IsBackground → auto-terminates when process exits.
+        // stream.Close() in Disconnect() causes ReceiveLoop stream.Read to throw →
+        // loop exits naturally. No need for Thread.Abort().
     }
 }
