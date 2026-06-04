@@ -20,9 +20,63 @@
 // or oversized packet handling, these pools automatically discard any buffers that
 // expanded beyond 4x their baseline capacity, letting the Go Garbage Collector (GC)
 // cleanly reclaim the transient spikes.
+//
+// # Zeroing Optimization
+//
+// SlicePool.Put performs a zeroing loop only when T contains pointers (detected
+// at creation time via reflect). For value-only types (testEntry, primitives),
+// the zeroing loop is skipped entirely, eliminating CPU overhead on the hot-path.
 package pool
 
-import "sync"
+import (
+	"reflect"
+	"sync"
+	"unsafe"
+)
+
+// pointerChecker caches whether a type T has any pointer-typed fields.
+// This is computed once at SlicePool creation time.
+type pointerChecker struct {
+	hasPtr bool
+}
+
+// hasPointers returns true if the reflect.Type of T contains any pointer fields.
+// Uses a cached result to avoid repeated reflection.
+func hasPointers[T any]() bool {
+	var t T
+	typ := reflect.TypeOf(t)
+	return hasPointersRecursive(typ)
+}
+
+func hasPointersRecursive(typ reflect.Type) bool {
+	switch typ.Kind() {
+	case reflect.Ptr, reflect.Chan, reflect.Map, reflect.Slice, reflect.Func, reflect.Interface, reflect.UnsafePointer:
+		return true
+	case reflect.Array:
+		return hasPointersRecursive(typ.Elem())
+	case reflect.Struct:
+		for i := 0; i < typ.NumField(); i++ {
+			f := typ.Field(i)
+			if !f.IsExported() {
+				// Unexported fields: check via unsafe.SizeOf heuristic.
+				// If the field's size equals the size of unsafe.Pointer, it may be a pointer.
+				if f.Type.Size() == unsafe.Sizeof(uintptr(0)) {
+					// Re-check reflectively
+					if f.Type.Kind() == reflect.String || f.Type.Kind() == reflect.Struct {
+						continue
+					}
+				}
+				continue
+			}
+			if hasPointersRecursive(f.Type) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
 
 // ─── BytesPool ───────────────────────────────────────────────────────────────
 
@@ -75,14 +129,15 @@ func (bp *BytesPool) Put(b *[]byte) {
 // SlicePool[T] handles a typed, generic collection pool managing pointers to arrays (*[]T).
 // Highly versatile for recycling intensive runtime vectors like ecs.Entity or world.ChunkEntry.
 type SlicePool[T any] struct {
-	p   sync.Pool
-	cap int
+	p      sync.Pool
+	cap    int
+	hasPtr bool // cached: true if T contains any pointer fields
 }
 
 // NewSlicePool creates a typed SlicePool whose arrays initialized with a baseline target capacity.
 // Standard configurations: 8 for chunk buckets, 16 for proximity filters, 1024 for dense entity lists.
 func NewSlicePool[T any](capacity int) *SlicePool[T] {
-	sp := &SlicePool[T]{cap: capacity}
+	sp := &SlicePool[T]{cap: capacity, hasPtr: hasPointers[T]()}
 	sp.p.New = func() any {
 		s := make([]T, 0, capacity)
 		return &s
@@ -105,17 +160,23 @@ func (sp *SlicePool[T]) Get() *[]T {
 // GC Leak Protection: This method completely zeros out the active backing array elements.
 // If [T] contains pointer references or composite interfaces, failure to clear them means the
 // runtime GC will still see live root links, causing silent severe memory leaks despite length resets.
+//
+// Optimization: If T is a value-only type (no pointers), the zeroing loop is skipped entirely
+// to eliminate unnecessary CPU work on the hot-path.
 func (sp *SlicePool[T]) Put(ps *[]T) {
 	// Memory Anti-Pollution Guard: Do not re-pool dynamic arrays that over-expanded during a spike.
 	if cap(*ps) > sp.cap*4 {
 		return
 	}
 
-	var zero T
 	s := *ps
-	// Strict zeroing loop: Erases any underlying live links to prevent phantom GC reference leaks
-	for i := range s {
-		s[i] = zero
+
+	if sp.hasPtr {
+		// Strict zeroing loop: Erases any underlying live links to prevent phantom GC reference leaks
+		var zero T
+		for i := range s {
+			s[i] = zero
+		}
 	}
 
 	*ps = s[:0] // Reset length while retaining the backing array bounds

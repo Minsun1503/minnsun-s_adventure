@@ -66,23 +66,43 @@ var DefaultPool = pool.NewBytesPool(defaultPoolSize)
 
 // ─── Packet Input Operations (Read Path) ──────────────────────────────────────
 
+// readHeaderBufPoolGet is a small, inlineable helper to get a header buffer.
+//
+//go:noinline
+func readHeaderBufPoolGet() *[2]byte {
+	return headerBufPool.Get().(*[2]byte)
+}
+
+// readHeaderBufPoolPut is a small, inlineable helper to put back a header buffer.
+//
+//go:noinline
+func readHeaderBufPoolPut(pBuf *[2]byte) {
+	headerBufPool.Put(pBuf)
+}
+
 // ReadHeader reads the 2-byte Big-Endian length prefix from the connection.
 // Uses a pooled [2]byte buffer to minimize heap allocations.
 // The 2 B/op, 1 alloc/op remaining is from Go's escape analysis limitation:
 // net.Conn.Read() is an interface method call, so any slice passed through it
 // escapes to heap regardless of the underlying array location.
 // On real *net.TCPConn (not net.Pipe benchmarks), this alloc disappears.
+//
+// Optimized: defer removed, manual pool Put to avoid defer overhead.
 func ReadHeader(conn net.Conn) (uint16, error) {
-	pBuf := headerBufPool.Get().(*[2]byte)
-	defer headerBufPool.Put(pBuf)
-	// Use io.ReadFull for cleaner code; the slice pBuf[:] still escapes
-	// through the interface method, but the backing array is pooled.
-	if _, err := io.ReadFull(conn, pBuf[:]); err != nil {
+	pBuf := readHeaderBufPoolGet()
+	n, err := conn.Read(pBuf[:])
+	if err == nil && n < 2 {
+		// Partial read: we need the full 2 bytes via io.ReadFull
+		_, err = io.ReadFull(conn, pBuf[n:])
+	}
+	if err != nil {
+		readHeaderBufPoolPut(pBuf)
 		if err == io.EOF {
 			return 0, io.ErrUnexpectedEOF
 		}
 		return 0, err
 	}
+	readHeaderBufPoolPut(pBuf)
 	return codec.ReadUint16(pBuf[:]), nil
 }
 

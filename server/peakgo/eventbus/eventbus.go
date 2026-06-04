@@ -40,10 +40,18 @@
 //	moveBus.Publish("player.move", MoveEvent{...})  // 0 allocs
 //
 // For events with single subscriber on hot-path, use PublishSync (direct handler call).
+//
+// # Lock-Free Publish Hot-Path
+//
+// Bus and TypedBus use a Copy-On-Write (COW) pattern with atomic.Value for the
+// subscribers map. Publish and PublishSync read the subscriber list without any
+// lock, eliminating RWMutex contention on the hot-path. Subscribe (write path)
+// clones the map under a sync.Mutex.
 package eventbus
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 // Event represents an arbitrary type-safe payload transmitted across the bus.
@@ -59,10 +67,13 @@ const defaultChannelSize = 64
 
 // Bus acts as the central event registry and message routing coordinator.
 type Bus struct {
-	mu          sync.RWMutex             // Protects subscribers and closed state
-	subscribers map[string][]*subscriber // Map of topics to their respective lists of subscribers
-	closed      bool                     // Toggled to true during graceful shutdown
-	wg          sync.WaitGroup           // Tracks active subscriber goroutines for graceful termination
+	// subscribersMap is an atomic.Value holding map[string][]*subscriber.
+	// The map is immutable once stored; Subscribe clones it under write lock.
+	subscribersMap atomic.Value
+	writeMu        sync.Mutex     // Protects the COW clone operation during Subscribe
+	closed         atomic.Bool    // Toggled to true during graceful shutdown
+	liveMu         sync.RWMutex   // Protects send-to-channel vs channel-close race (Drain)
+	wg             sync.WaitGroup // Tracks active subscriber goroutines for graceful termination
 }
 
 // subscriber wraps the asynchronous communication channel and its processing logic.
@@ -73,13 +84,19 @@ type subscriber struct {
 
 // New instantiates and returns a pointer to a clean, ready-to-use Bus.
 func New() *Bus {
-	return &Bus{
-		subscribers: make(map[string][]*subscriber),
-	}
+	b := &Bus{}
+	b.subscribersMap.Store(make(map[string][]*subscriber))
+	return b
 }
 
 // GlobalBus serves as the engine-wide singleton event bus dispatcher.
 var GlobalBus = New()
+
+// loadSubscribers returns the current subscribers map from atomic.Value.
+// This is lock-free and safe for hot-path Publish/PublishSync calls.
+func (b *Bus) loadSubscribers() map[string][]*subscriber {
+	return b.subscribersMap.Load().(map[string][]*subscriber)
+}
 
 // Subscribe registers a new handler to receive all events dispatched to a specific topic.
 //
@@ -102,11 +119,11 @@ func (b *Bus) Subscribe(
 		handler: handler,
 	}
 
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.writeMu.Lock()
+	defer b.writeMu.Unlock()
 
 	// Defensive check: Do not spin up goroutines if the bus is closing
-	if b.closed {
+	if b.closed.Load() {
 		return
 	}
 
@@ -122,10 +139,16 @@ func (b *Bus) Subscribe(
 		}
 	}()
 
-	b.subscribers[topic] = append(
-		b.subscribers[topic],
-		sub,
-	)
+	// COW: Clone the existing map and add the new subscriber
+	oldMap := b.loadSubscribers()
+	newMap := make(map[string][]*subscriber, len(oldMap)+1)
+	for k, v := range oldMap {
+		subs := make([]*subscriber, len(v))
+		copy(subs, v)
+		newMap[k] = subs
+	}
+	newMap[topic] = append(newMap[topic], sub)
+	b.subscribersMap.Store(newMap)
 }
 
 // PublishSync delivers an event synchronously to all subscribers by calling
@@ -140,13 +163,10 @@ func (b *Bus) Subscribe(
 // Performance: ~60 ns per subscriber vs ~180 ns with async Publish.
 // Warning: Do NOT use for handlers that perform blocking operations (DB/network).
 func (b *Bus) PublishSync(topic string, event Event) {
-	b.mu.RLock()
-	if b.closed {
-		b.mu.RUnlock()
+	if b.closed.Load() {
 		return
 	}
-	subs := b.subscribers[topic]
-	b.mu.RUnlock()
+	subs := b.loadSubscribers()[topic]
 	for _, sub := range subs {
 		sub.handler(event)
 	}
@@ -161,15 +181,13 @@ func (b *Bus) Publish(
 	topic string,
 	event Event,
 ) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	// Prevent publishing to a draining/closed bus
-	if b.closed {
+	b.liveMu.RLock()
+	if b.closed.Load() {
+		b.liveMu.RUnlock()
 		return
 	}
 
-	subs := b.subscribers[topic]
+	subs := b.loadSubscribers()[topic]
 
 	// Broadcast the event to all subscribers registered under the topic
 	for _, sub := range subs {
@@ -180,6 +198,8 @@ func (b *Bus) Publish(
 			// This enforces the strict at-most-once delivery strategy.
 		}
 	}
+
+	b.liveMu.RUnlock()
 }
 
 // ─── Generic TypedBus[T] for Zero-Allocation Hot-Path ──────────────────────
@@ -197,17 +217,23 @@ type typedSubscriber[T any] struct {
 // Use this for hot-path events (movement, combat) where zero-allocation is required.
 // Performance: 0 B/op, 0 allocs/op for Publish and PublishSync.
 type TypedBus[T any] struct {
-	mu          sync.RWMutex
-	subscribers map[string][]*typedSubscriber[T]
-	closed      bool
-	wg          sync.WaitGroup
+	subscribersMap atomic.Value
+	writeMu        sync.Mutex
+	closed         atomic.Bool
+	liveMu         sync.RWMutex
+	wg             sync.WaitGroup
 }
 
 // NewTyped creates a new TypedBus for the given event type.
 func NewTyped[T any]() *TypedBus[T] {
-	return &TypedBus[T]{
-		subscribers: make(map[string][]*typedSubscriber[T]),
-	}
+	b := &TypedBus[T]{}
+	b.subscribersMap.Store(make(map[string][]*typedSubscriber[T]))
+	return b
+}
+
+// loadSubscribers returns the current subscribers map from atomic.Value.
+func (b *TypedBus[T]) loadSubscribers() map[string][]*typedSubscriber[T] {
+	return b.subscribersMap.Load().(map[string][]*typedSubscriber[T])
 }
 
 // Subscribe registers a typed handler for a topic.
@@ -221,10 +247,10 @@ func (b *TypedBus[T]) Subscribe(topic string, handler TypedHandler[T], channelSi
 		handler: handler,
 	}
 
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.writeMu.Lock()
+	defer b.writeMu.Unlock()
 
-	if b.closed {
+	if b.closed.Load() {
 		return
 	}
 
@@ -236,18 +262,24 @@ func (b *TypedBus[T]) Subscribe(topic string, handler TypedHandler[T], channelSi
 		}
 	}()
 
-	b.subscribers[topic] = append(b.subscribers[topic], sub)
+	// COW: Clone the existing map and add the new subscriber
+	oldMap := b.loadSubscribers()
+	newMap := make(map[string][]*typedSubscriber[T], len(oldMap)+1)
+	for k, v := range oldMap {
+		subs := make([]*typedSubscriber[T], len(v))
+		copy(subs, v)
+		newMap[k] = subs
+	}
+	newMap[topic] = append(newMap[topic], sub)
+	b.subscribersMap.Store(newMap)
 }
 
 // PublishSync delivers a typed event synchronously (0 B/op, 0 allocs/op).
 func (b *TypedBus[T]) PublishSync(topic string, event T) {
-	b.mu.RLock()
-	if b.closed {
-		b.mu.RUnlock()
+	if b.closed.Load() {
 		return
 	}
-	subs := b.subscribers[topic]
-	b.mu.RUnlock()
+	subs := b.loadSubscribers()[topic]
 	for _, sub := range subs {
 		sub.handler(event)
 	}
@@ -255,14 +287,13 @@ func (b *TypedBus[T]) PublishSync(topic string, event T) {
 
 // Publish delivers a typed event asynchronously (0 B/op, 0 allocs/op).
 func (b *TypedBus[T]) Publish(topic string, event T) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	if b.closed {
+	b.liveMu.RLock()
+	if b.closed.Load() {
+		b.liveMu.RUnlock()
 		return
 	}
 
-	subs := b.subscribers[topic]
+	subs := b.loadSubscribers()[topic]
 	for _, sub := range subs {
 		select {
 		case sub.ch <- event:
@@ -270,23 +301,29 @@ func (b *TypedBus[T]) Publish(topic string, event T) {
 			// Drop on overflow
 		}
 	}
+	b.liveMu.RUnlock()
 }
 
 // Drain gracefully shuts down the TypedBus.
 func (b *TypedBus[T]) Drain() {
-	b.mu.Lock()
-	if b.closed {
-		b.mu.Unlock()
+	b.writeMu.Lock()
+	if b.closed.Load() {
+		b.writeMu.Unlock()
 		return
 	}
-	b.closed = true
-	for _, subs := range b.subscribers {
+	b.closed.Store(true)
+
+	b.liveMu.Lock()
+	subsMap := b.loadSubscribers()
+	for _, subs := range subsMap {
 		for _, sub := range subs {
 			close(sub.ch)
 		}
 	}
-	b.subscribers = nil
-	b.mu.Unlock()
+	b.liveMu.Unlock()
+
+	b.subscribersMap.Store(make(map[string][]*typedSubscriber[T]))
+	b.writeMu.Unlock()
 	b.wg.Wait()
 }
 
@@ -296,27 +333,33 @@ func (b *TypedBus[T]) Drain() {
 // consumer channels, wipes out internal reference maps to clear memory, and
 // blocks execution until all active background workers have emptied their queues.
 func (b *Bus) Drain() {
-	b.mu.Lock()
+	b.writeMu.Lock()
 
-	if b.closed {
-		b.mu.Unlock()
+	if b.closed.Load() {
+		b.writeMu.Unlock()
 		return
 	}
 
-	b.closed = true
+	b.closed.Store(true)
+
+	// Acquire write lock on liveMu to prevent concurrent Publish from sending to closing channels
+	b.liveMu.Lock()
 
 	// Close all channels to break the 'for ... range' loops in the workers
-	for _, subs := range b.subscribers {
+	subsMap := b.loadSubscribers()
+	for _, subs := range subsMap {
 		for _, sub := range subs {
 			close(sub.ch)
 		}
 	}
 
-	// Purge references to allow fast garbage collection
-	b.subscribers = nil
+	b.liveMu.Unlock()
 
-	// Release the lock early so status metrics can be checked while waiting for handlers
-	b.mu.Unlock()
+	// Purge references to allow fast garbage collection
+	b.subscribersMap.Store(make(map[string][]*subscriber))
+
+	// Release the write lock early so status metrics can be checked while waiting for handlers
+	b.writeMu.Unlock()
 
 	// Wait completely for all running subscriber loops to process remaining buffer data
 	b.wg.Wait()
@@ -324,23 +367,15 @@ func (b *Bus) Drain() {
 
 // TopicCount calculates and returns the current total number of active event topics.
 func (b *Bus) TopicCount() int {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	return len(b.subscribers)
+	return len(b.loadSubscribers())
 }
 
 // SubscriberCount walks the topic registry and returns the total count of registered handlers.
 func (b *Bus) SubscriberCount() int {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
 	total := 0
-
-	for _, subs := range b.subscribers {
+	for _, subs := range b.loadSubscribers() {
 		total += len(subs)
 	}
-
 	return total
 }
 

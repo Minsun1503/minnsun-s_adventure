@@ -44,6 +44,16 @@
 // Info, Warn, and Error level functions always pass through to the underlying
 // logger and are intended for lower-frequency operational logging (startup
 // messages, critical events). They are not designed for hot-path use.
+//
+// # Inline Guard Pattern (go:noinline)
+//
+// Each public function (Debugf, Infof, Warnf, Errorf) is split into two parts:
+// 1. A tiny inlineable public function that performs the early guard check.
+// 2. A go:noinline private helper that does the actual logging work.
+//
+// This ensures that when the guard fails (e.g., debug disabled), the variadic
+// slice allocation from the call site stays on the caller's stack frame and
+// does not escape to heap — leading to zero allocation when the check returns early.
 package loggate
 
 import "server/logger"
@@ -63,13 +73,17 @@ func DebugEnabled() bool {
 
 // Debugf logs at DEBUG level if debug logging is enabled.
 //
-// Performance Warning: This method prevents expensive string formatting and logger
-// dispatching when disabled. However, variadic arguments are still evaluated and
-// wrapped into an allocation slice by the caller before invocation.
+// Inline guard pattern: If debug is disabled, this function returns immediately.
+// The go:noinline helper avoids variadic slice escape to heap when the check fails.
 func Debugf(format string, args ...any) {
 	if !logger.IsDebug() {
 		return
 	}
+	pushDebug(format, args)
+}
+
+//go:noinline
+func pushDebug(format string, args []any) {
 	logger.Debug(format, args...)
 }
 
@@ -89,17 +103,32 @@ func DebugLazy(fn func()) {
 	fn()
 }
 
-// Infof logs at INFO level. Matches logger.Info signature exactly.
+// Infof logs at INFO level.
 func Infof(format string, args ...any) {
+	pushInfo(format, args)
+}
+
+//go:noinline
+func pushInfo(format string, args []any) {
 	logger.Info(format, args...)
 }
 
-// Warnf logs at WARN level. Matches logger.Warn signature exactly.
+// Warnf logs at WARN level.
 func Warnf(format string, args ...any) {
+	pushWarn(format, args)
+}
+
+//go:noinline
+func pushWarn(format string, args []any) {
 	logger.Warn(format, args...)
 }
 
-// Errorf logs at ERROR level. Matches logger.Error signature exactly.
+// Errorf logs at ERROR level.
 func Errorf(format string, args ...any) {
+	pushError(format, args)
+}
+
+//go:noinline
+func pushError(format string, args []any) {
 	logger.Error(format, args...)
 }

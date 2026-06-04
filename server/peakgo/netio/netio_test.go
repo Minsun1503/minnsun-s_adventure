@@ -8,8 +8,59 @@ import (
 	"net"
 	"server/peakgo/netio"
 	"server/peakgo/pool"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+// ─── FAST MOCK CONN (Zero-Allocation, Lock-Free) ───────────────────────────
+//
+// fastMockBenchConn implements a minimal net.Conn that provides pre-loaded data
+// for Read operations and discards Write data. Unlike net.Pipe(), this avoids
+// all standard library timer/channel allocations, providing a clean micro-benchmark
+// surface to measure true application logic.
+//
+// For reads: it wraps around a fixed buffer, returning data starting from index 0
+// on each call (suitable for reading the same packet repeatedly in benchmarks).
+// For writes: data is discarded into a black hole.
+
+type fastMockBenchConn struct {
+	readBuf []byte
+	closed  int32 // atomic
+}
+
+func newFastMockBenchConn(readBuf []byte) *fastMockBenchConn {
+	return &fastMockBenchConn{
+		readBuf: readBuf,
+	}
+}
+
+func (c *fastMockBenchConn) Read(b []byte) (int, error) {
+	if atomic.LoadInt32(&c.closed) != 0 {
+		return 0, io.EOF
+	}
+	n := copy(b, c.readBuf)
+	return n, nil
+}
+
+func (c *fastMockBenchConn) Write(b []byte) (int, error) {
+	if atomic.LoadInt32(&c.closed) != 0 {
+		return 0, net.ErrClosed
+	}
+	// Discard all data (black hole)
+	return len(b), nil
+}
+
+func (c *fastMockBenchConn) Close() error {
+	atomic.StoreInt32(&c.closed, 1)
+	return nil
+}
+
+func (c *fastMockBenchConn) LocalAddr() net.Addr                { return nil }
+func (c *fastMockBenchConn) RemoteAddr() net.Addr               { return nil }
+func (c *fastMockBenchConn) SetDeadline(t time.Time) error      { return nil }
+func (c *fastMockBenchConn) SetReadDeadline(t time.Time) error  { return nil }
+func (c *fastMockBenchConn) SetWriteDeadline(t time.Time) error { return nil }
 
 // ─── UTILITY HELPERS ─────────────────────────────────────────────────────────
 
@@ -198,98 +249,58 @@ func TestNetioReadWritePipeline(t *testing.T) {
 // ─── HIGH-FREQUENCY NETWORK MICRO-BENCHMARKS ─────────────────────────────────
 
 func BenchmarkReadHeader(b *testing.B) {
-	client, server := pipeConn()
-	defer client.Close()
-	defer server.Close()
-
-	var header [2]byte
-	header[0] = 0x00
-	header[1] = 0x09
-	done := make(chan struct{})
+	// Use fastMockBenchConn to eliminate net.Pipe allocations
+	header := []byte{0x00, 0x09}
+	mock := newFastMockBenchConn(header)
+	defer mock.Close()
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	// Sử dụng stack-allocated array thay vì slice escape qua goroutine closure
-	go func() {
-		defer close(done)
-		for i := 0; i < b.N; i++ {
-			_, _ = client.Write(header[:])
-		}
-	}()
-
 	for i := 0; i < b.N; i++ {
-		_, err := netio.ReadHeader(server)
+		_, err := netio.ReadHeader(mock)
 		if err != nil {
 			b.Fatalf("Benchmark ReadHeader failed at loop %d: %v", i, err)
 		}
 	}
-
-	<-done
 }
 
 func BenchmarkReadPayload(b *testing.B) {
-	client, server := pipeConn()
-	defer client.Close()
-	defer server.Close()
-
+	// Use fastMockBenchConn to eliminate net.Pipe allocations
 	payload := make([]byte, 9)
+	mock := newFastMockBenchConn(payload)
+	defer mock.Close()
+
 	p := pool.NewBytesPool(1024)
-	done := make(chan struct{})
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	go func() {
-		defer close(done)
-		for i := 0; i < b.N; i++ {
-			_, _ = client.Write(payload)
-		}
-	}()
-
 	for i := 0; i < b.N; i++ {
-		pBuf, err := netio.ReadPayload(server, p, 9)
+		pBuf, err := netio.ReadPayload(mock, p, 9)
 		if err != nil {
 			b.Fatalf("Benchmark ReadPayload failed at loop %d: %v", i, err)
 		}
 		p.Put(pBuf)
 	}
-
-	<-done
 }
 
 // BenchmarkWritePacket bổ sung bài đo kiểm tải hiệu năng ghi gói tin TCP của hệ thống.
 func BenchmarkWritePacket(b *testing.B) {
-	client, server := pipeConn()
-	defer client.Close()
-	defer server.Close()
-
+	// Use fastMockBenchConn to eliminate net.Pipe allocations
 	var packetData [64]byte
-	var sinkBuf [64]byte
-	done := make(chan struct{})
+	mock := newFastMockBenchConn(nil)
+	defer mock.Close()
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	// Sử dụng stack-allocated arrays thay vì slice escape qua goroutine closure
-	go func() {
-		defer close(done)
-		for i := 0; i < b.N; i++ {
-			_, err := io.ReadFull(server, sinkBuf[:])
-			if err != nil {
-				return
-			}
-		}
-	}()
-
 	for i := 0; i < b.N; i++ {
-		err := netio.WritePacket(client, packetData[:])
+		err := netio.WritePacket(mock, packetData[:])
 		if err != nil {
 			b.Fatalf("Benchmark WritePacket failed at loop %d: %v", i, err)
 		}
 	}
-
-	<-done
 }
 
 // BenchmarkRingBufferPeakGo measures local buffer read/write operations simulating

@@ -166,11 +166,17 @@ func push(lv level, format string, args ...any) {
 		return
 	}
 
+	var copiedArgs []any
+	if len(args) > 0 {
+		copiedArgs = make([]any, len(args))
+		copy(copiedArgs, args)
+	}
+
 	entry := logEntry{
 		lv:     lv,
 		ts:     time.Now(),
 		format: format,
-		args:   args,
+		args:   copiedArgs,
 	}
 
 	// WARN and ERROR always make it through (block if needed).
