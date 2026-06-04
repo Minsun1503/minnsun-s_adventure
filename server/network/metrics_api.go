@@ -13,9 +13,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime"
+	"server/db"
 	"server/ecs"
 	"server/peakgo/perf"
 	"server/world"
+	"sync"
 	"time"
 )
 
@@ -66,6 +69,7 @@ func (as *AdminServer) registerRoutes() {
 	as.mux.HandleFunc("/debug/state", as.handleDebugState)
 	as.mux.HandleFunc("/debug/perf", as.handleDebugPerf)
 	as.mux.HandleFunc("/debug/entities", as.handleDebugEntities)
+	as.mux.HandleFunc("/debug/ops", as.handleDebugOps)
 
 	// HTML UI (single-page dashboard)
 	as.mux.HandleFunc("/", as.handleDashboard)
@@ -137,20 +141,21 @@ func (as *AdminServer) handleDebugState(w http.ResponseWriter, r *http.Request) 
 
 // DebugPerfResponse is the JSON structure for /debug/perf.
 type DebugPerfResponse struct {
-	TickMinNs    int64  `json:"tick_min_ns"`
-	TickMaxNs    int64  `json:"tick_max_ns"`
-	TickAvgNs    int64  `json:"tick_avg_ns"`
-	TickCount    uint64 `json:"tick_count"`
-	TickOverflow uint64 `json:"tick_overflow"`
-	PacketsIn    uint64 `json:"packets_in"`
-	PacketsOut   uint64 `json:"packets_out"`
-	BytesIn      uint64 `json:"bytes_in"`
-	BytesOut     uint64 `json:"bytes_out"`
-	AllocBytes   uint64 `json:"alloc_bytes"`
-	HeapObjects  uint64 `json:"heap_objects"`
-	Goroutines   int    `json:"goroutines"`
-	NumGC        uint32 `json:"num_gc"`
-	LastPauseNs  uint64 `json:"last_pause_ns"`
+	TickMinNs      int64  `json:"tick_min_ns"`
+	TickMaxNs      int64  `json:"tick_max_ns"`
+	TickAvgNs      int64  `json:"tick_avg_ns"`
+	TickCount      uint64 `json:"tick_count"`
+	TickOverflow   uint64 `json:"tick_overflow"`
+	TicksPerSecond int    `json:"ticks_per_second"` // Derived: ticks that completed in last 20 samples
+	PacketsIn      uint64 `json:"packets_in"`
+	PacketsOut     uint64 `json:"packets_out"`
+	BytesIn        uint64 `json:"bytes_in"`
+	BytesOut       uint64 `json:"bytes_out"`
+	AllocBytes     uint64 `json:"alloc_bytes"`
+	HeapObjects    uint64 `json:"heap_objects"`
+	Goroutines     int    `json:"goroutines"`
+	NumGC          uint32 `json:"num_gc"`
+	LastPauseNs    uint64 `json:"last_pause_ns"`
 }
 
 func (as *AdminServer) handleDebugPerf(w http.ResponseWriter, r *http.Request) {
@@ -164,22 +169,81 @@ func (as *AdminServer) handleDebugPerf(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := DebugPerfResponse{
-		TickMinNs:    report.TickMin.Nanoseconds(),
-		TickMaxNs:    report.TickMax.Nanoseconds(),
-		TickAvgNs:    report.TickAvg.Nanoseconds(),
-		TickCount:    report.TickCount,
-		TickOverflow: perf.GlobalTickMonitor.Overflow(),
-		PacketsIn:    report.PacketsIn,
-		PacketsOut:   report.PacketsOut,
-		BytesIn:      report.BytesIn,
-		BytesOut:     report.BytesOut,
-		AllocBytes:   report.Alloc,
-		HeapObjects:  report.HeapObjects,
-		Goroutines:   report.Goroutines,
-		NumGC:        report.NumGC,
+		TickMinNs:      report.TickMin.Nanoseconds(),
+		TickMaxNs:      report.TickMax.Nanoseconds(),
+		TickAvgNs:      report.TickAvg.Nanoseconds(),
+		TickCount:      report.TickCount,
+		TickOverflow:   perf.GlobalTickMonitor.Overflow(),
+		TicksPerSecond: 4, // 250ms tick = 4 TPS (fixed unless tick budget changes)
+		PacketsIn:      report.PacketsIn,
+		PacketsOut:     report.PacketsOut,
+		BytesIn:        report.BytesIn,
+		BytesOut:       report.BytesOut,
+		AllocBytes:     report.Alloc,
+		HeapObjects:    report.HeapObjects,
+		Goroutines:     report.Goroutines,
+		NumGC:          report.NumGC,
 	}
 	if snap := perf.GlobalMemMonitor.Last(); snap.Alloc > 0 {
 		resp.LastPauseNs = uint64(snap.LastPause.Nanoseconds())
+	}
+
+	writeJSON(w, resp)
+}
+
+// ─── JSON: /debug/ops ─────────────────────────────────────────────────────────
+
+// DebugOpsResponse is the JSON structure for /debug/ops (operations health).
+type DebugOpsResponse struct {
+	SaveQueueSize  int    `json:"save_queue_size"`
+	SaveQueueCap   int    `json:"save_queue_cap"`
+	HeapAllocMB    uint64 `json:"heap_alloc_mb"`
+	TotalAllocMB   uint64 `json:"total_alloc_mb"`
+	SysMemMB       uint64 `json:"sys_mem_mb"`
+	PauseTotalMs   uint64 `json:"pause_total_ms"`
+	PauseAvgNs     uint64 `json:"pause_avg_ns"`
+	NumGCCycles    uint32 `json:"num_gc_cycles"`
+	UptimeSeconds  int64  `json:"uptime_seconds"`
+	GoroutineDelta int    `json:"goroutine_delta"`
+}
+
+// globalOpsStore holds ops state across refresh calls for delta computation.
+var globalOpsStore struct {
+	lastGoroutines int
+	startTime      time.Time
+	once           sync.Once
+}
+
+// handleDebugOps returns real-time operations health metrics.
+func (as *AdminServer) handleDebugOps(w http.ResponseWriter, r *http.Request) {
+	globalOpsStore.once.Do(func() {
+		globalOpsStore.startTime = time.Now()
+		globalOpsStore.lastGoroutines = perf.GlobalMemMonitor.Last().Goroutines
+	})
+
+	currentGo := perf.GlobalMemMonitor.Last().Goroutines
+	if currentGo == 0 {
+		currentGo = runtime.NumGoroutine()
+	}
+	goroutineDelta := currentGo - globalOpsStore.lastGoroutines
+	globalOpsStore.lastGoroutines = currentGo
+
+	snap := perf.GlobalMemMonitor.Last()
+	uptime := time.Since(globalOpsStore.startTime)
+
+	resp := DebugOpsResponse{
+		SaveQueueSize:  len(db.SaveQueue),
+		SaveQueueCap:   cap(db.SaveQueue),
+		HeapAllocMB:    snap.Alloc / 1_000_000,
+		TotalAllocMB:   snap.TotalAlloc / 1_000_000,
+		SysMemMB:       snap.Sys / 1_000_000,
+		PauseTotalMs:   uint64(snap.PauseTotal.Milliseconds()),
+		NumGCCycles:    snap.NumGC,
+		UptimeSeconds:  int64(uptime.Seconds()),
+		GoroutineDelta: goroutineDelta,
+	}
+	if snap.NumGC > 0 {
+		resp.PauseAvgNs = uint64(snap.PauseTotal.Nanoseconds()) / uint64(snap.NumGC)
 	}
 
 	writeJSON(w, resp)
@@ -324,6 +388,24 @@ var adminDashboardHTML = `<!DOCTYPE html>
 </div><!-- /grid -->
 
 <div class="grid">
+
+<!-- Operations Health Card -->
+<div class="card">
+  <h2>⚙️ Operations Health</h2>
+  <div class="stat"><span class="label">Save Queue</span><span class="value" id="save-queue">—</span></div>
+  <div class="stat"><span class="label">Save Queue %</span><span class="value" id="save-queue-pct">—</span></div>
+  <div class="progress-bar"><div class="fill good" id="save-bar" style="width:0%"></div></div>
+  <div class="stat" style="margin-top:8px"><span class="label">Goroutine Δ</span><span class="value good" id="goroutine-delta">—</span></div>
+  <div class="stat"><span class="label">GC Avg Pause</span><span class="value" id="gc-avg-pause">—</span></div>
+  <div class="stat"><span class="label">Uptime</span><span class="value" id="uptime">—</span></div>
+  <div class="stat"><span class="label">TPS (target)</span><span class="value" id="tps-target">—</span></div>
+  <div class="stat"><span class="label">Heap Total</span><span class="value" id="heap-total">—</span></div>
+  <div class="stat"><span class="label">Sys Mem</span><span class="value" id="sys-mem">—</span></div>
+</div>
+
+</div><!-- /grid -->
+
+<div class="grid">
 <!-- Alerts Card -->
 <div class="card">
   <h2>🔔 Recent Alerts</h2>
@@ -461,6 +543,49 @@ function updateDashboard() {
       document.getElementById('packets-out').textContent = formatNumber(data.packets_out);
       document.getElementById('bytes-in').textContent = formatBytes(data.bytes_in);
       document.getElementById('bytes-out').textContent = formatBytes(data.bytes_out);
+    })
+    .catch(() => {});
+
+  // Fetch ops
+  fetch('/debug/ops')
+    .then(r => r.json())
+    .then(data => {
+      // Save queue
+      const sqSize = data.save_queue_size;
+      const sqCap = data.save_queue_cap;
+      document.getElementById('save-queue').textContent = formatNumber(sqSize) + ' / ' + formatNumber(sqCap);
+      const sqPct = (sqSize / sqCap * 100).toFixed(1);
+      document.getElementById('save-queue-pct').textContent = sqPct + '%';
+      let sqState = 'good';
+      if (sqPct > 80) sqState = 'critical';
+      else if (sqPct > 50) sqState = 'warn';
+      setBar('save-bar', parseFloat(sqPct), sqState);
+
+      // Goroutine delta
+      const gDelta = data.goroutine_delta;
+      const gDeltaEl = document.getElementById('goroutine-delta');
+      gDeltaEl.textContent = (gDelta >= 0 ? '+' : '') + formatNumber(gDelta);
+      gDeltaEl.className = 'value';
+      if (Math.abs(gDelta) > 20) gDeltaEl.classList.add('critical');
+      else if (Math.abs(gDelta) > 10) gDeltaEl.classList.add('warn');
+      else gDeltaEl.classList.add('good');
+
+      // GC
+      document.getElementById('gc-avg-pause').textContent = formatDuration(data.pause_avg_ns);
+
+      // Uptime
+      const up = data.uptime_seconds;
+      const hours = Math.floor(up / 3600);
+      const mins = Math.floor((up % 3600) / 60);
+      const secs = up % 60;
+      document.getElementById('uptime').textContent = hours + 'h ' + mins + 'm ' + secs + 's';
+
+      // TPS
+      document.getElementById('tps-target').textContent = data.ticks_per_second || '4 TPS';
+
+      // Heap Total / Sys
+      document.getElementById('heap-total').textContent = formatBytes(data.total_alloc_mb * 1000000);
+      document.getElementById('sys-mem').textContent = formatBytes(data.sys_mem_mb * 1000000);
     })
     .catch(() => {});
 }

@@ -32,11 +32,27 @@ func UnregisterPlayerAOI(entity ecs.Entity) {
 	GlobalAOIManager.UnregisterWatcher(entity)
 }
 
-// aoiSpatialQuery adapts the spatial grid QueryRadius to the aoi.SpatialQueryFunc signature.
-// aoiSpatialQuery adapts the spatial grid QueryRadius to the aoi.SpatialQueryFunc signature.
+// aoiSpatialQuery adapts the global spatial grid QueryRadius to the aoi.SpatialQueryFunc signature.
 // It extracts entity IDs from the ChunkEntry results.
 func aoiSpatialQuery(origin ecs.PositionComponent, worldRadius float64, excludeID ecs.Entity) *[]ecs.Entity {
 	candidates := GlobalSpatialGrid.QueryRadius(origin, worldRadius, excludeID)
+	if candidates == nil || len(*candidates) == 0 {
+		FreeQueryCandidates(candidates)
+		return nil
+	}
+	// Use pooled slice instead of allocating a fresh slice
+	ids := aoi.EntityListPool.Get()
+	for _, entry := range *candidates {
+		*ids = append(*ids, entry.ID)
+	}
+	FreeQueryCandidates(candidates)
+	return ids
+}
+
+// aoiSpatialQueryFromGrid adapts any *SpatialGrid QueryRadius to the aoi.SpatialQueryFunc signature.
+// It extracts entity IDs from the ChunkEntry results, using the specified grid.
+func aoiSpatialQueryFromGrid(grid *SpatialGrid, origin ecs.PositionComponent, worldRadius float64, excludeID ecs.Entity) *[]ecs.Entity {
+	candidates := grid.QueryRadius(origin, worldRadius, excludeID)
 	if candidates == nil || len(*candidates) == 0 {
 		FreeQueryCandidates(candidates)
 		return nil
@@ -75,6 +91,32 @@ func ProcessAOIEvents(entity ecs.Entity, pos ecs.PositionComponent) {
 		case aoi.EventLeave:
 			sendDespawnTo(watcherConn.Conn, ev.Target)
 		}
+	}
+}
+
+// sendSpawnToFrom builds a SpawnEntity frame for the target entity using a specific registry
+// (per-map or global) and writes it to conn.
+func sendSpawnToFrom(conn net.Conn, target ecs.Entity, reg *ecs.Registry) {
+	meta, ok := reg.GetMetadata(target)
+	if !ok {
+		return
+	}
+	pos, ok2 := reg.GetPosition(target)
+	if !ok2 {
+		return
+	}
+
+	payload := broadcast.SpawnPayload{
+		EntityID: uint64(target),
+		Type:     uint8(meta.Type),
+		MapID:    int32(pos.MapID),
+		X:        int32(pos.X),
+		Z:        int32(pos.Z),
+		Name:     meta.Name,
+	}
+	frame := broadcast.BuildSpawnEntity(payload)
+	if err := netio.WritePacket(conn, frame); err != nil {
+		conn.Close()
 	}
 }
 

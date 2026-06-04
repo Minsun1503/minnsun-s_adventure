@@ -3,14 +3,14 @@ package game
 import (
 	"fmt"
 	"server/ecs"
-	"server/peakgo/eventbus"
 	"server/models"
+	"server/peakgo/broadcast"
 	"server/peakgo/combat"
+	"server/peakgo/eventbus"
 	"server/peakgo/gmath"
 	"server/peakgo/loggate"
 	"server/peakgo/rng"
 	"server/peakgo/threat"
-	"server/peakgo/broadcast"
 	"server/protocol"
 	"server/world"
 	"time"
@@ -256,6 +256,16 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 			conn.Conn.Close()
 		}
 	} else {
+		// ── Threat Table Cleanup ─────────────────────────────────────────────
+		// Release threat table memory when a monster dies to prevent aggro
+		// memory leak. The ThreatTable holds a pooled slice and max-heap array
+		// that must be returned via Close().
+		if ai, hasAI := registry.GetAI(targetID); hasAI && ai.ThreatTable != nil {
+			ai.ThreatTable.Close()
+			ai.ThreatTable = nil
+			registry.SetAI(targetID, ai)
+		}
+
 		if t, found := models.GetTemplateByName(targetMeta.Name); found {
 			spawnX, spawnZ := t.SpawnX, t.SpawnZ
 			if ai, hasAI := registry.GetAI(targetID); hasAI {

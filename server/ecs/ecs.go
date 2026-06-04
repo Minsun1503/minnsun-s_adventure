@@ -419,8 +419,9 @@ func recycleEntityID(id Entity) {
 	recycledEntities.mu.Unlock()
 }
 
-// popRecycledID returns a recycled entity ID if one is available, or 0.
-func popRecycledID() Entity {
+// PopRecycledEntityID returns a recycled entity ID if one is available, or 0.
+// Exported for use by the world package's entity ID allocation.
+func PopRecycledEntityID() Entity {
 	recycledEntities.mu.Lock()
 	if len(recycledEntities.ids) == 0 {
 		recycledEntities.mu.Unlock()
@@ -451,13 +452,18 @@ type Registry struct {
 	effects       ComponentStore[EffectsComponent]
 }
 
-var GlobalRegistry = &Registry{}
+var GlobalRegistry = NewRegistry()
+
+// NewRegistry creates a new empty Registry with fresh component stores.
+func NewRegistry() *Registry {
+	return &Registry{}
+}
 
 // NewEntity returns a recycled entity ID if one is available, otherwise
 // allocates a fresh ID from the atomic counter. This prevents unbounded
 // growth of the entity ID space during long server uptimes.
 func (r *Registry) NewEntity() Entity {
-	if recycled := popRecycledID(); recycled != 0 {
+	if recycled := PopRecycledEntityID(); recycled != 0 {
 		return recycled
 	}
 	return Entity(r.nextID.Add(1))

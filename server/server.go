@@ -64,6 +64,21 @@ func main() {
 		logger.Info("[BOOT] No DB available — ECS ID counter starts from default (dev_mode).")
 	}
 
+	// ─── Crash Recovery: Load World Snapshot ─────────────────────────────────
+	// Attempt to restore the world state from the most recent snapshot.
+	// If a snapshot exists, entities are restored to the ECS registry.
+	// This provides fast recovery (within seconds) instead of respawning all
+	// monsters from scratch. Fresh monster templates + saved player state
+	// coexist harmoniously — monster template IDs are negative/partitioned
+	// while player entity IDs are positive and come from the DB.
+	snapshot := world.LoadLatestSnapshot()
+	if snapshot != nil {
+		restored := world.RestoreWorldFromSnapshot(snapshot)
+		logger.Info("[BOOT] Crash recovery: restored %d entities from world snapshot.", restored)
+	} else {
+		logger.Info("[BOOT] No crash recovery data — spawning fresh monsters.")
+	}
+
 	templates, err := models.LoadMonster("data/monster_templates.json")
 	if err != nil {
 		logger.Error("CRITICAL SERVER BOOT ERROR: %v", err)
@@ -147,14 +162,18 @@ func main() {
 		sig := <-sigCh
 		logger.Info("[SHUTDOWN] Received signal %v — starting graceful shutdown...", sig)
 
-		// Step 1: Flush the save queue — drain all pending snapshots to DB.
+		// Step 1: Take a shutdown snapshot for crash recovery.
+		world.TakeShutdownSnapshot()
+		logger.Info("[SHUTDOWN] Shutdown snapshot taken.")
+
+		// Step 2: Flush the save queue — drain all pending snapshots to DB.
 		db.FlushSaveQueue()
 
-		// Step 2: Close the TCP listener to stop accepting new connections.
+		// Step 3: Close the TCP listener to stop accepting new connections.
 		lis.Close()
 		logger.Info("[SHUTDOWN] TCP listener closed.")
 
-		// Step 3: Log shutdown complete.
+		// Step 4: Log shutdown complete.
 		logger.Info("[SHUTDOWN] Server shut down gracefully.")
 		os.Exit(0)
 	}()

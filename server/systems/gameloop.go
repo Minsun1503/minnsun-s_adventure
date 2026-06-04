@@ -36,45 +36,24 @@ const AI_UPDATE_BUCKETS = 4
 // runtime, which silently drops stalled ticks without compounding delay.
 //
 // Map parallelism: Each registered map runs its own goroutine via the
-// world.MapInstance system. The heartbeat dispatcher sends ticks to all
-// maps concurrently. Cross-map entity transfers go through a central
-// orchestrator channel to avoid lock-coupling between maps.
+// world.MapWorker system. The heartbeat dispatcher sends ticks to all
+// maps concurrently via world.TickAll. Cross-map entity transfers go
+// through a central orchestrator channel to avoid lock-coupling between maps.
 //
 // AI Budget: Monster updates are distributed across AI_UPDATE_BUCKETS frames.
 // Each frame only processes monsters whose (entityID % AI_UPDATE_BUCKETS)
 // matches the current frame bucket (tick % AI_UPDATE_BUCKETS). This ensures
 // smooth CPU usage even with 1000+ monsters on a single map.
 func StartGameLoop() {
-	// Start the cross-map transfer orchestrator.
-	world.StartTransferOrchestrator()
+	// Initialize the World instance with the per-map tick function.
+	// This creates GlobalWorld which manages all MapWorkers.
+	world.InitWorld(perMapTick)
+	world.GlobalWorld.StartTransferOrchestrator()
 
 	// Register default map tick for map 1 (the primary game map).
 	// Additional maps can be registered at boot time via world.RegisterMapTick.
-	// The cmdBuf parameter is this map's local CommandBuffer; systems record
-	// deferred mutations into it, and the framework flushes at end of tick.
-	world.RegisterMapTick(1, func(mapID int, tick uint64, cmdBuf *ecs.CommandBuffer) {
-		// Compute the current AI bucket from the global tick.
-		// Each monster is assigned to bucket (entityID % AI_UPDATE_BUCKETS).
-		// On each frame, only monsters in bucket (tick % AI_UPDATE_BUCKETS)
-		// get their AI updated. This distributes the AI load evenly across frames.
-		currentBucket := int(tick % AI_UPDATE_BUCKETS)
-
-		// Query monsters on this map and process AI.
-		// Uses QueryPositionAI which iterates over the smallest store (AI store, monsters only)
-		// and provides AI + Position + Stats in one pass — no nested lookups needed.
-		ecs.GlobalRegistry.QueryPositionAI(func(id ecs.Entity, ai ecs.AIComponent, pos ecs.PositionComponent, stats ecs.StatsComponent) bool {
-			if pos.MapID != mapID {
-				return true
-			}
-			// Frame bucket filtering: only process monsters in the current bucket.
-			// Entity ID distribution is roughly uniform, so this gives us an even split.
-			if int(id%ecs.Entity(AI_UPDATE_BUCKETS)) != currentBucket {
-				return true
-			}
-			game.TickAI(id)
-			return true
-		})
-	})
+	// Each map gets its own ECS Registry, SpatialGrid, AOI manager, and CommandBuffer.
+	world.RegisterMapTick(1, perMapTick)
 
 	ticker := time.NewTicker(250 * time.Millisecond)
 	go func() {
@@ -92,6 +71,34 @@ func StartGameLoop() {
 			perf.GlobalAlertMonitor.CheckTickDuration(elapsed.Nanoseconds())
 		}
 	}()
+}
+
+// perMapTick is the tick function for each MapWorker. During the migration phase,
+// it operates on ecs.GlobalRegistry with MapID filtering. Once per-map registries
+// are fully populated at boot, the reg variable below will switch to mw.Registry
+// for true per-map isolation.
+//
+// FUTURE: Replace ecs.GlobalRegistry below with mw.Registry once server.go
+// spawns entities into per-map registries instead of GlobalRegistry.
+func perMapTick(mapID int, tick uint64, cmdBuf *ecs.CommandBuffer) {
+	// Compute the current AI bucket from the global tick.
+	currentBucket := int(tick % AI_UPDATE_BUCKETS)
+
+	// FUTURE: mw := world.GlobalWorld.GetWorker(mapID); reg := mw.Registry
+	reg := ecs.GlobalRegistry
+
+	// Query monsters on this map and process AI.
+	reg.QueryPositionAI(func(id ecs.Entity, ai ecs.AIComponent, pos ecs.PositionComponent, stats ecs.StatsComponent) bool {
+		if pos.MapID != mapID {
+			return true
+		}
+		// Frame bucket filtering: only process monsters in the current bucket.
+		if int(id%ecs.Entity(AI_UPDATE_BUCKETS)) != currentBucket {
+			return true
+		}
+		game.TickAI(id)
+		return true
+	})
 }
 
 // tickWorld does a single metadata scan per tick.

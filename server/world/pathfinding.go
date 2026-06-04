@@ -5,13 +5,8 @@ import (
 	"server/peakgo/astar"
 )
 
-// isWalkableDefault checks collision grid for a given map ID.
-// Returns true if the tile is passable (not blocked).
-func isWalkableDefault(x, z int) bool {
-	return !IsTileBlocked(1, x, z)
-}
-
 // IsWalkableForMap returns a walkability checker bound to a specific map ID.
+// Replaces the old isWalkableDefault which hardcoded map ID 1.
 func IsWalkableForMap(mapID int) astar.IsWalkable {
 	return func(x, z int) bool {
 		return !IsTileBlocked(mapID, x, z)

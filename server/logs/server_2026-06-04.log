@@ -31,3 +31,22 @@
 [2026-06-04 13:09:10.998] [INFO ] [BOOT] Connection login worker #1 active.
 [2026-06-04 13:09:10.998] [INFO ] [BOOT] Connection login worker #2 active.
 [2026-06-04 13:09:10.998] [INFO ] [BOOT] Connection login worker #3 active.
+[2026-06-04 15:59:05.969] [INFO ] [MCP] HTTP server shut down.
+[2026-06-04 21:21:40.198] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-04 21:21:40.268] [INFO ] [DATABASE] Relational system matrices initialized and ready.
+[2026-06-04 21:21:40.268] [INFO ] [PERSISTENCE] Asynchronous DB Save Worker thread active.
+[2026-06-04 21:21:40.282] [INFO ] [BOOT] Loaded 3 monster templates.
+[2026-06-04 21:21:40.284] [INFO ] [SPAWN] Sea King (entity 1) at (30, 40) | HP:120 ATK:18 aggro:8 leash:16 melee:2
+[2026-06-04 21:21:40.284] [INFO ] [SPAWN] Bandit (entity 2) at (70, 20) | HP:60 ATK:10 aggro:12 leash:24 melee:2
+[2026-06-04 21:21:40.284] [INFO ] [SPAWN] Marine Guard (entity 3) at (50, 80) | HP:200 ATK:25 aggro:6 leash:12 melee:2
+[2026-06-04 21:21:40.284] [INFO ] [BOOT] Spawned 3 live monster instances into ECS.
+[2026-06-04 21:21:40.284] [INFO ] [BOOT] Server listening on [::]:1503
+[2026-06-04 21:21:40.293] [INFO ] [ENGINE] Heartbeat game loop started at 4 ticks/sec.
+[2026-06-04 21:21:40.305] [INFO ] [BOOT] Connection login worker #1 active.
+[2026-06-04 21:21:40.305] [INFO ] [BOOT] Connection login worker #0 active.
+[2026-06-04 21:21:40.305] [INFO ] [BOOT] Connection login worker #2 active.
+[2026-06-04 21:21:40.305] [INFO ] [BOOT] Connection login worker #3 active.
+[2026-06-04 21:21:40.313] [INFO ] [BOOT] MCP admin interface available on http://localhost:8080/mcp
+[2026-06-04 21:21:40.313] [INFO ] [BOOT] WebSocket transport listening on ws://localhost:8081/ws
+[2026-06-04 21:21:40.314] [INFO ] [BOOT] WebSocket listener starting on :8081/ws
+[2026-06-04 21:21:40.325] [INFO ] [MCP] JSON-RPC server listening on :8080

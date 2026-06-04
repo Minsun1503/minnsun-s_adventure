@@ -1,22 +1,40 @@
-# Benchmarks Optimization Plan
+# Phase 5 & 6 Implementation Checklist
 
-## Packages to fix (non-zero B/op or allocs/op):
+## Phase 5: Combat System
+### 13. Combat Profiling (★★★★☆)
+- [x] Add benchmarks for combat hot paths (AttackSystem, DamageSystem, DeathSystem)
+- [x] Run benchmarks and identify hotspots
+  - AttackSystem: ~233 ns/op, 32 B/op, 1 allocs/op
+  - DamageSystem: ~82 ns/op, 0 B/op, 0 allocs/op
+  - DeathSystem: ~1613 ns/op, 175 B/op, 4 allocs/op (expected: DB + broadcast)
+  - StatsToCombatStats: ~3 ns/op, 0 B/op, 0 allocs/op (zero alloc)
+- [x] Add zero-alloc profiling test for combat paths
 
-### 1. eventbus (7-8 B/op)
-- **Root cause**: `Event any` interface boxing when passing `int` to `Publish`
-- **Fix**: Make `Bus` generic with `Bus[T any]` so channel sends avoid boxing
+### 14. Skill Execution Pipeline (★★★★☆)
+- [x] Create SkillPipeline with stages: Target Selection → Damage Calc → Effect Application → Broadcast
+- [x] Refactor AttackSystem to use pipeline stages
+- [x] Refactor HandleSkillCastingSystem to use pipeline stages
+- [x] Add pipeline tests (8 tests passing)
 
-### 2. loggate (8 B/op DebugfDisabled, 72 B/op 2 allocs/op Infof)
-- **Root cause**: Variadic `...any` creates caller-site slice allocation even when disabled
-- **Fix**: Fast-path guard + lazy evaluation optimization
+### 15. Threat Table Cleanup (★★★☆☆)
+- [x] Fix memory leak: call Close() on threat tables when monsters die
+- [x] Add threat table cleanup in DeathSystem
+- [x] Verify memory allocation with benchmarks (threat: 0 B/op, 0 allocs/op)
 
-### 3. netio (2 B/op 1 alloc ReadHeader, 128 B/op 2 alloc WritePacket)
-- **Root cause**: Need further investigation
-- **Fix**: Will identify after examining full source
+## Phase 6: Operations
+### 16. Live Admin Dashboard Enhancements (★★★★☆)
+- [x] Add TPS display to dashboard (fixed 4 TPS display)
+- [x] Add save queue size display (size/capacity + percentage gauge)
+- [x] Add goroutine growth tracking (delta/rate with color coding)
+- [x] Add GC metrics to JSON API and HTML dashboard (avg pause, GC count)
+- [x] Add save queue depth gauge to HTML
 
-## Plan:
-- [ ] Examine full source of eventbus.go, loggate.go, packet.go
-- [ ] Fix eventbus: Make Bus generic to eliminate interface boxing
-- [ ] Fix loggate: Optimize variadic guard patterns  
-- [ ] Fix netio: Eliminate allocations in packet IO
-- [ ] Run benchmarks to verify 0 B/op, 0 allocs/op for all three packages
+### 17. Alert System Enhancements (★★★★☆)
+- [x] Add goroutine growth anomaly detection via /debug/ops delta
+- [x] Add abnormal goroutine growth alert (color-coded in HTML dashboard)
+- [x] Add save queue alert enhancements (existing AlertMonitor + dashboard gauge)
+
+### 18. Long-Run Stability Test (★★★★☆)
+- [x] Create automated long-run test script (cmd/soaktest)
+- [x] Build report generator for memory/GC/queue trends
+- [x] Add soak test with combat interactions (HTTP-based metrics polling)

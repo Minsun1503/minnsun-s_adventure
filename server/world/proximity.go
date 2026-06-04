@@ -32,6 +32,15 @@ func FreeNearbyPlayers(s []ProximityResult) {
 	proximityPool.Put(&s)
 }
 
+// FreeNearbyMonsters returns a pooled monster result slice to the pool.
+func FreeNearbyMonsters(s []ProximityResult) {
+	if s == nil {
+		return
+	}
+	s = s[:0]
+	proximityPool.Put(&s)
+}
+
 // GetNearbyPlayers filters spatial grid candidates to player-type entities only,
 // resolving components with zero allocations via slice pooling.
 // Callers must call FreeNearbyPlayers(slice) when done to recycle memory.

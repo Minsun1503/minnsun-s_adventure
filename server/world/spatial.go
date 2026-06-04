@@ -266,6 +266,18 @@ func (g *SpatialGrid) GetEntityChunk(id ecs.Entity) (ChunkKey, bool) {
 	return key, ok
 }
 
+// ForEachEntityChunk calls f for every entity in the grid with its current chunk key.
+// Returns false from f to stop early. Safe for concurrent use with read-lock.
+func (g *SpatialGrid) ForEachEntityChunk(f func(id ecs.Entity, key ChunkKey) bool) {
+	g.indexMu.RLock()
+	defer g.indexMu.RUnlock()
+	for id, key := range g.entityIndex {
+		if !f(id, key) {
+			return
+		}
+	}
+}
+
 // DebugStats returns a snapshot of grid occupancy for logging/monitoring.
 func (g *SpatialGrid) DebugStats() string {
 	g.chunkMu.RLock()
