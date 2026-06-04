@@ -22,6 +22,7 @@ const (
 	OpcodeC2STradeCancel  byte = 18
 	OpcodeC2SSkillCast    byte = 19
 	OpcodeC2SChat         byte = 20
+	OpcodeC2SHeartbeat    byte = 21
 )
 
 // Server → Client opcodes — MUST match peakgo/broadcast opcodes (wire format)
@@ -35,6 +36,7 @@ const (
 	OpcodeS2CCombatHit     byte = 0x14
 	OpcodeS2CChat          byte = 0x15
 	OpcodeS2CNotice        byte = 0x16
+	OpcodeS2CHeartbeat     byte = 0x17
 )
 
 // Error codes

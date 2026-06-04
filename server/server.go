@@ -11,12 +11,12 @@ import (
 	"server/logger"
 	"server/mcp"
 	"server/models"
+	"server/peakgo/broadcast"
 	"server/peakgo/codec"
 	"server/peakgo/loggate"
 	"server/peakgo/netio"
 	"server/protocol"
 	"server/systems"
-	"server/peakgo/broadcast"
 	"server/world"
 )
 
@@ -30,7 +30,7 @@ var opcodeNames = map[byte]string{
 	10: "LOGIN", 11: "REGISTER", 12: "PARTY_CREATE",
 	13: "PARTY_INVITE", 14: "PARTY_JOIN",
 	15: "TRADE_INIT", 16: "TRADE_OFFER", 17: "TRADE_CONFIRM", 18: "TRADE_CANCEL",
-	19: "SKILL_CAST", 20: "CHAT",
+	19: "SKILL_CAST", 20: "CHAT", 21: "HEARTBEAT",
 }
 
 // opcodeNameOf returns a human-readable name for a binary opcode byte.
@@ -354,7 +354,7 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 	)
 	systems.SendNoticeSystem(playerEntity, []byte(spawnMsg))
 
-	_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(45 * time.Second))
 
 	for {
 		// Zero-alloc header read: stack [2]byte + BigEndian.Uint16, no reflection.
@@ -379,7 +379,7 @@ func handleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		handleBinaryPacket(conn, playerEntity, opcode, payload)
 
 		packetPool.Put(pBuf)
-		_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(45 * time.Second))
 	}
 }
 
@@ -571,6 +571,13 @@ func handleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, pay
 	case protocol.OpcodeC2SChat: // CHAT
 		msg := string(payload)
 		game.RouteChatMessage(playerEntity, msg)
+
+	case protocol.OpcodeC2SHeartbeat: // HEARTBEAT
+		// Reset read deadline — this is the primary purpose of heartbeat.
+		_ = conn.SetReadDeadline(time.Now().Add(45 * time.Second))
+		// Pong back to client.
+		pong := [4]byte{0, 1, protocol.OpcodeS2CHeartbeat}
+		_ = netio.WritePacket(conn, pong[:3])
 
 	default:
 		loggate.Warnf("[NET] Unknown opcode %d from %s", opcode, conn.RemoteAddr())
