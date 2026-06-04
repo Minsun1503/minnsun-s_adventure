@@ -4,6 +4,10 @@ import (
 	"server/peakgo/rng"
 )
 
+// DisableRngForTesting bypasses random (hit/crit) logic entirely when set to true.
+// Intended for deterministic test environments only.
+var DisableRngForTesting bool
+
 // ─── Stats ──────────────────────────────────────────────────────────────────
 
 // Stats holds the combat-relevant attributes of an entity (player or monster).
@@ -140,7 +144,7 @@ func ResolvePhysical(attacker, defender *Stats, modifiers DamageModifiers) Comba
 	var result CombatResult
 
 	// Hit check
-	if !modifiers.IsGuaranteed {
+	if !modifiers.IsGuaranteed && !DisableRngForTesting {
 		hitChance := attacker.HitRate - defender.DodgeRate
 		if hitChance < 100 {
 			hitChance = 100 // Minimum 10% hit chance
@@ -182,7 +186,7 @@ func ResolvePhysical(attacker, defender *Stats, modifiers DamageModifiers) Comba
 
 	// Crit check
 	isCrit := modifiers.IsCrit
-	if !isCrit && result.Hit {
+	if !isCrit && result.Hit && !DisableRngForTesting {
 		critRoll := rng.Intn(1000)
 		isCrit = critRoll < attacker.CritRate
 	}
@@ -206,7 +210,7 @@ func ResolveMagical(attacker, defender *Stats, modifiers DamageModifiers) Combat
 	var result CombatResult
 
 	// Hit check (magic has higher base hit rate)
-	if !modifiers.IsGuaranteed {
+	if !modifiers.IsGuaranteed && !DisableRngForTesting {
 		hitChance := attacker.HitRate + 50 - defender.DodgeRate/2
 		if hitChance < 100 {
 			hitChance = 100
@@ -247,7 +251,7 @@ func ResolveMagical(attacker, defender *Stats, modifiers DamageModifiers) Combat
 
 	// Crit check (magic crits are rarer)
 	isCrit := modifiers.IsCrit
-	if !isCrit && result.Hit {
+	if !isCrit && result.Hit && !DisableRngForTesting {
 		critRoll := rng.Intn(1000)
 		isCrit = critRoll < attacker.CritRate/2
 	}

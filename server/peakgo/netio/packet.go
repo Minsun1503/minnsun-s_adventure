@@ -67,15 +67,11 @@ var DefaultPool = pool.NewBytesPool(defaultPoolSize)
 // ─── Packet Input Operations (Read Path) ──────────────────────────────────────
 
 // readHeaderBufPoolGet is a small, inlineable helper to get a header buffer.
-//
-//go:noinline
 func readHeaderBufPoolGet() *[2]byte {
 	return headerBufPool.Get().(*[2]byte)
 }
 
 // readHeaderBufPoolPut is a small, inlineable helper to put back a header buffer.
-//
-//go:noinline
 func readHeaderBufPoolPut(pBuf *[2]byte) {
 	headerBufPool.Put(pBuf)
 }
@@ -102,8 +98,9 @@ func ReadHeader(conn net.Conn) (uint16, error) {
 		}
 		return 0, err
 	}
+	val := codec.ReadUint16(pBuf[:])
 	readHeaderBufPoolPut(pBuf)
-	return codec.ReadUint16(pBuf[:]), nil
+	return val, nil
 }
 
 // ReadPayload fetches a managed buffer from the pool and reads exactly `length` bytes into it.

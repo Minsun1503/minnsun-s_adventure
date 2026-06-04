@@ -4,11 +4,14 @@ import (
 	"os"
 	"server/ecs"
 	"server/models"
+	"server/peakgo/combat"
 	"server/world"
 	"testing"
 )
 
 func init() {
+	combat.DisableRngForTesting = true
+
 	// Load a mock monster template for combat testing
 	jsonContent := `[
 		{"id": 1, "name": "Orc", "hp": 100, "damage": 10, "spawn_x": 50, "spawn_z": 50, "roam_radius": 5, "aggro_radius": 6.0, "attack_cooldown": 4, "xp_reward": 50}
