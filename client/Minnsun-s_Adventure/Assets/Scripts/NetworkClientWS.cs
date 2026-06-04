@@ -130,8 +130,9 @@ public class NetworkClientWS : MonoBehaviour
         {
             if (t.IsFaulted)
             {
-                Debug.LogError($"[WS] Send failed, disconnecting: {t.Exception?.InnerException?.Message}");
-                Disconnect();
+                Debug.LogError($"[WS] Send failed: {t.Exception?.InnerException?.Message}");
+                // Marshal Disconnect to main thread — StopAllCoroutines() is Unity API.
+                dispatchQueue.Enqueue(() => Disconnect());
             }
         });
     }
