@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 
 /// <summary>
@@ -31,10 +32,13 @@ public static class UnityMainThreadDispatcher
 
 /// <summary>
 /// TCP network client with binary packet framing, heartbeat, and main-thread dispatch.
-/// Attach to a persistent GameObject; call StartHeartbeat() after login success.
+/// Attach to a persistent GameObject; set host/port in Inspector; call StartHeartbeat() after login success.
 /// </summary>
 public class NetworkClient : MonoBehaviour
 {
+    [SerializeField] private string serverHost = "127.0.0.1";
+    [SerializeField] private int serverPort = 1503;
+
     private TcpClient tcpClient;
     private NetworkStream stream;
     private bool connected;
@@ -47,18 +51,39 @@ public class NetworkClient : MonoBehaviour
 
     private void Start()
     {
-        // Connect to server
-        tcpClient = new TcpClient();
-        tcpClient.Connect("127.0.0.1", 1503);
+        StartCoroutine(ConnectAsync());
+    }
+
+    /// <summary>
+    /// Connect to server asynchronously via thread pool — does NOT block the Unity main thread.
+    /// </summary>
+    private IEnumerator ConnectAsync()
+    {
+        var task = Task.Run(() =>
+        {
+            tcpClient = new TcpClient();
+            tcpClient.Connect(serverHost, serverPort);
+        });
+
+        // Yield every frame until the connect task completes.
+        while (!task.IsCompleted)
+            yield return null;
+
+        if (task.IsFaulted)
+        {
+            Debug.LogError($"[NET] Connect failed: {task.Exception?.InnerException?.Message}");
+            yield break;
+        }
+
         stream = tcpClient.GetStream();
         connected = true;
 
-        // Start receive thread
         receiveThread = new Thread(ReceiveLoop) { IsBackground = true };
         receiveThread.Start();
 
-        // Start heartbeat coroutine after login success
-        // Call StartHeartbeat() when login succeeds
+        Debug.Log($"[NET] Connected to {serverHost}:{serverPort}");
+
+        // StartHeartbeat() should be called manually after login success.
     }
 
     private void Update()
