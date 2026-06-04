@@ -37,7 +37,12 @@ public class Bootstrap : MonoBehaviour
         // ── UI ──
         GameObject uiRoot = new GameObject("UIRoot");
         DontDestroyOnLoad(uiRoot);
-        uiRoot.AddComponent<UIManager>();
+        UIManager uiManager = uiRoot.AddComponent<UIManager>();
+
+        // ── PacketRouter — wire up references manually (UIManager is on separate GO, not a child)
+        var router = gameObject.GetComponent<PacketRouter>();
+        if (router != null)
+            router.Init(entityManager, uiManager);
 
         // ── Camera ──
         GameObject cam = new GameObject("MainCamera");

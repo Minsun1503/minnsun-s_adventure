@@ -9,11 +9,15 @@ public class PacketRouter : MonoBehaviour
     private EntityManager entityManager;
     private UIManager uiManager;
 
-    private void Awake()
+    /// <summary>
+    /// Called by Bootstrap after creating all components.
+    /// This avoids FindObjectOfType scans while correctly handling
+    /// the fact that UIManager sits on a separate UIRoot GameObject.
+    /// </summary>
+    public void Init(EntityManager em, UIManager ui)
     {
-        // Use GetComponent instead of FindObjectOfType — all on same root GameObject
-        entityManager = GetComponent<EntityManager>();
-        uiManager     = GetComponentInChildren<UIManager>();
+        entityManager = em;
+        uiManager = ui;
     }
 
     /// <summary>
