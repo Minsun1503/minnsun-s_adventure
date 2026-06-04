@@ -63,21 +63,21 @@ type MetadataComponent struct {
 }
 
 type StatsComponent struct {
-	Level int
-	XP    uint64
-	HP    int
-	MaxHP int
-	MP    int
-	MaxMP int
-	Dam           int
-	Attack        int
-	MagicAttack   int
-	Defense       int
-	MagicDefense  int
-	HitRate       int
-	DodgeRate     int
-	CritRate      int
-	CritDamage    int
+	Level        int
+	XP           uint64
+	HP           int
+	MaxHP        int
+	MP           int
+	MaxMP        int
+	Dam          int
+	Attack       int
+	MagicAttack  int
+	Defense      int
+	MagicDefense int
+	HitRate      int
+	DodgeRate    int
+	CritRate     int
+	CritDamage   int
 }
 
 type ItemTemplateComponent struct {
@@ -470,6 +470,51 @@ func (r *Registry) RangePartyMembers(f func(id Entity, pm PartyMemberComponent) 
 
 func (r *Registry) RangeConnections(f func(id Entity, conn ConnectionComponent) bool) {
 	r.conns.Range(f)
+}
+
+// ─── COMPONENT MUTATION POLICY ───────────────────────────────────────────────
+//
+// All Component values in the ECS are stored inline (not as pointers) inside
+// ComponentStore[T]. This ensures CPU cache-locality and zero GC pressure on
+// the hot path.
+//
+// Read policy (hot-path safe):
+//   - Use Get() to obtain a read-only copy of the component value.
+//   - The returned value is a stack-allocated copy — the caller may read it
+//     freely without locks after Get() returns.
+//
+// Write policy (Copy-Modify-Override):
+//   1. Read:   val, ok := registry.GetComponent(id)
+//   2. Modify: val.Field = newValue  (mutate the local copy)
+//   3. Write:  registry.SetComponent(id, val)
+//
+// NEVER:
+//   - Store pointers to component values (use inline structs only).
+//   - Return pointers to internal ComponentStore.values elements.
+//   - Mutate a component value obtained from Get() and expect it to persist
+//     without calling Set().
+//
+// For slices and maps inside components (e.g. InventoryComponent.Items,
+// PartyComponent.MemberIDs, EffectsComponent.ActiveList), use the Clone()
+// method provided on the struct BEFORE mutation. This prevents accidental
+// sharing of slice/map headers between the stored value and the working copy.
+//
+// ─── QUERY LAYER: COMBINED COMPONENT LOOKUPS ─────────────────────────────────
+
+// QueryPositionStats iterates over all entities that have both a Position and
+// Stats component. Uses the smaller store (positions) as the driver and looks
+// up the other (stats) via O(1) Get. This avoids two separate Range passes
+// when both components are needed together (e.g. AOI broadcast, combat tick).
+//
+// The callback receives the entity ID, its PositionComponent and StatsComponent.
+// Return false from the callback to stop iteration early.
+func (r *Registry) QueryPositionStats(f func(id Entity, pos PositionComponent, stats StatsComponent) bool) {
+	r.positions.Range(func(id Entity, pos PositionComponent) bool {
+		if stats, ok := r.stats.Get(id); ok {
+			return f(id, pos, stats)
+		}
+		return true // continue iteration
+	})
 }
 
 // ─── DIAGNOSTIC & SURVEY LAYER APIS ──────────────────────────────────────────

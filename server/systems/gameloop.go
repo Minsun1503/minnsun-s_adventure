@@ -5,6 +5,7 @@ import (
 	"server/game"
 	"server/logger"
 	"server/peakgo/loggate"
+	"server/world"
 	"time"
 )
 
@@ -22,6 +23,21 @@ var globalTick uint64
 // authority — OS scheduler jitter and clock drift are absorbed by Go's
 // runtime, which silently drops stalled ticks without compounding delay.
 func StartGameLoop() {
+	// Register default map tick for map 1 (the primary game map).
+	// Additional maps can be registered at boot time via world.RegisterMapTick.
+	world.RegisterMapTick(1, func(mapID int, tick uint64) {
+		// Query entities on this map and process AI.
+		ecs.GlobalRegistry.QueryPositionStats(func(id ecs.Entity, pos ecs.PositionComponent, stats ecs.StatsComponent) bool {
+			if pos.MapID != mapID {
+				return true
+			}
+			if meta, ok := ecs.GlobalRegistry.GetMetadata(id); ok && meta.Type == ecs.EntityMonster {
+				game.TickAI(id)
+			}
+			return true
+		})
+	})
+
 	ticker := time.NewTicker(250 * time.Millisecond)
 	go func() {
 		logger.Info("[ENGINE] Heartbeat game loop started at 4 ticks/sec.")
@@ -65,13 +81,11 @@ func tickWorld(tick uint64) {
 		return
 	}
 
-	// Tick every monster's AI state machine.
-	// RangeAI is separate from RangeSnapshots to avoid a second
-	// metadata scan — AI and snapshot passes are decoupled by design.
-	ecs.GlobalRegistry.RangeAI(func(id ecs.Entity, _ ecs.AIComponent) bool {
-		game.TickAI(id)
-		return true
-	})
+	// Dispatch per-map ticks using the world partition system.
+	// Registered map tick functions handle their own entity filtering.
+	// Currently only map 1 is registered; future maps will be added
+	// via world.RegisterMapTick at boot time.
+	world.TickMap(1, tick)
 }
 
 // debugLogMonsterState logs active monster state at DEBUG level only.

@@ -1,11 +1,11 @@
 package transport
 
 import (
-	"net"
 	"net/http"
 
 	"github.com/gorilla/websocket"
 
+	"server/auth"
 	"server/logger"
 )
 
@@ -26,20 +26,6 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// ─── External Login Queue ─────────────────────────────────────────────────────
-
-// LoginQueue is the shared channel that accepts both TCP and WebSocket connections.
-// It must be set before calling StartWebSocketListener — the existing LoginQueue
-// from server.go is used directly.
-//
-//	server.LoginQueue ← TCP connections from :1503
-//	                    ← WebSocket connections from :8080/ws
-//
-// Both transport types push net.Conn values into the same queue, so the existing
-// worker pool (processLogin → handleClient → handleBinaryPacket) handles both
-// transparently.
-var LoginQueue chan net.Conn
-
 // ─── WebSocket Handler ────────────────────────────────────────────────────────
 
 // handleWebSocket upgrades an HTTP request to a WebSocket connection, wraps it
@@ -59,7 +45,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Push into the shared login queue — the same worker pool handles it.
 	select {
-	case LoginQueue <- wsConn:
+	case auth.LoginQueue <- wsConn:
 	default:
 		logger.Warn("[WS] Login queue full — dropping WebSocket connection from %s", conn.RemoteAddr())
 		// Send error frame and close.
@@ -70,16 +56,10 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 // ─── StartWebSocketListener ───────────────────────────────────────────────────
 
 // StartWebSocketListener starts an HTTP server on addr that upgrades /ws
-// connections to WebSocket and pushes them into the shared LoginQueue.
-//
-// Parameters:
-//   - addr:      Bind address, e.g. ":8080"
-//   - loginChan: Shared LoginQueue from server.go
+// connections to WebSocket and pushes them into the shared auth.LoginQueue.
 //
 // This function blocks — call it in a goroutine from main().
-func StartWebSocketListener(addr string, loginChan chan net.Conn) {
-	LoginQueue = loginChan
-
+func StartWebSocketListener(addr string) {
 	http.HandleFunc("/ws", handleWebSocket)
 
 	logger.Info("[BOOT] WebSocket listener starting on %s/ws", addr)
