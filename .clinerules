@@ -25,6 +25,8 @@ File Locking & Redundant Builds: Tuyệt đối KHÔNG chạy go build hoặc go
 BẮT BUỘC dùng CMD /C cho các lệnh phức tạp: Sử dụng CMD để di chuyển thư mục (cd) và chạy chuỗi lệnh thông qua toán tử && mà không sợ bị nuốt ký tự hay lỗi mở rộng biến trong PowerShell:
 cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && <lệnh_cần_chạy>"
 
+CẢNH BÁO TREO LỆNH DO THOÁT DẤU NHÁY: Khi chạy lệnh cmd /c hoặc PowerShell, tuyệt đối KHÔNG viết dấu gạch chéo ngược `\` ngay trước dấu ngoặc kép `"` ở cuối đường dẫn (ví dụ: "...\Scripts\"" sẽ bị lỗi thoát dấu nháy `\"` khiến lệnh bị treo/đơ). Hãy sửa thành "...\Scripts"" (xóa dấu `\`) hoặc dùng dấu nháy đơn `'` bọc bên ngoài.
+
 III. REFACTORING, FILE PATCHING & TERMINAL SAFETY
 CẤM DÙNG TERMINAL ĐỂ TẠO/SỬA FILE: Nghiêm cấm dùng echo, cat, Set-Content, Out-File, >, >> để tạo hoặc vá code (tránh lỗi "Double Interpolation" với các ký tự đặc biệt như $, \, `, * trên PowerShell). Hãy sử dụng các công cụ quản lý file tích hợp mặc định (write_to_file, replace_file_content, multi_replace_file_content).
 

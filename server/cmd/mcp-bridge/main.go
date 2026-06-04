@@ -51,6 +51,37 @@ type GrepResult struct {
 }
 
 var serverDir string
+var workspaceDir string
+
+func resolvePath(inputPath string) string {
+	if filepath.IsAbs(inputPath) {
+		return filepath.Clean(inputPath)
+	}
+
+	cleanPath := filepath.ToSlash(inputPath)
+	cleanPath = strings.TrimPrefix(cleanPath, "server/")
+	cleanPath = filepath.FromSlash(cleanPath)
+
+	// Try resolving original inputPath against workspaceDir first
+	pathInWorkspace := filepath.Join(workspaceDir, inputPath)
+	if _, err := os.Stat(pathInWorkspace); err == nil {
+		return pathInWorkspace
+	}
+
+	// Try resolving cleanPath against workspaceDir
+	pathCleanInWorkspace := filepath.Join(workspaceDir, cleanPath)
+	if _, err := os.Stat(pathCleanInWorkspace); err == nil {
+		return pathCleanInWorkspace
+	}
+
+	// Try resolving cleanPath against serverDir
+	pathInServer := filepath.Join(serverDir, cleanPath)
+	if _, err := os.Stat(pathInServer); err == nil {
+		return pathInServer
+	}
+
+	return pathCleanInWorkspace
+}
 
 func main() {
 	// Compute serverDir once for reuse across bridge
@@ -62,6 +93,7 @@ func main() {
 	if strings.HasSuffix(filepath.ToSlash(serverDir), "/cmd/mcp-bridge") {
 		serverDir = filepath.Dir(filepath.Dir(serverDir))
 	}
+	workspaceDir = filepath.Dir(serverDir)
 
 	// Phase 1: Vòng đời tự động (Giữ nguyên logic thông minh của bạn)
 	if !isServerRunning() {
@@ -311,6 +343,9 @@ func main() {
 			sendMCPTextResult(req.ID, string(respBody))
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "[MCP-BRIDGE] Stdin scanner error: %v\n", err)
+	}
 }
 
 // ─── Local Tool Handlers ──────────────────────────────────────────────────────
@@ -324,16 +359,7 @@ func handleCodeOutline(args json.RawMessage) (string, error) {
 		return "", fmt.Errorf("file_path is required")
 	}
 
-	// Path Sanitizer: normalize slashes and strip duplicate "server/" prefix
-	cleanPath := filepath.ToSlash(p.FilePath)
-	cleanPath = strings.TrimPrefix(cleanPath, "server/")
-	cleanPath = filepath.FromSlash(cleanPath)
-
-	// Resolve relative paths against serverDir
-	fullPath := cleanPath
-	if !filepath.IsAbs(fullPath) {
-		fullPath = filepath.Join(serverDir, fullPath)
-	}
+	fullPath := resolvePath(p.FilePath)
 
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, fullPath, nil, parser.ParseComments)
@@ -464,15 +490,7 @@ func handleCodeExtract(args json.RawMessage) (string, error) {
 		return "", fmt.Errorf("action is required")
 	}
 
-	// Path Sanitizer: normalize slashes and strip duplicate "server/" prefix
-	cleanPath := filepath.ToSlash(p.Path)
-	cleanPath = strings.TrimPrefix(cleanPath, "server/")
-	cleanPath = filepath.FromSlash(cleanPath)
-
-	fullPath := cleanPath
-	if !filepath.IsAbs(fullPath) {
-		fullPath = filepath.Join(serverDir, fullPath)
-	}
+	fullPath := resolvePath(p.Path)
 
 	// Determine if path is file or directory
 	info, err := os.Stat(fullPath)
@@ -970,15 +988,9 @@ func handleGrep(args json.RawMessage) ([]GrepResult, error) {
 	}
 	root := params.Root
 	if root == "" {
-		root = serverDir
+		root = workspaceDir
 	} else {
-		// Path Sanitizer: normalize slashes and strip duplicate "server/" prefix
-		cleanRoot := filepath.ToSlash(root)
-		cleanRoot = strings.TrimPrefix(cleanRoot, "server/")
-		root = filepath.FromSlash(cleanRoot)
-		if !filepath.IsAbs(root) {
-			root = filepath.Join(serverDir, root)
-		}
+		root = resolvePath(root)
 	}
 
 	var results []GrepResult
@@ -986,7 +998,8 @@ func handleGrep(args json.RawMessage) ([]GrepResult, error) {
 		if err != nil {
 			return nil // skip inaccessible dirs
 		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") {
+		ext := strings.ToLower(filepath.Ext(path))
+		if d.IsDir() || (ext != ".go" && ext != ".cs" && ext != ".json" && ext != ".sql" && ext != ".s") {
 			return nil
 		}
 
@@ -1008,6 +1021,9 @@ func handleGrep(args json.RawMessage) ([]GrepResult, error) {
 					Content: strings.TrimSpace(line),
 				})
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			fmt.Fprintf(os.Stderr, "[MCP-BRIDGE] Grep scanner error on %s: %v\n", path, err)
 		}
 		return nil
 	})
@@ -1082,15 +1098,7 @@ func handleReplace(args json.RawMessage) (string, error) {
 		return "", fmt.Errorf("search_text is required")
 	}
 
-	// Path Sanitizer: normalize slashes and strip duplicate "server/" prefix
-	cleanPath := filepath.ToSlash(p.Path)
-	cleanPath = strings.TrimPrefix(cleanPath, "server/")
-	cleanPath = filepath.FromSlash(cleanPath)
-
-	fullPath := cleanPath
-	if !filepath.IsAbs(fullPath) {
-		fullPath = filepath.Join(serverDir, fullPath)
-	}
+	fullPath := resolvePath(p.Path)
 
 	info, err := os.Stat(fullPath)
 	if err != nil {
@@ -1100,9 +1108,6 @@ func handleReplace(args json.RawMessage) (string, error) {
 	var files []string
 	if info.IsDir() {
 		pattern := p.Glob
-		if pattern == "" {
-			pattern = "*.go"
-		}
 		err = filepath.WalkDir(fullPath, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return nil
@@ -1110,9 +1115,16 @@ func handleReplace(args json.RawMessage) (string, error) {
 			if d.IsDir() {
 				return nil
 			}
-			match, err := filepath.Match(pattern, d.Name())
-			if err == nil && match {
-				files = append(files, path)
+			if pattern != "" {
+				match, err := filepath.Match(pattern, d.Name())
+				if err == nil && match {
+					files = append(files, path)
+				}
+			} else {
+				ext := strings.ToLower(filepath.Ext(d.Name()))
+				if ext == ".go" || ext == ".cs" {
+					files = append(files, path)
+				}
 			}
 			return nil
 		})
@@ -1228,14 +1240,7 @@ func handleListFiles(args json.RawMessage) (string, error) {
 		return "", fmt.Errorf("path is required")
 	}
 
-	cleanPath := filepath.ToSlash(p.Path)
-	cleanPath = strings.TrimPrefix(cleanPath, "server/")
-	cleanPath = filepath.FromSlash(cleanPath)
-
-	fullPath := cleanPath
-	if !filepath.IsAbs(fullPath) {
-		fullPath = filepath.Join(serverDir, fullPath)
-	}
+	fullPath := resolvePath(p.Path)
 
 	var results []FileEntry
 	if p.Recursive {
@@ -1246,7 +1251,10 @@ func handleListFiles(args json.RawMessage) (string, error) {
 			if path == fullPath {
 				return nil
 			}
-			rel, _ := filepath.Rel(serverDir, path)
+			rel, err := filepath.Rel(workspaceDir, path)
+			if err != nil {
+				rel, _ = filepath.Rel(serverDir, path)
+			}
 			rel = filepath.ToSlash(rel)
 
 			if p.Glob != "" {
@@ -1288,7 +1296,10 @@ func handleListFiles(args json.RawMessage) (string, error) {
 				}
 			}
 			path := filepath.Join(fullPath, d.Name())
-			rel, _ := filepath.Rel(serverDir, path)
+			rel, err := filepath.Rel(workspaceDir, path)
+			if err != nil {
+				rel, _ = filepath.Rel(serverDir, path)
+			}
 			rel = filepath.ToSlash(rel)
 
 			info, _ := d.Info()

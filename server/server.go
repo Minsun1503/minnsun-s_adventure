@@ -17,6 +17,7 @@ import (
 	"server/peakgo/netio"
 	"server/protocol"
 	"server/systems"
+	"server/transport"
 	"server/world"
 )
 
@@ -300,6 +301,11 @@ func main() {
 	// Uses port 8080 by default; configure via MCP_PORT env var or data/config.json.
 	mcp.Start(mcp.Config{Port: 8080})
 	logger.Info("[BOOT] MCP admin interface available on http://localhost:8080/mcp")
+
+	// Start the WebSocket listener for WebGL clients on port 8081.
+	// Runs in its own goroutine — does not block the TCP accept loop.
+	go transport.StartWebSocketListener(":8081", LoginQueue)
+	logger.Info("[BOOT] WebSocket transport listening on ws://localhost:8081/ws")
 
 	for {
 		conn, err := lis.Accept()
