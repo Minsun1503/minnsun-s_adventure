@@ -189,9 +189,10 @@ public class NetworkClient : MonoBehaviour
 
     private void HandlePacket(byte opcode, byte[] data)
     {
-        // Route received packets to game logic
-        // Implement based on your game's packet handling
-        Debug.Log($"[NET] Received opcode: {opcode}, data length: {data.Length}");
+        // Route received packets to game logic via PacketRouter
+        var router = GetComponent<PacketRouter>();
+        if (router != null)
+            router.Route(opcode, data);
     }
 
     public void Disconnect()
