@@ -57,9 +57,6 @@ public class NetworkClientWS : MonoBehaviour
             HandleRawMessage(bytes);
         };
 
-        // Dispatch messages on Unity main thread
-        ws.OnMessage += (bytes) => { };
-
         var connectTask = ws.Connect();
         while (!connectTask.IsCompleted)
             yield return null;
@@ -129,8 +126,14 @@ public class NetworkClientWS : MonoBehaviour
         if (payload.Length > 0)
             Buffer.BlockCopy(payload, 0, frame, 3, payload.Length);
 
-        var sendTask = ws.Send(frame);
-        // Fire-and-forget: errors are logged via OnError callback
+        _ = ws.Send(frame).ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+            {
+                Debug.LogError($"[WS] Send failed, disconnecting: {t.Exception?.InnerException?.Message}");
+                Disconnect();
+            }
+        });
     }
 
     /// <summary>

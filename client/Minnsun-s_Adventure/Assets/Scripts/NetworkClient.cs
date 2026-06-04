@@ -57,21 +57,23 @@ public class NetworkClient : MonoBehaviour
     /// <summary>
     /// Connect to server asynchronously via thread pool — does NOT block the Unity main thread.
     /// </summary>
+    private Task connectTask;
     private IEnumerator ConnectAsync()
     {
-        var task = Task.Run(() =>
+        // Save local reference so scene-change cleanup can observe/dispose it.
+        connectTask = Task.Run(() =>
         {
             tcpClient = new TcpClient();
             tcpClient.Connect(serverHost, serverPort);
         });
 
         // Yield every frame until the connect task completes.
-        while (!task.IsCompleted)
+        while (!connectTask.IsCompleted)
             yield return null;
 
-        if (task.IsFaulted)
+        if (connectTask.IsFaulted)
         {
-            Debug.LogError($"[NET] Connect failed: {task.Exception?.InnerException?.Message}");
+            Debug.LogError($"[NET] Connect failed: {connectTask.Exception?.InnerException?.Message}");
             yield break;
         }
 

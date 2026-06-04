@@ -18,8 +18,11 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 
-	// Allow all origins during development.  In production, restrict this to
-	// your actual game domain.
+	// Allow all origins during development.
+	// PRODUCTION: Replace the wildcard check with a domain whitelist, e.g.:
+	//   CheckOrigin: func(r *http.Request) bool {
+	//       return r.Header.Get("Origin") == "https://yourgame.com"
+	//   },
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 

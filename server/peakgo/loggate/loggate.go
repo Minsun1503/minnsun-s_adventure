@@ -8,12 +8,16 @@
 // the function — even if the first line of that function is an early return.
 // This means:
 //
-//   - loggate.Debugf("entity %d moved", entity.ID)           // 8 B/op alloc
-//   - loggate.Infof("player %s connected", playerName)       // 8 B/op alloc
+//   - loggate.Debugf("entity %d moved", entity.ID)           // 24 B/1 alloc (interface boxing + slice header)
+//   - loggate.Infof("player %s connected", playerName)       // 24 B/1 alloc (interface boxing + slice header)
 //
-// These allocations happen regardless of whether the log level is enabled.
-// This is a fundamental Go language limitation and cannot be eliminated
-// from within the library.
+// These allocations happen at the CALL SITE regardless of whether the log
+// level is enabled because the Go compiler must construct the []any{} slice
+// before entering the function. This is a fundamental Go language limitation
+// and cannot be eliminated from within the library.
+//
+// For Infof / Warnf / Errorf (always-on), this 24 B/1 alloc per call is an
+// expected and accepted cost for operational logging outside hot-paths.
 //
 // # Zero-Allocation Hot-Path Strategies
 //

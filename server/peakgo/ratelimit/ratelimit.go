@@ -74,12 +74,17 @@ func (rl *RateLimiter) Allow(conn net.Conn, currentTick uint64) bool {
 		// We won — do the actual refill
 		elapsed := currentTick - lastTick
 		if elapsed > 0 {
+			refillPerTick := cfg.RateLimitRefillPerTick
+			// Guard against division by zero (config validation).
+			if refillPerTick <= 0 {
+				refillPerTick = 1
+			}
 			var refill int32
 			// Overflow guard: cap refill at maxTokens
-			if elapsed >= uint64(tb.maxTokens)/uint64(cfg.RateLimitRefillPerTick) {
+			if elapsed >= uint64(tb.maxTokens)/uint64(refillPerTick) {
 				refill = tb.maxTokens
 			} else {
-				refill = int32(elapsed) * cfg.RateLimitRefillPerTick
+				refill = int32(elapsed) * refillPerTick
 			}
 
 			// Add tokens atomically with cap
