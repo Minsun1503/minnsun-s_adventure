@@ -17,6 +17,11 @@ public class NetworkClientWS : MonoBehaviour
 {
     [SerializeField] private string serverUrl = "ws://127.0.0.1:8081/ws";
 
+    public bool IsConnected => connected;
+
+    /// <summary>Fired once when the WebSocket connection is established (on Unity main thread).</summary>
+    public event System.Action OnConnected;
+
     private WebSocket ws;
     private bool connected;
     private readonly ConcurrentQueue<Action> dispatchQueue = new ConcurrentQueue<Action>();
@@ -37,6 +42,7 @@ public class NetworkClientWS : MonoBehaviour
         ws.OnOpen += () =>
         {
             connected = true;
+            dispatchQueue.Enqueue(() => OnConnected?.Invoke());
             Debug.Log($"[WS] Connected to {serverUrl}");
         };
 

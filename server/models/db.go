@@ -13,30 +13,39 @@ var DBEngine *sql.DB
 
 // InitializeDatabase opens a connection to MySQL, creates the database if it doesn't exist,
 // selects it, and sets up relational tables.
+// If MySQL is not available, logs a warning and sets DBEngine to nil (dev_mode).
 func InitializeDatabase(dsn string) {
 	var err error
 	// Connect to MySQL server first (without database name)
 	DBEngine, err = sql.Open("mysql", dsn)
 	if err != nil {
-		panic(fmt.Sprintf("SQL Connection Fault: %v", err))
+		logger.Warn("[DATABASE] SQL Connection Fault: %v — running in dev_mode (no DB)", err)
+		DBEngine = nil
+		return
 	}
 
 	// Verify server connection
 	err = DBEngine.Ping()
 	if err != nil {
-		panic(fmt.Sprintf("SQL Server Ping Fault: %v", err))
+		logger.Warn("[DATABASE] SQL Server Ping Fault: %v — running in dev_mode (no DB)", err)
+		DBEngine = nil
+		return
 	}
 
 	// Create database if not exists
 	_, err = DBEngine.Exec("CREATE DATABASE IF NOT EXISTS minnsun_adventure")
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create database: %v", err))
+		logger.Warn("[DATABASE] Failed to create database: %v — running in dev_mode (no DB)", err)
+		DBEngine = nil
+		return
 	}
 
 	// Use database
 	_, err = DBEngine.Exec("USE minnsun_adventure")
 	if err != nil {
-		panic(fmt.Sprintf("Failed to select database: %v", err))
+		logger.Warn("[DATABASE] Failed to select database: %v — running in dev_mode (no DB)", err)
+		DBEngine = nil
+		return
 	}
 
 	// Create character structural base schemas

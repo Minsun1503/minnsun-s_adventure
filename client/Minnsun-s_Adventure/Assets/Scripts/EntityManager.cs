@@ -50,8 +50,11 @@ public class EntityManager : MonoBehaviour
                 break;
         }
 
-        // Create primitive cube as placeholder
-        GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        // Create primitive placeholder: Capsule for players, Cube for monsters, Sphere for items
+        PrimitiveType primitive = packet.Type == 0 ? PrimitiveType.Capsule :
+                                  packet.Type == 1 ? PrimitiveType.Cube :
+                                  PrimitiveType.Sphere;
+        GameObject go = GameObject.CreatePrimitive(primitive);
         go.name = packet.Name ?? $"Entity_{packet.EntityID}";
         go.tag = tag;
         go.transform.SetParent(EntityRoot);

@@ -39,6 +39,11 @@ public class NetworkClient : MonoBehaviour
     [SerializeField] private string serverHost = "127.0.0.1";
     [SerializeField] private int serverPort = 1503;
 
+    public bool IsConnected => connected;
+
+    /// <summary>Fired once when the TCP connection is established (on Unity main thread).</summary>
+    public event System.Action OnConnected;
+
     private TcpClient tcpClient;
     private NetworkStream stream;
     private bool connected;
@@ -84,6 +89,9 @@ public class NetworkClient : MonoBehaviour
         receiveThread.Start();
 
         Debug.Log($"[NET] Connected to {serverHost}:{serverPort}");
+
+        // Notify listeners on main thread
+        UnityMainThreadDispatcher.Enqueue(() => OnConnected?.Invoke());
 
         // StartHeartbeat() should be called manually after login success.
     }

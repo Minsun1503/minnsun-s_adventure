@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 /// <summary>
@@ -11,6 +12,9 @@ using UnityEngine;
 /// </summary>
 public class NetworkManager : MonoBehaviour
 {
+    /// <summary>Fired once when the currently active transport connects (on Unity main thread).</summary>
+    public event Action OnConnected;
+
     private void Awake()
     {
         // Ensure we don't get destroyed on scene load — must persist across all scenes.
@@ -30,6 +34,10 @@ public class NetworkManager : MonoBehaviour
         if (wsClient != null) wsClient.enabled = false;
         Debug.Log($"[NET] Platform: {(Application.isEditor ? "Editor" : Application.platform.ToString())} — using TCP transport");
 #endif
+
+        // Forward the active transport's OnConnected to our own event.
+        if (tcpClient != null) tcpClient.OnConnected += () => OnConnected?.Invoke();
+        if (wsClient != null) wsClient.OnConnected += () => OnConnected?.Invoke();
     }
 
     /// <summary>

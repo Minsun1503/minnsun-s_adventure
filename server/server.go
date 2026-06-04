@@ -144,21 +144,30 @@ func processLogin(conn net.Conn) {
 			return
 		}
 
-		// Look up stored credentials.
-		_, storedHash, found := models.LookupCredentials(auth.username)
-		if !found {
-			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Account does not exist. Please register first.")
-			conn.Close()
-			return
-		}
-		if !models.CheckPasswordHash(auth.password, storedHash) {
-			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid username or password.")
-			conn.Close()
-			return
+		// In dev_mode (no DB), skip credential checks and create a fresh player entity.
+		devMode := models.DBEngine == nil
+		if !devMode {
+			// Look up stored credentials.
+			_, storedHash, found := models.LookupCredentials(auth.username)
+			if !found {
+				protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Account does not exist. Please register first.")
+				conn.Close()
+				return
+			}
+			if !models.CheckPasswordHash(auth.password, storedHash) {
+				protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid username or password.")
+				conn.Close()
+				return
+			}
 		}
 
 		// Auth passed — create ECS entity from saved DB state.
 		playerEntity, err := models.CreatePlayerEntity(conn, auth.username)
+		if devMode && err == nil {
+			// In dev_mode: ensure the entity has a valid metadata name
+			// (CreatePlayerEntity already sets the default Position/Stats/Equipment)
+			logger.Info("[DEV] Skipped DB auth for %s — dev_mode active", auth.username)
+		}
 		if err != nil {
 			logger.Error("[CONNECT] Error loading character from DB: %v", err)
 			protocol.SendErrorPacket(conn, protocol.ErrCodeDatabaseError, "Failed to load character data. Please try again.")
@@ -175,6 +184,30 @@ func processLogin(conn net.Conn) {
 		}
 
 		logger.Info("[CONNECT] %s (entity %d) from %s", snap.Meta.Name, playerEntity, conn.RemoteAddr())
+
+		// Send the player's own SpawnEntity so the client can create their character.
+		selfSpawn := broadcast.BuildSpawnEntity(broadcast.SpawnPayload{
+			EntityID: uint64(playerEntity),
+			Type:     uint8(snap.Meta.Type),
+			MapID:    int32(snap.Pos.MapID),
+			X:        int32(snap.Pos.X),
+			Z:        int32(snap.Pos.Z),
+			Name:     snap.Meta.Name,
+		})
+		_ = netio.WritePacket(conn, selfSpawn)
+
+		// Send the player's own StatsSync so the client can initialize the HUD.
+		selfStats := broadcast.BuildStatsSync(broadcast.StatsSyncPayload{
+			EntityID: uint64(playerEntity),
+			HP:       int32(snap.Stats.HP),
+			MaxHP:    int32(snap.Stats.MaxHP),
+			MP:       int32(snap.Stats.MP),
+			MaxMP:    int32(snap.Stats.MaxMP),
+			Dam:      int32(snap.Stats.Dam),
+			Level:    int32(snap.Stats.Level),
+		})
+		_ = netio.WritePacket(conn, selfStats)
+
 		systems.BroadcastSystem(
 			[]byte(fmt.Sprintf("Player %s has logged into the game!\r\n", snap.Meta.Name)),
 		)
@@ -256,11 +289,16 @@ func main() {
 	db.StartSaveWorkerEngine()
 
 	// Initialize the ECS Entity ID counter to the maximum character ID in the DB to avoid session ID collisions.
-	var maxID uint64
-	if err := models.DBEngine.QueryRow("SELECT COALESCE(MAX(id), 0) FROM characters").Scan(&maxID); err == nil {
-		ecs.GlobalRegistry.SetNextID(maxID)
+	// Skip if DB is not available (dev_mode).
+	if models.DBEngine != nil {
+		var maxID uint64
+		if err := models.DBEngine.QueryRow("SELECT COALESCE(MAX(id), 0) FROM characters").Scan(&maxID); err == nil {
+			ecs.GlobalRegistry.SetNextID(maxID)
+		} else {
+			logger.Error("[BOOT] Failed to scan max character ID: %v", err)
+		}
 	} else {
-		logger.Error("[BOOT] Failed to scan max character ID: %v", err)
+		logger.Info("[BOOT] No DB available — ECS ID counter starts from default (dev_mode).")
 	}
 
 	templates, err := models.LoadMonster("data/monster_templates.json")
