@@ -5,13 +5,15 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math/rand"
 	"net"
 	"os"
 	"os/signal"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"server/peakgo/gmath"
+	"server/peakgo/rng"
 )
 
 // ─── Protocol Opcode Constants (mirrors server/protocol/opcodes.go) ────────────
@@ -201,8 +203,8 @@ func connectAllBots() {
 				username:   username,
 				password:   password,
 				mapID:      mapID,
-				x:          50,
-				z:          50,
+				x:          0,
+				z:          0,
 				stopCh:     make(chan struct{}),
 				readerDone: make(chan struct{}),
 			}
@@ -216,8 +218,6 @@ func connectAllBots() {
 			bots = append(bots, bot)
 			mu.Unlock()
 
-			totalBotsConnected.Add(1)
-			currentBots.Add(1)
 			updatePeak()
 			botCh <- bot
 		}(i)
@@ -312,6 +312,8 @@ func (b *Bot) readLoop() {
 	}()
 
 	b.connected.Store(true)
+	currentBots.Add(1)
+	totalBotsConnected.Add(1)
 
 	// Pre-allocated buffer for the common case (most packets are < 256 bytes)
 	var header [2]byte
@@ -392,32 +394,22 @@ func (b *Bot) sendActions() {
 	// ── Compute next movement ──
 	var targetX, targetZ int32
 
+	// Clump mode: all bots try to move near (0,0)
 	if *flagClump {
-		// Clump near center (48-52 range) — worst-case AOI density
-		targetX = 50 + int32(rand.Intn(5)-2)
-		targetZ = 50 + int32(rand.Intn(5)-2)
+		// Clump near origin (0,0) — worst-case AOI density
+		targetX = int32(rng.Intn(5) - 2)
+		targetZ = int32(rng.Intn(5) - 2)
 	} else if *flagSpread {
 		// Spread mode: bots keep their initial position (no movement)
 		targetX = b.x
 		targetZ = b.z
 	} else {
 		// Default: random walk within map bounds [1, 99]
-		dx := int32(rand.Intn(3) - 1) // -1, 0, or 1
-		dz := int32(rand.Intn(3) - 1)
-		targetX = b.x + dx
-		targetZ = b.z + dz
-		if targetX < 1 {
-			targetX = 1
-		}
-		if targetX > 99 {
-			targetX = 99
-		}
-		if targetZ < 1 {
-			targetZ = 1
-		}
-		if targetZ > 99 {
-			targetZ = 99
-		}
+		dx := int32(rng.Intn(3) - 1) // -1, 0, or 1
+		dz := int32(rng.Intn(3) - 1)
+		tx, tz := gmath.ClampPos(int(b.x+dx), int(b.z+dz), 1, 99)
+		targetX = int32(tx)
+		targetZ = int32(tz)
 	}
 
 	// ── Send MOVE packet ──

@@ -1,0 +1,11 @@
+# import config
+packagefile net=C:\Users\ADMIN\AppData\Local\go-build\3b\3bd390ad9eb1f924999fb6e01115a5493e797a9b85068c9acda17e2b0df9981f-d
+packagefile server/ecs=C:\Users\ADMIN\AppData\Local\go-build\2e\2e078cb9ff650de25d3eac8a18c739cc7c1b711ca54fffbf0ee9c48d5c458521-d
+packagefile server/logger=C:\Users\ADMIN\AppData\Local\go-build\ef\ef355a899a8831e0df53f456e66f537dde457cc9a0db4a92484132a47e1067f4-d
+packagefile server/models=C:\Users\ADMIN\AppData\Local\go-build\b6\b60d6164382a513e88984e4de4d6c349e54947d81af6127515557c6aeaf4c54d-d
+packagefile server/network=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build2706878264\b197\_pkg_.a
+packagefile server/peakgo/broadcast=C:\Users\ADMIN\AppData\Local\go-build\75\75eaf9f78cb31208a5d67a4f079e2cbf9c07bd547155996559ee912b2b762324-d
+packagefile server/peakgo/netio=C:\Users\ADMIN\AppData\Local\go-build\62\62caf0f203833da4249502f0c21c0d81c43d380046b5a9d5a22ba8b7c76d4748-d
+packagefile server/protocol=C:\Users\ADMIN\AppData\Local\go-build\b6\b63b723589a78099cb98f26753ce5219d260c292982b56ac0c59bf53ce376283-d
+packagefile server/world=C:\Users\ADMIN\AppData\Local\go-build\c4\c4d9307530377e4ec9de5df05823bc4529ca6e9518508fad649e68b85ea738e8-d
+packagefile time=C:\Users\ADMIN\AppData\Local\go-build\d3\d3c9032fb1e11e160dda6e4fabf81517243996cc68710d1d03750443f2d68066-d

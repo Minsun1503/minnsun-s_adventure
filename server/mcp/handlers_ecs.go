@@ -15,7 +15,7 @@ func init() {
 		var p struct {
 			Type string `json:"type"` // "player", "monster", "ground_item", or "" for all
 		}
-		if req.Params != nil && len(req.Params) > 0 {
+		if len(req.Params) > 0 {
 			json.Unmarshal(req.Params, &p)
 		}
 
@@ -114,17 +114,17 @@ func init() {
 			return rpcError(req.ID, ErrCodeInternal, fmt.Sprintf("AI for entity %d not found", id))
 		}
 		return rpcResult(req.ID, map[string]any{
-			"state":                 ai.State.String(),
-			"state_code":            int(ai.State),
-			"target_id":             uint64(ai.TargetID),
-			"spawn_x":               ai.SpawnX,
-			"spawn_z":               ai.SpawnZ,
-			"spawn_radius":          ai.SpawnRadius,
-			"aggro_radius":          ai.AggroRadius,
-			"leash_radius":          ai.LeashRadius,
-			"melee_range":           ai.MeleeRange,
-			"attack_cooldown_ticks": ai.AttackTimer.Cooldown(),
-			"idle_cooldown_ticks":   ai.IdleTimer.Cooldown(),
+			"state":               ai.State.String(),
+			"state_code":          int(ai.State),
+			"target_id":           uint64(ai.TargetID),
+			"spawn_x":             ai.SpawnX,
+			"spawn_z":             ai.SpawnZ,
+			"spawn_radius":        ai.SpawnRadius,
+			"aggro_radius":        ai.AggroRadius,
+			"leash_radius":        ai.LeashRadius,
+			"melee_range":         ai.MeleeRange,
+			"attack_cooldown":     ai.AttackTimer.GetCooldown(),
+			"idle_cooldown":       ai.IdleTimer.GetCooldown(),
 		})
 	})
 

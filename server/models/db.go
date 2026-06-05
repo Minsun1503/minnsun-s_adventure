@@ -40,10 +40,28 @@ func InitializeDatabase(dsn string) {
 		return
 	}
 
-	// Use database
-	_, err = DBEngine.Exec("USE minnsun_adventure")
+	// Close the initial connection pool and reconnect with the database selected.
+	DBEngine.Close()
+
+	dbDSN := ""
+	for i := 0; i < len(dsn)-1; i++ {
+		if dsn[i] == '/' && dsn[i+1] == '?' {
+			dbDSN = dsn[:i+1] + "minnsun_adventure" + dsn[i+1:]
+			break
+		}
+	}
+	if dbDSN == "" {
+		dbDSN = dsn + "minnsun_adventure"
+	}
+
+	DBEngine, err = sql.Open("mysql", dbDSN)
 	if err != nil {
-		logger.Warn("[DATABASE] Failed to select database: %v — running in dev_mode (no DB)", err)
+		logger.Warn("[DATABASE] Failed to reconnect with DB: %v — running in dev_mode (no DB)", err)
+		DBEngine = nil
+		return
+	}
+	if err = DBEngine.Ping(); err != nil {
+		logger.Warn("[DATABASE] Ping failed on reconnect: %v — running in dev_mode (no DB)", err)
 		DBEngine = nil
 		return
 	}

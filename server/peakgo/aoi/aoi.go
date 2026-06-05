@@ -2,6 +2,7 @@ package aoi
 
 import (
 	"server/ecs"
+	"server/peakgo/perf"
 	"server/peakgo/pool"
 	"sync"
 )
@@ -127,6 +128,7 @@ func (m *AOIManager) UpdateAll(
 // the count is already ≤ MaxAOIWatchers.
 func (m *AOIManager) updateOne(entity ecs.Entity, w *Watcher, pos ecs.PositionComponent, query SpatialQueryFunc, onEvent AOIEventCallback) {
 	raw := query(pos, w.radius, entity)
+	perf.GlobalPacketMonitor.RecordAoiQuery()
 	if raw == nil {
 		return
 	}

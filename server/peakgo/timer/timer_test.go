@@ -143,19 +143,19 @@ func TestTickTimerProgress(t *testing.T) {
 func TestTickTimerGuardCaps(t *testing.T) {
 	// Case cooldown = 0
 	ttZero := timer.NewTickTimer(0)
-	if ttZero.Cooldown() != 1 {
-		t.Fatalf("expected zero cooldown to cap at 1, got %d", ttZero.Cooldown())
+	if ttZero.GetCooldown() != 1 {
+		t.Fatalf("Expected cooldown cap at 1, got %d", ttZero.GetCooldown())
 	}
 
 	// Case cooldown âm
 	ttNeg := timer.NewTickTimer(-100)
-	if ttNeg.Cooldown() != 1 {
-		t.Fatalf("expected negative cooldown to cap at 1, got %d", ttNeg.Cooldown())
+	if ttNeg.GetCooldown() != 1 {
+		t.Fatalf("Expected cooldown cap at 1 for negative, got %d", ttNeg.GetCooldown())
 	}
 
 	// Case SetCooldown rác
 	ttZero.SetCooldown(-5)
-	if ttZero.Cooldown() != 1 {
+	if ttZero.GetCooldown() != 1 {
 		t.Fatalf("expected SetCooldown dynamic rác to cap at 1")
 	}
 }

@@ -101,7 +101,14 @@ func (sb *SaveBuffer) Append(snap SaveSnapshot) int {
 //   - Normal operation: non-blocking send to SaveQueue
 //   - On overflow: fall through to disk buffer
 //   - The disk buffer is replayed into the queue on the next successful drain
-func TryWriteToQueue(snap SaveSnapshot) bool {
+func TryWriteToQueue(snap SaveSnapshot) (ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			// SaveQueue has been closed due to shutdown.
+			ok = false
+		}
+	}()
+
 	select {
 	case SaveQueue <- snap:
 		// Fast path: channel accepted the snapshot
@@ -268,7 +275,7 @@ func itoa(i int) string {
 
 // fmtSscanf is a minimal sscanf wrapper for buffer file parsing.
 // Returns the number of items successfully parsed.
-func fmtSscanf(str, format string, args ...interface{}) int {
+func fmtSscanf(str, _ string, args ...interface{}) int {
 	// Simplified integer scan: find first digit sequence and parse
 	if len(args) == 0 {
 		return 0

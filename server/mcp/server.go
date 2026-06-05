@@ -301,7 +301,7 @@ func parseOptionalEntityParam(params json.RawMessage) (ecs.Entity, error) {
 	var p struct {
 		ID uint64 `json:"id"`
 	}
-	if params == nil || len(params) == 0 {
+	if len(params) == 0 {
 		return 0, nil // no params provided — caller handles default
 	}
 	if err := json.Unmarshal(params, &p); err != nil {

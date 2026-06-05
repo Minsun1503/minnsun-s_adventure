@@ -46,6 +46,8 @@ func opcodeNameOf(op byte) string {
 //   - playerEntity: ECS entity ID.
 //   - snap:         Pre-fetched snapshot (name + spawn position already resolved).
 func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapshot) {
+	isBot := len(snap.Meta.Name) >= 3 && snap.Meta.Name[:3] == "bot"
+
 	// Deferred cleanup: broadcast logout, remove from ECS, close socket.
 	defer func() {
 		name := snap.Meta.Name
@@ -59,19 +61,25 @@ func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		world.GlobalSpatialGrid.RemoveEntity(playerEntity)
 		ecs.DefaultRegistry.RemoveEntity(playerEntity)
 		models.ActivePlayers.Delete(conn.RemoteAddr().String())
-		logger.Info("[DISCONNECT] %s (%s)", name, conn.RemoteAddr())
-		systems.BroadcastSystem(
-			[]byte(fmt.Sprintf("Player %s has logged out the game!\r\n", name)),
-		)
+
+		if !isBot {
+			logger.Info("[DISCONNECT] %s (%s)", name, conn.RemoteAddr())
+			systems.BroadcastSystem(
+				[]byte(fmt.Sprintf("Player %s has logged out the game!\r\n", name)),
+			)
+		}
 		conn.Close()
 	}()
 
 	// Greet the player with their name and spawn position — both already in snap.
-	spawnMsg := fmt.Sprintf(
-		"Welcome to the Realm, %s!\r\nYour Spawn Position is X: %d, Z: %d\r\n",
-		snap.Meta.Name, snap.Pos.X, snap.Pos.Z,
-	)
-	systems.SendNoticeSystem(playerEntity, []byte(spawnMsg))
+	// Only for real players to save allocation and bandwidth.
+	if !isBot {
+		spawnMsg := fmt.Sprintf(
+			"Welcome to the Realm, %s!\r\nYour Spawn Position is X: %d, Z: %d\r\n",
+			snap.Meta.Name, snap.Pos.X, snap.Pos.Z,
+		)
+		systems.SendNoticeSystem(playerEntity, []byte(spawnMsg))
+	}
 
 	_ = conn.SetReadDeadline(time.Now().Add(45 * time.Second))
 

@@ -553,3 +553,13 @@ func hasLineOfSight(x1, z1, x2, z2 int, isWalkable IsWalkable) bool {
 
 	return isWalkable(x, z)
 }
+
+// GobEncode implements the gob.GobEncoder interface to prevent gob from trying to encode unexported fields.
+func (pc *PathCache) GobEncode() ([]byte, error) {
+	return nil, nil
+}
+
+// GobDecode implements the gob.GobDecoder interface to satisfy gob deserialization.
+func (pc *PathCache) GobDecode(data []byte) error {
+	return nil
+}

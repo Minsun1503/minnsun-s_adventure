@@ -5,6 +5,9 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
+	"runtime/pprof"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -25,7 +28,19 @@ import (
 
 func main() {
 	devMode := flag.Bool("dev", false, "Chạy server ở chế độ Development (không cần Database)")
+	cpuprofile := flag.String("cpuprofile", "", "Write cpu profile to file")
+	memprofile := flag.String("memprofile", "", "Write memory profile to this file")
 	flag.Parse()
+
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			logger.Error("Could not create CPU profile: %v", err)
+			return
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
 
 	logger.Init() // Must be first: reads data/config.json, starts async log worker
 
@@ -58,7 +73,7 @@ func main() {
 	} else {
 		models.InitializeDatabase("root:root@tcp(127.0.0.1:3306)/?parseTime=true")
 	}
-	
+
 	db.StartSaveWorkerEngine()
 
 	// Initialize the ECS Entity ID counter to the maximum character ID in the DB to avoid session ID collisions.
@@ -135,14 +150,29 @@ func main() {
 	adminServer.Start()
 	logger.Info("[BOOT] Admin dashboard available on http://localhost:9090/")
 
-	// Start the periodic background alert monitor goroutine.
-	// Samples memory and save queue every 5 seconds, checking thresholds.
+	// Start the periodic background alert monitor and metrics logger goroutine.
+	// Samples memory, logs performance metrics, and checks thresholds every 5 seconds.
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
+		var lastReport perf.Report
 		for range ticker.C {
-			// Sample memory and alert on threshold breach
-			if snap := perf.GlobalMemMonitor.Sample(); snap != nil {
+			// Trigger a forced memory sample for accurate reporting
+			snap := perf.GlobalMemMonitor.Sample()
+
+			report := perf.Collect(perf.GlobalTickMonitor, perf.GlobalPacketMonitor, perf.GlobalMemMonitor)
+
+			aoiSec := (report.AoiQueries - lastReport.AoiQueries) / 5
+			bcastSec := (report.Broadcasts - lastReport.Broadcasts) / 5
+
+			// Print human-readable metrics report
+			logger.Info("[METRICS] TickAvg: %v | HeapAlloc: %d MB | GC: %d | Goroutines: %d | AOI/s: %d | Broadcast/s: %d",
+				report.TickAvg, report.Alloc/1024/1024, report.NumGC, report.Goroutines, aoiSec, bcastSec)
+
+			lastReport = report
+
+			// Alert on threshold breaches
+			if snap != nil {
 				perf.GlobalAlertMonitor.CheckHeapSize(snap.Alloc)
 			}
 
@@ -168,20 +198,23 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	var shuttingDown atomic.Bool
+
 	go func() {
 		sig := <-sigCh
+		shuttingDown.Store(true)
 		logger.Info("[SHUTDOWN] Received signal %v — starting graceful shutdown...", sig)
 
-		// Step 1: Take a shutdown snapshot for crash recovery.
+		// Step 1: Close the TCP listener to stop accepting new connections.
+		lis.Close()
+		logger.Info("[SHUTDOWN] TCP listener closed.")
+
+		// Step 2: Take a shutdown snapshot for crash recovery.
 		world.TakeShutdownSnapshot()
 		logger.Info("[SHUTDOWN] Shutdown snapshot taken.")
 
-		// Step 2: Flush the save queue — drain all pending snapshots to DB.
+		// Step 3: Flush the save queue — drain all pending snapshots to DB.
 		db.FlushSaveQueue()
-
-		// Step 3: Close the TCP listener to stop accepting new connections.
-		lis.Close()
-		logger.Info("[SHUTDOWN] TCP listener closed.")
 
 		// Step 4: Shutdown all MapWorkers gracefully.
 		if world.GlobalWorld != nil {
@@ -189,14 +222,32 @@ func main() {
 		}
 		logger.Info("[SHUTDOWN] All MapWorkers shut down.")
 
-		// Step 5: Log shutdown complete.
+		if *memprofile != "" {
+			f, err := os.Create(*memprofile)
+			if err != nil {
+				logger.Error("Could not create memory profile: %v", err)
+			} else {
+				runtime.GC() // get up-to-date statistics
+				if err := pprof.WriteHeapProfile(f); err != nil {
+					logger.Error("Could not write memory profile: %v", err)
+				}
+				f.Close()
+			}
+		}
+
+		// Step 5: Log shutdown complete and flush all logs.
 		logger.Info("[SHUTDOWN] Server shut down gracefully.")
+		logger.Flush()
 		os.Exit(0)
 	}()
 
 	for {
 		conn, err := lis.Accept()
 		if err != nil {
+			if shuttingDown.Load() {
+				// Block and let the shutdown handler exit cleanly via os.Exit(0)
+				select {}
+			}
 			logger.Error("[ACCEPT] Error: %v", err)
 			return
 		}

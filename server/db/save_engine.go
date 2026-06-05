@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"server/ecs"
 	"server/logger"
@@ -113,7 +112,7 @@ func writeRecoveryCheckpoint() {
 	defer f.Close()
 
 	timestamp := time.Now().UTC().Format(time.RFC3339)
-	line := fmt.Sprintf("CHECKPOINT %s\n", timestamp)
+	line := "CHECKPOINT " + timestamp + "\n"
 	if _, err := f.WriteString(line); err != nil {
 		logger.Error("[PERSISTENCE] Failed to write recovery checkpoint: %v", err)
 	}
@@ -142,7 +141,10 @@ func FlushSaveQueue() {
 // drains the queue. Position and stats are value-type fields (copied by value out of
 // sync.Map) so they are inherently snapshot-safe as well.
 func QueuePlayerSave(playerID ecs.Entity) {
-	meta, _ := ecs.DefaultRegistry.GetMetadata(playerID)
+	meta, ok := ecs.DefaultRegistry.GetMetadata(playerID)
+	if !ok || (len(meta.Name) >= 3 && meta.Name[:3] == "bot") {
+		return
+	}
 	pos, _ := ecs.DefaultRegistry.GetPosition(playerID)
 	stats, _ := ecs.DefaultRegistry.GetStats(playerID)
 
@@ -176,9 +178,9 @@ func QueuePlayerSave(playerID ecs.Entity) {
 }
 
 func executeWriteToSQL(snap SaveSnapshot) {
-	if models.DBEngine == nil {
-		// Ở dev_mode, ta không có kết nối DB để lưu. Chỉ log giả lập hoặc bỏ qua.
-		logger.Debug("[DB SAVE] Dev mode active. Skipped SQL write for entity #%d", snap.EntityID)
+	if models.DBEngine == nil || (len(snap.Name) >= 3 && snap.Name[:3] == "bot") {
+		// Ở dev_mode hoặc là bot, ta không có kết nối DB để lưu hoặc bỏ qua lưu bot.
+		logger.Debug("[DB SAVE] Dev mode or bot active. Skipped SQL write for entity #%d", snap.EntityID)
 		return
 	}
 

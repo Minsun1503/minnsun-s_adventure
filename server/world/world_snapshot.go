@@ -143,6 +143,11 @@ func takeWorldSnapshot(snapshotType string) {
 			continue
 		}
 
+		// Skip bot players from world snapshot
+		if meta.Type == ecs.EntityPlayer && len(meta.Name) >= 3 && meta.Name[:3] == "bot" {
+			continue
+		}
+
 		pos, hasPos := ecs.DefaultRegistry.GetPosition(id)
 		stats, hasStats := ecs.DefaultRegistry.GetStats(id)
 

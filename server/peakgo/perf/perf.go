@@ -234,8 +234,10 @@ type PacketMonitor struct {
 	packetsOut uint64 // Total packets sent
 	bytesIn    uint64 // Total bytes received
 	bytesOut   uint64 // Total bytes sent
-	peakIn     uint64 // Peak inbound packets per second
-	peakOut    uint64 // Peak outbound packets per second
+	peakIn       uint64 // Peak inbound packets per second
+	peakOut      uint64 // Peak outbound packets per second
+	aoiQueries   uint64 // Total AOI queries executed
+	broadcasts   uint64 // Total Broadcast packets sent
 }
 
 // RecordIn records an inbound packet.
@@ -250,12 +252,24 @@ func (pm *PacketMonitor) RecordOut(bytes int) {
 	atomic.AddUint64(&pm.bytesOut, uint64(bytes))
 }
 
+// RecordAoiQuery records a single AOI spatial query execution.
+func (pm *PacketMonitor) RecordAoiQuery() {
+	atomic.AddUint64(&pm.aoiQueries, 1)
+}
+
+// RecordBroadcast records a broadcast packet sent.
+func (pm *PacketMonitor) RecordBroadcast() {
+	atomic.AddUint64(&pm.broadcasts, 1)
+}
+
 // Snapshot returns the current packet statistics.
-func (pm *PacketMonitor) Snapshot() (packetsIn, packetsOut, bytesIn, bytesOut uint64) {
+func (pm *PacketMonitor) Snapshot() (packetsIn, packetsOut, bytesIn, bytesOut, aoi, bcast uint64) {
 	return atomic.LoadUint64(&pm.packetsIn),
 		atomic.LoadUint64(&pm.packetsOut),
 		atomic.LoadUint64(&pm.bytesIn),
-		atomic.LoadUint64(&pm.bytesOut)
+		atomic.LoadUint64(&pm.bytesOut),
+		atomic.LoadUint64(&pm.aoiQueries),
+		atomic.LoadUint64(&pm.broadcasts)
 }
 
 // Reset resets all counters.
@@ -266,6 +280,8 @@ func (pm *PacketMonitor) Reset() {
 	atomic.StoreUint64(&pm.bytesOut, 0)
 	atomic.StoreUint64(&pm.peakIn, 0)
 	atomic.StoreUint64(&pm.peakOut, 0)
+	atomic.StoreUint64(&pm.aoiQueries, 0)
+	atomic.StoreUint64(&pm.broadcasts, 0)
 }
 
 // ─── Report ───────────────────────────────────────────────────────────────────
@@ -280,6 +296,8 @@ type Report struct {
 	PacketsOut  uint64
 	BytesIn     uint64
 	BytesOut    uint64
+	AoiQueries  uint64
+	Broadcasts  uint64
 	Alloc       uint64
 	HeapObjects uint64
 	Goroutines  int
@@ -297,7 +315,7 @@ func Collect(tm *TickMonitor, pm *PacketMonitor, mm *MemMonitor) Report {
 		Goroutines: runtime.NumGoroutine(),
 	}
 
-	report.PacketsIn, report.PacketsOut, report.BytesIn, report.BytesOut = pm.Snapshot()
+	report.PacketsIn, report.PacketsOut, report.BytesIn, report.BytesOut, report.AoiQueries, report.Broadcasts = pm.Snapshot()
 
 	if snap := mm.Last(); snap.Alloc > 0 {
 		report.Alloc = snap.Alloc

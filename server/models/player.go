@@ -229,8 +229,13 @@ func RegisterNewAccount(username, passwordHash string) error {
 func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 	playerAddress := conn.RemoteAddr().String()
 
+	isBot := len(username) >= 3 && username[:3] == "bot"
+	var saved *savedPlayerData
+
 	// Phase 1: Load saved state if this username has been here before.
-	saved := loadSavedPlayerState(username)
+	if !isBot {
+		saved = loadSavedPlayerState(username)
+	}
 
 	// Phase 2: Select/Generate entity ID.
 	var entityID ecs.Entity
@@ -240,8 +245,8 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 		entityID = ecs.DefaultRegistry.NewEntity()
 	}
 
-	// Phase 3: Persist to database (only if brand new player).
-	if DBEngine != nil && saved == nil {
+	// Phase 3: Persist to database (only if brand new player and not a bot).
+	if DBEngine != nil && saved == nil && !isBot {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 

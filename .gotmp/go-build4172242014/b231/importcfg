@@ -1,0 +1,18 @@
+# import config
+packagefile context=C:\Users\ADMIN\AppData\Local\go-build\08\08c817609b39a2eb6ca37603adc013f3fe07fd7b75835ada92501104b2045408-d
+packagefile encoding/json=C:\Users\ADMIN\AppData\Local\go-build\d7\d72c691f865461cb5df3503774ff25d037fb3716cb900a1530fa4da461bfde75-d
+packagefile fmt=C:\Users\ADMIN\AppData\Local\go-build\40\4000d30d23188cb38449f61c759d0143495d1da30e9843200257422e199ca34e-d
+packagefile io=C:\Users\ADMIN\AppData\Local\go-build\22\2220ba82378c07c1696faa2787e61e557eb815293dd2f3f02043edb64d0f608d-d
+packagefile net/http=C:\Users\ADMIN\AppData\Local\go-build\0c\0cbd6514b9f958a34b7cdb95d80ce1cf88b9d73375c3359a84a5e188dd845392-d
+packagefile os=C:\Users\ADMIN\AppData\Local\go-build\1f\1fdb4d48a4147d507d48bbc8aa2c553d6ff4ee4347742abee55f98d5c5ad03dc-d
+packagefile os/signal=C:\Users\ADMIN\AppData\Local\go-build\fd\fd7063b149c265f7a5fc5d2b37a258f4c56e7754585fad0a6098c82c64a9dcca-d
+packagefile server/ecs=C:\Users\ADMIN\AppData\Local\go-build\2e\2e078cb9ff650de25d3eac8a18c739cc7c1b711ca54fffbf0ee9c48d5c458521-d
+packagefile server/game=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build4172242014\b217\_pkg_.a
+packagefile server/logger=C:\Users\ADMIN\AppData\Local\go-build\ef\ef355a899a8831e0df53f456e66f537dde457cc9a0db4a92484132a47e1067f4-d
+packagefile server/models=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build4172242014\b100\_pkg_.a
+packagefile server/protocol=C:\Users\ADMIN\AppData\Local\go-build\b6\b63b723589a78099cb98f26753ce5219d260c292982b56ac0c59bf53ce376283-d
+packagefile server/systems=C:\Users\ADMIN\AppData\Local\go-build\43\43dd662dd46fb6ecd2fc05f40ce7e307bc29880b57bab0126f9991559005e5c7-d
+packagefile server/world=C:\Users\ADMIN\AppData\Local\go-build\c4\c4d9307530377e4ec9de5df05823bc4529ca6e9518508fad649e68b85ea738e8-d
+packagefile sync=C:\Users\ADMIN\AppData\Local\go-build\2e\2e2a56c4fb0662e67243a5ba1c7c8a58cb9d3d9502da34339df854d70b628846-d
+packagefile syscall=C:\Users\ADMIN\AppData\Local\go-build\65\65d0aa6568754dcda4cd2d3264f5532db35cab468965fc4b09acffc1e9895153-d
+packagefile time=C:\Users\ADMIN\AppData\Local\go-build\d3\d3c9032fb1e11e160dda6e4fabf81517243996cc68710d1d03750443f2d68066-d

@@ -1,0 +1,22 @@
+# import config
+packagefile flag=C:\Users\ADMIN\AppData\Local\go-build\1e\1e5ed6e066deda8a06b515c63ac18f7e0580856a2436f55c7a47feacf72a350e-d
+packagefile net=C:\Users\ADMIN\AppData\Local\go-build\3b\3bd390ad9eb1f924999fb6e01115a5493e797a9b85068c9acda17e2b0df9981f-d
+packagefile os=C:\Users\ADMIN\AppData\Local\go-build\1f\1fdb4d48a4147d507d48bbc8aa2c553d6ff4ee4347742abee55f98d5c5ad03dc-d
+packagefile os/signal=C:\Users\ADMIN\AppData\Local\go-build\fd\fd7063b149c265f7a5fc5d2b37a258f4c56e7754585fad0a6098c82c64a9dcca-d
+packagefile runtime=C:\Users\ADMIN\AppData\Local\go-build\b9\b9ef32e29be838fafc6850e175a564710847b50fd938e85c7ae7535766e7e475-d
+packagefile runtime/pprof=C:\Users\ADMIN\AppData\Local\go-build\bd\bda76962f32d6b30f4aba7981438f4c21d10532e7aeff192bc3a0aceadcf4863-d
+packagefile server/auth=C:\Users\ADMIN\AppData\Local\go-build\d1\d112e933a6841aa55fd9a268c7ec1f97c4751cdf9bc8f032f2cf04b18f679a09-d
+packagefile server/db=C:\Users\ADMIN\AppData\Local\go-build\aa\aa9c563966f56ec0ef7db897bf4c37419b25eb4e5101ecd379253ab783817498-d
+packagefile server/ecs=C:\Users\ADMIN\AppData\Local\go-build\2e\2e078cb9ff650de25d3eac8a18c739cc7c1b711ca54fffbf0ee9c48d5c458521-d
+packagefile server/game=C:\Users\ADMIN\AppData\Local\go-build\0e\0e16138dd704e4b39b486ce1fe2bdddb873e2089fd2a1884de1732573dc2514a-d
+packagefile server/logger=C:\Users\ADMIN\AppData\Local\go-build\ef\ef355a899a8831e0df53f456e66f537dde457cc9a0db4a92484132a47e1067f4-d
+packagefile server/mcp=C:\Users\ADMIN\AppData\Local\go-build\9c\9cd211d3c9ebcbcbdaf5b5a92a8761e069bb3432f3641ebe39156a9eae20c8d6-d
+packagefile server/models=C:\Users\ADMIN\AppData\Local\go-build\2f\2f6bb9387c69bcb7063d100191cd4b561379021c70968003b59ea1a669fdd1e0-d
+packagefile server/network=C:\Users\ADMIN\AppData\Local\go-build\a1\a1b88278a4bc193115e6933a4368295590f31b070162916274f0ce4fac0cbcf2-d
+packagefile server/peakgo/perf=C:\Users\ADMIN\AppData\Local\go-build\3e\3e0be3c537894e2f90737f03ddf9d29b0feeccf7277b7f30aa0600e90c5ffa48-d
+packagefile server/protocol=C:\Users\ADMIN\AppData\Local\go-build\b6\b63b723589a78099cb98f26753ce5219d260c292982b56ac0c59bf53ce376283-d
+packagefile server/systems=C:\Users\ADMIN\AppData\Local\go-build\f4\f48b2904ce1913ffe8c8e598755127290678279e908a3cdbb66ed5c01f0acc3e-d
+packagefile server/transport=C:\Users\ADMIN\AppData\Local\go-build\e6\e60b9f74dc80259e47a422b7884571395278ed7efee56db1ae5055b805b3767c-d
+packagefile server/world=C:\Users\ADMIN\AppData\Local\go-build\c4\c4d9307530377e4ec9de5df05823bc4529ca6e9518508fad649e68b85ea738e8-d
+packagefile syscall=C:\Users\ADMIN\AppData\Local\go-build\65\65d0aa6568754dcda4cd2d3264f5532db35cab468965fc4b09acffc1e9895153-d
+packagefile time=C:\Users\ADMIN\AppData\Local\go-build\d3\d3c9032fb1e11e160dda6e4fabf81517243996cc68710d1d03750443f2d68066-d

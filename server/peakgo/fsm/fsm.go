@@ -291,7 +291,7 @@ func (st *StateTimer[S, E]) Tick() bool {
 	}
 
 	// Configure timer if not yet set
-	if st.FSM.Ticker.Cooldown() != timeout {
+	if st.FSM.Ticker.GetCooldown() != timeout {
 		st.FSM.Ticker.SetCooldown(timeout)
 	}
 

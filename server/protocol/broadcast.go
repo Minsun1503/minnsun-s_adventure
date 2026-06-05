@@ -4,6 +4,7 @@ import (
 	"net"
 	"server/ecs"
 	"server/peakgo/netio"
+	"server/peakgo/perf"
 	"server/world"
 )
 
@@ -40,6 +41,7 @@ func BroadcastToNeighbors(origin ecs.PositionComponent, data []byte, excludeID e
 		}
 		// Monster/ground-item entities without net connections are skipped automatically.
 		writeConn(connComp.Conn, data)
+		perf.GlobalPacketMonitor.RecordBroadcast()
 	}
 	world.FreeQueryCandidates(candidates)
 }
@@ -62,6 +64,7 @@ func BroadcastToChunk(pos ecs.PositionComponent, data []byte, excludeID ecs.Enti
 			continue
 		}
 		writeConn(connComp.Conn, data)
+		perf.GlobalPacketMonitor.RecordBroadcast()
 	}
 }
 
@@ -76,6 +79,7 @@ func BroadcastToChunkWithRadius(pos ecs.PositionComponent, data []byte, excludeI
 			continue
 		}
 		writeConn(connComp.Conn, data)
+		perf.GlobalPacketMonitor.RecordBroadcast()
 	}
 	world.FreeQueryCandidates(candidates)
 }

@@ -1,0 +1,12 @@
+# import config
+packagefile context=C:\Users\ADMIN\AppData\Local\go-build\08\08c817609b39a2eb6ca37603adc013f3fe07fd7b75835ada92501104b2045408-d
+packagefile encoding/gob=C:\Users\ADMIN\AppData\Local\go-build\5f\5f15b3391be478a933a0cde754bc8024cceaf6b431afea08084fbd807509661f-d
+packagefile fmt=C:\Users\ADMIN\AppData\Local\go-build\40\4000d30d23188cb38449f61c759d0143495d1da30e9843200257422e199ca34e-d
+packagefile os=C:\Users\ADMIN\AppData\Local\go-build\1f\1fdb4d48a4147d507d48bbc8aa2c553d6ff4ee4347742abee55f98d5c5ad03dc-d
+packagefile path/filepath=C:\Users\ADMIN\AppData\Local\go-build\bd\bd81532734cbaf612217c177517cbd5ad3faa34308e9d868e4c78dff14980c74-d
+packagefile server/ecs=C:\Users\ADMIN\AppData\Local\go-build\2e\2e078cb9ff650de25d3eac8a18c739cc7c1b711ca54fffbf0ee9c48d5c458521-d
+packagefile server/logger=C:\Users\ADMIN\AppData\Local\go-build\ef\ef355a899a8831e0df53f456e66f537dde457cc9a0db4a92484132a47e1067f4-d
+packagefile server/models=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build4172242014\b100\_pkg_.a
+packagefile strings=C:\Users\ADMIN\AppData\Local\go-build\44\443b92438e1c52de972f8d942b064a27bec5076fab15c839f5a31f73bdf5d40b-d
+packagefile sync=C:\Users\ADMIN\AppData\Local\go-build\2e\2e2a56c4fb0662e67243a5ba1c7c8a58cb9d3d9502da34339df854d70b628846-d
+packagefile time=C:\Users\ADMIN\AppData\Local\go-build\d3\d3c9032fb1e11e160dda6e4fabf81517243996cc68710d1d03750443f2d68066-d

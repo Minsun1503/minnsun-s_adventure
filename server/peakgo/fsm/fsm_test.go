@@ -274,7 +274,7 @@ func TestFSMDefDuplicateTransitionPanics(t *testing.T) {
 		}
 	}()
 
-	_ = NewFSMDef[MonsterState, MonsterEvent](Idle, []TransitionRule[MonsterState, MonsterEvent]{
+	_ = NewFSMDef(Idle, []TransitionRule[MonsterState, MonsterEvent]{
 		{Idle, SeePlayer, Chase},
 		{Idle, SeePlayer, Attack}, // Duplicate!
 	})

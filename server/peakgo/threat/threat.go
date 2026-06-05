@@ -302,3 +302,13 @@ func (t *ThreatTable) Close() {
 	t.Clear()
 	tablePool.Put(t)
 }
+
+// GobEncode implements the gob.GobEncoder interface to prevent gob from trying to encode unexported fields.
+func (t *ThreatTable) GobEncode() ([]byte, error) {
+	return nil, nil
+}
+
+// GobDecode implements the gob.GobDecoder interface to satisfy gob deserialization.
+func (t *ThreatTable) GobDecode(data []byte) error {
+	return nil
+}

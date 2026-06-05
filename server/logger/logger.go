@@ -75,6 +75,7 @@ var (
 	debugMode    atomic.Bool   // true = print DEBUG entries
 	logChannel   chan logEntry // async buffer
 	shutdownOnce sync.Once
+	isClosed     atomic.Bool           // true = logger is shutting down
 	done         = make(chan struct{}) // signals worker has flushed and exited
 
 	// file rotation state (guarded by fileMu)
@@ -144,7 +145,9 @@ func Error(format string, args ...any) {
 // the background worker. Call this once during graceful server shutdown.
 func Flush() {
 	shutdownOnce.Do(func() {
-		close(logChannel)
+		isClosed.Store(true)
+		// Send sentinel entry with level -1 to shut down the worker
+		logChannel <- logEntry{lv: level(-1)}
 		<-done
 	})
 }
@@ -162,7 +165,7 @@ func IsDebug() bool {
 // ─── Internal ────────────────────────────────────────────────────────────────
 
 func push(lv level, format string, args ...any) {
-	if logChannel == nil {
+	if logChannel == nil || isClosed.Load() {
 		return
 	}
 
@@ -182,7 +185,15 @@ func push(lv level, format string, args ...any) {
 	// WARN and ERROR always make it through (block if needed).
 	// DEBUG and INFO are dropped if the channel is full to protect the game loop.
 	if lv >= levelWarn {
-		logChannel <- entry
+		select {
+		case logChannel <- entry:
+		default:
+			// If logger is closed or channel is full during shutdown, don't block
+			if isClosed.Load() {
+				return
+			}
+			logChannel <- entry
+		}
 	} else {
 		select {
 		case logChannel <- entry:
@@ -196,14 +207,26 @@ func push(lv level, format string, args ...any) {
 func runWorker() {
 	defer close(done)
 	for entry := range logChannel {
+		if entry.lv == -1 {
+			break
+		}
 		writeEntry(entry)
 	}
-	// Drain is complete — close the current log file cleanly.
-	fileMu.Lock()
-	if currentFile != nil {
-		currentFile.Close()
+
+	// Drain any leftover entries that got pushed concurrently so we don't block callers
+	for {
+		select {
+		case <-logChannel:
+		default:
+			// File closure
+			fileMu.Lock()
+			if currentFile != nil {
+				currentFile.Close()
+			}
+			fileMu.Unlock()
+			return
+		}
 	}
-	fileMu.Unlock()
 }
 
 // writeEntry formats and writes one log entry to console + file.

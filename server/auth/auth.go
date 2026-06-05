@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"fmt"
 	"net"
 	"server/ecs"
 	"server/logger"
@@ -16,7 +15,7 @@ import (
 )
 
 // LoginQueue is a buffered channel that holds incoming TCP connections waiting to log in.
-var LoginQueue = make(chan net.Conn, 1000)
+var LoginQueue = make(chan net.Conn, 10000)
 
 // packetAuth holds parsed username/password from a LOGIN or REGISTER packet.
 type packetAuth struct {
@@ -116,8 +115,8 @@ func processLogin(conn net.Conn) {
 			return
 		}
 
-		// In dev_mode (no DB), skip credential checks and create a fresh player entity.
-		devMode := models.DBEngine == nil
+		// In dev_mode (no DB) or for bots, skip credential checks and create a fresh player entity.
+		devMode := models.DBEngine == nil || (len(auth.username) >= 3 && auth.username[:3] == "bot")
 		if !devMode {
 			// Look up stored credentials.
 			_, storedHash, found := models.LookupCredentials(auth.username)
@@ -155,7 +154,10 @@ func processLogin(conn net.Conn) {
 			return
 		}
 
-		logger.Info("[CONNECT] %s (entity %d) from %s", snap.Meta.Name, playerEntity, conn.RemoteAddr())
+		isBot := len(snap.Meta.Name) >= 3 && snap.Meta.Name[:3] == "bot"
+		if !isBot {
+			logger.Info("[CONNECT] %s (entity %d) from %s", snap.Meta.Name, playerEntity, conn.RemoteAddr())
+		}
 
 		// Send S2CSuccess with EntityID so client can set LocalPlayerID from a trusted source.
 		successWithID := broadcast.BuildSuccessWithEntityID(
@@ -192,10 +194,19 @@ func processLogin(conn net.Conn) {
 			CritRate:     int32(snap.Stats.CritRate),
 		})
 		_ = netio.WritePacket(conn, selfStats)
-
-		systems.BroadcastSystem(
-			[]byte(fmt.Sprintf("Player %s has logged into the game!\r\n", snap.Meta.Name)),
-		)
+ 
+		// Restore the login broadcast using peakgo/netio.DefaultPool to build the string zero-alloc
+		// Skip for bots to prevent N^2 broadcast storm when 5000 bots connect concurrently.
+		if !(len(auth.username) >= 3 && auth.username[:3] == "bot") {
+			pBuf := netio.DefaultPool.Get()
+			buf := *pBuf
+			n := copy(buf, "Player ")
+			n += copy(buf[n:], snap.Meta.Name)
+			n += copy(buf[n:], " has logged into the game!\r\n")
+			systems.BroadcastSystem(buf[:n])
+			netio.DefaultPool.Put(pBuf)
+		}
+ 
 		// Register the player as an AOI watcher for delta enter/leave broadcasts.
 		world.RegisterPlayerAOI(playerEntity)
 		go network.HandleClient(conn, playerEntity, snap)

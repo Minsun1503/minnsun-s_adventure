@@ -25,8 +25,8 @@ import (
 // TickTimer counts game-loop ticks and fires when a cooldown is reached.
 // Stored as an inline value — copy-modify-overwrite like all ECS components.
 type TickTimer struct {
-	cur      int // Ticks elapsed since last reset
-	cooldown int // Ticks required before Ready() returns true
+	Cur      int // Ticks elapsed since last reset
+	Cooldown int // Ticks required before Ready() returns true
 }
 
 // NewTickTimer creates a TickTimer with the given cooldown duration (in ticks).
@@ -35,27 +35,27 @@ func NewTickTimer(cooldown int) TickTimer {
 	if cooldown < 1 {
 		cooldown = 1
 	}
-	return TickTimer{cooldown: cooldown}
+	return TickTimer{Cooldown: cooldown}
 }
 
 // Advance increments the internal tick counter by one.
 // Call once per game-loop tick for every entity owning this timer.
 func (t *TickTimer) Advance() {
-	t.cur++
+	t.Cur++
 }
 
 // Ready reports whether the cooldown has been reached.
 // Does NOT reset — call Reset() explicitly to restart the cooldown.
 func (t *TickTimer) Ready() bool {
-	return t.cur >= t.cooldown
+	return t.Cur >= t.Cooldown
 }
 
 // AdvanceAndCheck advances the counter and returns true if the cooldown is met.
 // Convenience method for the common advance-then-check pattern.
 // Does NOT reset on true — caller must call Reset() if they want to fire once.
 func (t *TickTimer) AdvanceAndCheck() bool {
-	t.cur++
-	return t.cur >= t.cooldown
+	t.Cur++
+	return t.Cur >= t.Cooldown
 }
 
 // Tick là hàm tối ưu tối đa cho logic lặp của Game Server.
@@ -67,17 +67,17 @@ func (t *TickTimer) AdvanceAndCheck() bool {
 //	    ai.FireAttack() // Không cần gọi Reset() thủ công nữa
 //	}
 func (t *TickTimer) Tick() bool {
-	t.cur++
-	if t.cur < t.cooldown {
+	t.Cur++
+	if t.Cur < t.Cooldown {
 		return false
 	}
-	t.cur = 0 // Tự động reset bộ đếm
+	t.Cur = 0 // Tự động reset bộ đếm
 	return true
 }
 
 // Reset restarts the cooldown from zero.
 func (t *TickTimer) Reset() {
-	t.cur = 0
+	t.Cur = 0
 }
 
 // SetCooldown changes the cooldown duration without resetting the current counter.
@@ -86,23 +86,23 @@ func (t *TickTimer) SetCooldown(cooldown int) {
 	if cooldown < 1 {
 		cooldown = 1
 	}
-	t.cooldown = cooldown
+	t.Cooldown = cooldown
 }
 
 // Cooldown returns the current target cooldown duration in ticks.
-func (t *TickTimer) Cooldown() int {
-	return t.cooldown
+func (t *TickTimer) GetCooldown() int {
+	return t.Cooldown
 }
 
 // Elapsed returns the number of ticks elapsed since the last reset.
 func (t *TickTimer) Elapsed() int {
-	return t.cur
+	return t.Cur
 }
 
 // Remaining returns how many more ticks until Ready() fires.
 // Đã sửa: Sử dụng toán tử `<=` rõ ràng để tối ưu hóa điều kiện biên.
 func (t *TickTimer) Remaining() int {
-	r := t.cooldown - t.cur
+	r := t.Cooldown - t.Cur
 	if r <= 0 {
 		return 0
 	}
@@ -112,10 +112,10 @@ func (t *TickTimer) Remaining() int {
 // Progress returns the completion ratio from 0.0 (started) to 1.0 (ready).
 // Highly useful for UI progression bars, action bars, or AI weight evaluations.
 func (t *TickTimer) Progress() float64 {
-	if t.cooldown <= 0 {
+	if t.Cooldown <= 0 {
 		return 1.0
 	}
-	p := float64(t.cur) / float64(t.cooldown)
+	p := float64(t.Cur) / float64(t.Cooldown)
 	if p > 1.0 {
 		return 1.0
 	}
@@ -127,42 +127,42 @@ func (t *TickTimer) Progress() float64 {
 // WallTimer tracks a real-world deadline using time.Time.
 // Stored as an inline value — copy-modify-overwrite like all ECS components.
 type WallTimer struct {
-	expiresAt time.Time
+	ExpiresAtTime time.Time
 }
 
 // NewWallTimer creates a WallTimer that fires after the given duration from now.
 func NewWallTimer(d time.Duration) WallTimer {
-	return WallTimer{expiresAt: time.Now().Add(d)}
+	return WallTimer{ExpiresAtTime: time.Now().Add(d)}
 }
 
 // NewWallTimerAt creates a WallTimer with an explicit expiry time.
 // Use when the deadline is computed externally (e.g. loaded from DB).
 func NewWallTimerAt(t time.Time) WallTimer {
-	return WallTimer{expiresAt: t}
+	return WallTimer{ExpiresAtTime: t}
 }
 
 // IsZero reports whether the timer is uninitialized (has no expiration set).
 func (w *WallTimer) IsZero() bool {
-	return w.expiresAt.IsZero()
+	return w.ExpiresAtTime.IsZero()
 }
 
 // Done reports whether the deadline has passed.
 // Đã sửa: Thay After bằng `!Before` để tính cả trường hợp thời gian hiện tại trùng khít với deadline.
 func (w *WallTimer) Done() bool {
-	return !time.Now().Before(w.expiresAt)
+	return !time.Now().Before(w.ExpiresAtTime)
 }
 
 // DoneAt reports whether the deadline has passed relative to a provided time.
 // Use in tight loops where time.Now() should be called once outside the loop.
 // Đã sửa: Đã sửa lỗi điều kiện biên tương tự hàm Done().
 func (w *WallTimer) DoneAt(now time.Time) bool {
-	return !now.Before(w.expiresAt)
+	return !now.Before(w.ExpiresAtTime)
 }
 
 // Remaining returns how much time is left until the deadline.
 // Returns 0 if the timer has already expired.
 func (w *WallTimer) Remaining() time.Duration {
-	r := time.Until(w.expiresAt)
+	r := time.Until(w.ExpiresAtTime)
 	if r < 0 {
 		return 0
 	}
@@ -172,10 +172,10 @@ func (w *WallTimer) Remaining() time.Duration {
 // ExpiredDuration reports how much time has passed since the timer expired.
 // Returns 0 if the timer is still active or uninitialized.
 func (w *WallTimer) ExpiredDuration() time.Duration {
-	if w.expiresAt.IsZero() {
+	if w.ExpiresAtTime.IsZero() {
 		return 0
 	}
-	r := time.Since(w.expiresAt)
+	r := time.Since(w.ExpiresAtTime)
 	if r < 0 {
 		return 0
 	}
@@ -185,19 +185,19 @@ func (w *WallTimer) ExpiredDuration() time.Duration {
 // ExpiresAt returns the raw deadline time.Time.
 // Useful for serialization (e.g. storing respawn time in a queue).
 func (w *WallTimer) ExpiresAt() time.Time {
-	return w.expiresAt
+	return w.ExpiresAtTime
 }
 
 // Refresh ghi đè thời hạn mới tính từ thời điểm hiện tại (Now + d).
 // Đã sửa: Đổi tên từ Extend sang Refresh để phản ánh đúng chính xác bản chất thay thế mốc thời gian.
 func (w *WallTimer) Refresh(d time.Duration) {
-	w.expiresAt = time.Now().Add(d)
+	w.ExpiresAtTime = time.Now().Add(d)
 }
 
 // ExtendFrom pushes the deadline forward by d from the current expiry.
 // Use when stacking a buff on top of an existing one without losing remaining time.
 func (w *WallTimer) ExtendFrom(d time.Duration) {
-	w.expiresAt = w.expiresAt.Add(d)
+	w.ExpiresAtTime = w.ExpiresAtTime.Add(d)
 }
 
 // String implements the fmt.Stringer interface. Making debugging and logging trivial.
@@ -205,7 +205,7 @@ func (w WallTimer) String() string {
 	if w.IsZero() {
 		return "WallTimer(uninitialized)"
 	}
-	r := time.Until(w.expiresAt)
+	r := time.Until(w.ExpiresAtTime)
 	if r <= 0 {
 		return "WallTimer(expired)"
 	}

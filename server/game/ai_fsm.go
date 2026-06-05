@@ -1,7 +1,6 @@
 package game
 
 import (
-	"fmt"
 	"sync"
 
 	"server/ecs"
@@ -26,7 +25,7 @@ const (
 	MonsterEvThreatSwitch                     // Higher-threat player exists
 )
 
-// String implements fmt.Stringer.
+// String returns the string representation of MonsterEvent.
 func (e MonsterEvent) String() string {
 	switch e {
 	case MonsterEvTick:
@@ -46,7 +45,7 @@ func (e MonsterEvent) String() string {
 	case MonsterEvThreatSwitch:
 		return "ThreatSwitch"
 	default:
-		return fmt.Sprintf("Event(%d)", e)
+		return "Event(" + itoa(int(e)) + ")"
 	}
 }
 
@@ -105,7 +104,7 @@ func MonsterFSMSend(id ecs.Entity, ai *ecs.AIComponent, ev MonsterEvent) bool {
 
 	// Log state changes
 	if newState != oldState {
-		name := fmt.Sprintf("entity_%d", id)
+		name := "entity_" + itoa(int(id))
 		if meta, ok := ecs.DefaultRegistry.GetMetadata(id); ok {
 			name = meta.Name
 		}
@@ -150,4 +149,18 @@ func buildMonsterFSMDef() *fsm.FSMDef[ecs.AIState, MonsterEvent] {
 	})
 
 	return def
+}
+
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	var buf [12]byte
+	pos := len(buf)
+	for i > 0 {
+		pos--
+		buf[pos] = byte('0' + i%10)
+		i /= 10
+	}
+	return string(buf[pos:])
 }

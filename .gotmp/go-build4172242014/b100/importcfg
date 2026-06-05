@@ -1,0 +1,16 @@
+# import config
+packagefile context=C:\Users\ADMIN\AppData\Local\go-build\08\08c817609b39a2eb6ca37603adc013f3fe07fd7b75835ada92501104b2045408-d
+packagefile database/sql=C:\Users\ADMIN\AppData\Local\go-build\d9\d9ad79432a2003f7f90b5186b926aa32d8ee1907127b999acb867858ad82f79e-d
+packagefile encoding/json=C:\Users\ADMIN\AppData\Local\go-build\d7\d72c691f865461cb5df3503774ff25d037fb3716cb900a1530fa4da461bfde75-d
+packagefile fmt=C:\Users\ADMIN\AppData\Local\go-build\40\4000d30d23188cb38449f61c759d0143495d1da30e9843200257422e199ca34e-d
+packagefile github.com/go-sql-driver/mysql=C:\Users\ADMIN\AppData\Local\go-build\17\17ef8d5a46d9820bf1e6b995be88362c26c5ae63486642681b5e8a7c823453ca-d
+packagefile golang.org/x/crypto/bcrypt=C:\Users\ADMIN\AppData\Local\go-build\d4\d48109613352bc515b5adb2cfa1dbabd96478a79b8134b1368004d080787bfc0-d
+packagefile net=C:\Users\ADMIN\AppData\Local\go-build\3b\3bd390ad9eb1f924999fb6e01115a5493e797a9b85068c9acda17e2b0df9981f-d
+packagefile os=C:\Users\ADMIN\AppData\Local\go-build\1f\1fdb4d48a4147d507d48bbc8aa2c553d6ff4ee4347742abee55f98d5c5ad03dc-d
+packagefile server/ecs=C:\Users\ADMIN\AppData\Local\go-build\2e\2e078cb9ff650de25d3eac8a18c739cc7c1b711ca54fffbf0ee9c48d5c458521-d
+packagefile server/logger=C:\Users\ADMIN\AppData\Local\go-build\ef\ef355a899a8831e0df53f456e66f537dde457cc9a0db4a92484132a47e1067f4-d
+packagefile server/peakgo/timer=C:\Users\ADMIN\AppData\Local\go-build\26\263c70323cb7a2295305b3fe9a40b7a98fd906a1d06f7b7514c8019e3d4d9452-d
+packagefile server/state=C:\Users\ADMIN\AppData\Local\go-build\16\16851aa157175a7a47d5e7ae400dfdc44e6829b8f01527cc1ea693eaa6956dad-d
+packagefile strings=C:\Users\ADMIN\AppData\Local\go-build\44\443b92438e1c52de972f8d942b064a27bec5076fab15c839f5a31f73bdf5d40b-d
+packagefile sync=C:\Users\ADMIN\AppData\Local\go-build\2e\2e2a56c4fb0662e67243a5ba1c7c8a58cb9d3d9502da34339df854d70b628846-d
+packagefile time=C:\Users\ADMIN\AppData\Local\go-build\d3\d3c9032fb1e11e160dda6e4fabf81517243996cc68710d1d03750443f2d68066-d

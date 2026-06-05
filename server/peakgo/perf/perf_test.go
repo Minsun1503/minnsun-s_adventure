@@ -139,7 +139,7 @@ func TestPacketMonitor(t *testing.T) {
 	pm.RecordIn(100)
 	pm.RecordOut(200)
 
-	in, out, bytesIn, bytesOut := pm.Snapshot()
+	in, out, bytesIn, bytesOut, _, _ := pm.Snapshot()
 	if in != 1 {
 		t.Fatalf("expected 1 packet in, got %d", in)
 	}
@@ -159,7 +159,7 @@ func TestPacketMonitorReset(t *testing.T) {
 	pm.RecordIn(100)
 	pm.Reset()
 
-	in, _, _, _ := pm.Snapshot()
+	in, _, _, _, _, _ := pm.Snapshot()
 	if in != 0 {
 		t.Fatal("expected 0 packets after reset")
 	}
