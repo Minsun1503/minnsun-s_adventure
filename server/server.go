@@ -19,6 +19,7 @@ import (
 	"server/mcp"
 	"server/models"
 	"server/network"
+	"server/peakgo/config"
 	"server/peakgo/perf"
 	"server/protocol"
 	"server/systems"
@@ -42,11 +43,15 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	logger.Init() // Must be first: reads data/config.json, starts async log worker
+	// Initialize hot-reload config before any other subsystem.
+	config.InitConfig("data/config.json")
+
+	logger.Init() // Must be early: starts async log worker (reads config via peakgo/config)
 
 	game.InitializeItemRegistry()
 	game.InitializeLootTables()
 	world.InitializeCollisionMaps()
+	world.InitNavMesh() // Build global NavMesh from collision data for AI pathfinding
 	models.InitializeSkillRegistry()
 
 	// Sync item registry to MCP for inventory display.

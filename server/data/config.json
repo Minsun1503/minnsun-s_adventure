@@ -1,5 +1,25 @@
 {
   "debug": false,
   "log_dir": "logs",
-  "log_max_mb": 10
+  "log_max_mb": 10,
+  "map_bounds_min_x": 0,
+  "map_bounds_max_x": 100,
+  "map_bounds_min_z": 0,
+  "map_bounds_max_z": 100,
+  "max_move_distance": 2,
+  "chunk_size": 10,
+  "melee_range": 5.0,
+  "cast_range": 6.0,
+  "aggro_radius": 12.0,
+  "leash_radius": 20,
+  "attack_cooldown_ms": 1000,
+  "broadcast_aoi_radius": 60.0,
+  "bfs_max_nodes": 400,
+  "tick_rate_ms": 250,
+  "log_metrics_every": 40,
+  "rate_limit_max_tokens": 500,
+  "rate_limit_refill_per_tick": 20,
+  "db_save_interval_ms": 15000,
+  "respawn_delay_ms": 3000,
+  "ground_item_ttl_ms": 60000
 }

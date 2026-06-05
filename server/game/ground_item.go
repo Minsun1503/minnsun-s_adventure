@@ -5,7 +5,6 @@ import (
 	"server/ecs"
 	"server/protocol"
 	"server/world"
-	"time"
 )
 
 // SpawnItemOnGround creates a live ground item entity in the ECS register.
@@ -41,10 +40,10 @@ func SpawnItemOnGround(itemTemplateID uint64, mapID int, x int, z int) ecs.Entit
 		TemplateID: itemTemplateID,
 	})
 
-	// 6. Populate lifetime expiry columns (Set item to despawn in 60 seconds)
+	// 6. Populate lifetime expiry columns (Set item to despawn in 240 ticks = 60 seconds at 4 ticks/sec)
 	ecs.DefaultRegistry.SetLifetime(itemEntity, ecs.LifetimeComponent{
-		SpawnedAt: time.Now(),
-		Duration:  60 * time.Second,
+		SpawnedTick: GetCurrentTick(),
+		Duration:    240, // 240 ticks = 60 seconds
 	})
 
 	// 6. Broadcast packet notice to nearby players using AOI-aware neighbor broadcast.
@@ -56,9 +55,9 @@ func SpawnItemOnGround(itemTemplateID uint64, mapID int, x int, z int) ecs.Entit
 }
 
 // RunGroundItemDecaySystem scans all active ground items and purges expired floor loot.
-// Uses RangeSnapshots for zero-extra-allocation scanning per architectural rules.
+// Uses tick-based timing via GetCurrentTick() instead of time.Now().
 func RunGroundItemDecaySystem() {
-	now := time.Now()
+	currentTick := GetCurrentTick()
 
 	ecs.DefaultRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
 		// 1. Only process ground items with a lifetime component
@@ -71,8 +70,8 @@ func RunGroundItemDecaySystem() {
 			return true
 		}
 
-		// 2. Evaluate if the expiry threshold duration has been crossed
-		if now.After(lifetime.SpawnedAt.Add(lifetime.Duration)) {
+		// 2. Evaluate if the expiry threshold duration has been crossed using tick comparison
+		if currentTick >= lifetime.SpawnedTick+lifetime.Duration {
 			// Fetch data for the exit notification before clearing columns
 			pos, posOk := ecs.DefaultRegistry.GetPosition(snap.ID)
 			meta, metaOk := ecs.DefaultRegistry.GetMetadata(snap.ID)

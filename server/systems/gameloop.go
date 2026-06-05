@@ -78,6 +78,10 @@ func StartGameLoop() {
 // that all game systems (AttackSystem, MovementSystem, etc.) read/write the
 // correct per-map ECS state.
 func perMapTick(mapID int, tick uint64, cmdBuf *ecs.CommandBuffer) {
+	// Set the global tick for the game package so systems can use GetCurrentTick()
+	// instead of time.Now() for drift-free timing.
+	game.SetCurrentTick(tick)
+
 	// Get the current MapWorker and install its per-map registry as the default.
 	mw := world.GlobalWorld.GetWorker(mapID)
 	if mw == nil {
@@ -116,6 +120,10 @@ func perMapTick(mapID int, tick uint64, cmdBuf *ecs.CommandBuffer) {
 // hasPlayers and monster processing happen in the same pass — no double scan.
 // Then dispatches ticks to all running maps for parallel simulation.
 func tickWorld(tick uint64) {
+	// Set the global tick for the game package so direct game calls
+	// (RunGroundItemDecaySystem, RunRespawnSystem, etc.) can use GetCurrentTick().
+	game.SetCurrentTick(tick)
+
 	hasPlayers := false
 
 	// Use map 1's registry for the global snapshot scan.

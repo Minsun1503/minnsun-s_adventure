@@ -2,7 +2,6 @@ package game
 
 import (
 	"server/ecs"
-	"server/peakgo/astar"
 	"server/peakgo/gmath"
 	"server/peakgo/rng"
 	"server/peakgo/spatial"
@@ -41,21 +40,11 @@ func TickAI(id ecs.Entity) {
 
 // ─── PATH FOLLOWING HELPERS ──────────────────────────────────────────────────
 
-// ensurePathCache creates a PathCache for this monster on first use.
-// Lazy init = zero cost for idle monsters.
-func ensurePathCache(ai *ecs.AIComponent) *astar.PathCache {
-	if ai.PathCache == nil {
-		ai.PathCache = astar.NewPathCache()
-	}
-	return ai.PathCache
-}
-
 // requestPath computes a full A* path from current position to (goalX, goalZ).
+// Uses the global NavMesh (zone-aware, multi-map support) instead of raw astar.
 // Stores the result in ai.CurrentPath and resets PathFollowIdx to 1 (skip start node).
 // Returns true if a valid path was found.
 func requestPath(ai *ecs.AIComponent, pos ecs.PositionComponent, goalX, goalZ int) bool {
-	pc := ensurePathCache(ai)
-
 	// Check if we already have a cached valid path for the same goal
 	if ai.CurrentPath.Found && ai.PathFollowIdx >= 0 &&
 		ai.PathFollowIdx < ai.CurrentPath.Len &&
@@ -64,8 +53,19 @@ func requestPath(ai *ecs.AIComponent, pos ecs.PositionComponent, goalX, goalZ in
 		return true
 	}
 
-	walkable := world.IsWalkableForMap(pos.MapID)
-	ai.CurrentPath = astar.FindPathWithCache(pc, pos.X, pos.Z, goalX, goalZ, walkable, astar.MaxPathNodes)
+	// Use GlobalNavMesh for pathfinding — integrates tile collisions, zone awareness,
+	// and multi-map portal support. Falls back to IsWalkableForMap via NavMesh.IsWalkable.
+	if world.GlobalNavMesh == nil {
+		// NavMesh not initialized — fallback to no path
+		ai.PathFollowIdx = -1
+		return false
+	}
+
+	ai.CurrentPath = world.GlobalNavMesh.FindPathWithCache(
+		pos.MapID,
+		int32(pos.X), int32(pos.Z),
+		int32(goalX), int32(goalZ),
+	)
 	if !ai.CurrentPath.Found {
 		ai.PathFollowIdx = -1
 		return false

@@ -103,6 +103,12 @@ func (lt *LootTable) Clone() *LootTable {
 	return clone
 }
 
+// Entries returns the drop entries of this loot table.
+// Used by MCP/monitoring tools to inspect loot configuration.
+func (lt *LootTable) Entries() []DropEntry {
+	return lt.entries
+}
+
 // referenced slice pools for roll results
 var dropPool = pool.NewSlicePool[Drop](4) // Most monsters drop 1-4 items
 

@@ -11,11 +11,11 @@ package network
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"runtime"
 	"server/db"
 	"server/ecs"
+	"server/peakgo/loggate"
 	"server/peakgo/perf"
 	"server/world"
 	"sync"
@@ -47,7 +47,7 @@ func NewAdminServer(addr string) *AdminServer {
 func (as *AdminServer) Start() {
 	go func() {
 		if err := as.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Printf("[ADMIN] HTTP server error: %v\n", err)
+			loggate.Errorf("[ADMIN] HTTP server error: %v", err)
 		}
 	}()
 }

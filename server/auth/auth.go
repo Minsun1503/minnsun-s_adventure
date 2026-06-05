@@ -137,7 +137,9 @@ func processLogin(conn net.Conn) {
 		if devMode && err == nil {
 			// In dev_mode: ensure the entity has a valid metadata name
 			// (CreatePlayerEntity already sets the default Position/Stats/Equipment)
-			logger.Info("[DEV] Skipped DB auth for %s — dev_mode active", auth.username)
+			if !(len(auth.username) >= 3 && auth.username[:3] == "bot") {
+				logger.Info("[DEV] Skipped DB auth for %s — dev_mode active", auth.username)
+			}
 		}
 		if err != nil {
 			logger.Error("[CONNECT] Error loading character from DB: %v", err)

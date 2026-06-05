@@ -13,7 +13,6 @@ import (
 	"server/peakgo/threat"
 	"server/protocol"
 	"server/world"
-	"time"
 )
 
 // CombatResult is returned by AttackSystem to handleCommand.
@@ -225,7 +224,7 @@ func DamageSystem(targetID ecs.Entity, amount int) int {
 	if !ok {
 		return 0
 	}
-	stats.HP -= amount                           // MODIFY
+	stats.HP -= amount                            // MODIFY
 	ecs.DefaultRegistry.SetStats(targetID, stats) // OVERWRITE
 	return stats.HP
 }
@@ -297,7 +296,7 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 				spawnX, spawnZ = ai.SpawnX, ai.SpawnZ
 			}
 			GlobalRespawnManager.ScheduleMonsterRespawn(
-				t.ID, targetPos.MapID, spawnX, spawnZ, 15*time.Second,
+				t.ID, targetPos.MapID, spawnX, spawnZ, 60, // 60 ticks = 15 seconds at 4 ticks/sec
 			)
 
 			// Publish monster death event

@@ -1,0 +1,7 @@
+# import config
+packagefile encoding/binary=C:\Users\ADMIN\AppData\Local\go-build\9a\9ace3cf9ca09ea754ec709dc397077c318c025c2ac5e40c9ce7dfdbb44fd89a1-d
+packagefile net=C:\Users\ADMIN\AppData\Local\go-build\3b\3bd390ad9eb1f924999fb6e01115a5493e797a9b85068c9acda17e2b0df9981f-d
+packagefile server/ecs=C:\Users\ADMIN\AppData\Local\go-build\b2\b2399913679ce408a0696e42478f7163f44fae071eab3e0cb57c1fd0488d71ec-d
+packagefile server/peakgo/netio=C:\Users\ADMIN\AppData\Local\go-build\62\62caf0f203833da4249502f0c21c0d81c43d380046b5a9d5a22ba8b7c76d4748-d
+packagefile server/peakgo/perf=C:\Users\ADMIN\AppData\Local\go-build\c4\c49f3ff0e41230e549fa8a0f83a698c3a8ddb86ca37a84e91ae4d42ae088f3e2-d
+packagefile server/world=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build3349048745\b233\_pkg_.a

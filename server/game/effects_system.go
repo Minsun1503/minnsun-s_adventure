@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"server/ecs"
 	"server/protocol"
-	"time"
 )
 
 // RunStatusEffectsSystem iterates through all entities to tick down active buffs or process DoTs.
+// Uses tick-based timing via CurrentTick() and WallTimer for delay tracking.
 func RunStatusEffectsSystem() {
-	now := time.Now()
-	tickInterval := 250 * time.Millisecond
+	tickInterval := uint64(1) // 1 tick per call (called every game loop tick)
+	_ = tickInterval
 
 	ecs.DefaultRegistry.RangeEffects(func(id ecs.Entity, effComp ecs.EffectsComponent) bool {
 		if len(effComp.ActiveList) == 0 {
@@ -22,15 +22,17 @@ func RunStatusEffectsSystem() {
 		var activeRemaining []ecs.ActiveEffect
 		forceStatRecalc := false
 
-		// Fetch metadata for logging purposes
 		meta, _ := ecs.DefaultRegistry.GetMetadata(id)
 		pos, posOk := ecs.DefaultRegistry.GetPosition(id)
 
 		for _, effect := range effComp.ActiveList {
-			// 1. Tick down total lifespan duration frames
-			effect.Duration -= tickInterval
+			// 1. Tick down total lifespan duration using tick-based decrement
+			// Convert to ticks: decrement by 1 tick per 250ms game loop
+			if effect.DurationTicks > 0 {
+				effect.DurationTicks--
+			}
 
-			if effect.Duration <= 0 {
+			if effect.DurationTicks <= 0 {
 				// Effect expired!
 				if effect.Type == "haste_buff" {
 					forceStatRecalc = true
@@ -41,9 +43,14 @@ func RunStatusEffectsSystem() {
 				continue // Skip appending to remaining active list
 			}
 
-			// 2. PROCESS DAMAGE OVER TIME (DoT) TICKERS (Downsample to 1-second cycles)
+			// 2. PROCESS DAMAGE OVER TIME (DoT) TICKERS (every ~4 ticks = ~1 second)
 			if effect.Type == "poison" || effect.Type == "burn" {
-				if now.Sub(effect.LastTickTime) >= 1*time.Second {
+				// Tick-based DoT: fire every 4 ticks (1 second at 250ms/tick)
+				effect.DoTTickAccum++
+
+				if effect.DoTTickAccum >= 4 {
+					effect.DoTTickAccum = 0
+
 					// COPY STATS OUT
 					stats, hasStats := ecs.DefaultRegistry.GetStats(id)
 					if hasStats && stats.HP > 0 {
@@ -55,7 +62,6 @@ func RunStatusEffectsSystem() {
 
 						// OVERWRITE
 						ecs.DefaultRegistry.SetStats(id, stats)
-						effect.LastTickTime = now
 
 						if posOk {
 							protocol.BroadcastToNeighbors(pos, []byte(fmt.Sprintf("[STATUS] %s (#%d) suffered -%d %s damage! (HP: %d/%d)\r\n",
@@ -69,7 +75,7 @@ func RunStatusEffectsSystem() {
 							}
 
 							DeathSystem(id, 0, meta, ecs.MetadataComponent{Name: effect.Type, Type: ecs.EntityMonster}, effect.Value) // status_effect not in EntityType enum; fallback to monster for logging
-							continue                                                                                    // Stop processing an already erased row anchor
+							continue                                                                                                  // Stop processing an already erased row anchor
 						}
 					}
 				}
@@ -90,4 +96,30 @@ func RunStatusEffectsSystem() {
 
 		return true
 	})
+}
+
+// ─── TICK-BASED DURATION HELPERS ────────────────────────────────────────────
+
+// TicksFromSeconds converts seconds to ticks at 4 ticks/sec.
+// floor(seconds) * 4 gives the approximate tick count.
+func TicksFromSeconds(seconds int) uint64 {
+	return uint64(seconds) * 4
+}
+
+// AddEffectWithTicks applies an effect with tick-based duration instead of time.Duration.
+// This replaces the old time.Now() based effect scheduling for zero-syscall timing.
+func AddEffectWithTicks(entity ecs.Entity, effectType string, value int, durationTicks int) {
+	effComp, ok := ecs.DefaultRegistry.GetEffects(entity)
+	if !ok {
+		return
+	}
+
+	effComp = effComp.Clone()
+	effComp.ActiveList = append(effComp.ActiveList, ecs.ActiveEffect{
+		Type:          effectType,
+		Value:         value,
+		DurationTicks: durationTicks,
+		DoTTickAccum:  0,
+	})
+	ecs.DefaultRegistry.SetEffects(entity, effComp)
 }

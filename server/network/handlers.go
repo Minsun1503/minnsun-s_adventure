@@ -1,7 +1,7 @@
 package network
 
 import (
-	"fmt"
+	"encoding/binary"
 	"net"
 	"server/ecs"
 	"server/game"
@@ -12,6 +12,7 @@ import (
 	"server/protocol"
 	"server/systems"
 	"server/world"
+	"strconv"
 	"time"
 )
 
@@ -58,23 +59,41 @@ func handleAttack(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 
 	result, errMsg := game.AttackSystem(playerEntity, targetID)
 	if errMsg != "" {
-		systems.SendNoticeSystem(playerEntity, []byte(errMsg))
+		// Zero-alloc hit error notice packet
+		pBuf := netio.DefaultPool.Get()
+		buf := (*pBuf)[:3]
+		buf[2] = protocol.OpcodeS2CNotice
+		buf = append(buf, errMsg...)
+		binary.BigEndian.PutUint16(buf[0:2], uint16(len(buf)-2))
+		_ = netio.WritePacket(conn, buf)
+		netio.DefaultPool.Put(pBuf)
 		return
 	}
 
+	// Zero-alloc hit success notice packet
+	pBuf := netio.DefaultPool.Get()
+	buf := (*pBuf)[:3]
+	buf[2] = protocol.OpcodeS2CNotice
+
 	if result.Killed {
-		systems.SendNoticeSystem(playerEntity,
-			[]byte(fmt.Sprintf("You killed %s!\r\n", result.TargetName)),
-		)
+		buf = append(buf, "You killed "...)
+		buf = append(buf, result.TargetName...)
+		buf = append(buf, "!\r\n"...)
 	} else {
-		systems.SendNoticeSystem(playerEntity,
-			[]byte(fmt.Sprintf(
-				"You hit %s for %d damage. %s has %d HP remaining.\r\n",
-				result.TargetName, result.Damage,
-				result.TargetName, result.TargetHP,
-			)),
-		)
+		buf = append(buf, "You hit "...)
+		buf = append(buf, result.TargetName...)
+		buf = append(buf, " for "...)
+		buf = strconv.AppendInt(buf, int64(result.Damage), 10)
+		buf = append(buf, " damage. "...)
+		buf = append(buf, result.TargetName...)
+		buf = append(buf, " has "...)
+		buf = strconv.AppendInt(buf, int64(result.TargetHP), 10)
+		buf = append(buf, " HP remaining.\r\n"...)
 	}
+
+	binary.BigEndian.PutUint16(buf[0:2], uint16(len(buf)-2))
+	_ = netio.WritePacket(conn, buf)
+	netio.DefaultPool.Put(pBuf)
 }
 
 func handleInfo(conn net.Conn, playerEntity ecs.Entity, payload []byte) {

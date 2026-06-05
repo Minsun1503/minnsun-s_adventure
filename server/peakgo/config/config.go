@@ -12,6 +12,11 @@ import (
 // Read via GetConfig() for zero-alloc atomic access.
 // Write via Reload() which does an atomic pointer swap.
 type GameConfig struct {
+	// Logger
+	Debug    bool   `json:"debug"`
+	LogDir   string `json:"log_dir"`
+	LogMaxMB int    `json:"log_max_mb"`
+
 	// Map & Movement
 	MapBoundsMinX   int32 `json:"map_bounds_min_x"`
 	MapBoundsMaxX   int32 `json:"map_bounds_max_x"`
@@ -53,6 +58,9 @@ type GameConfig struct {
 // DefaultConfig returns a sensible default config matching the current hardcoded values.
 func DefaultConfig() *GameConfig {
 	return &GameConfig{
+		Debug:                  false,
+		LogDir:                 "logs",
+		LogMaxMB:               10,
 		MapBoundsMinX:          0,
 		MapBoundsMaxX:          100,
 		MapBoundsMinZ:          0,

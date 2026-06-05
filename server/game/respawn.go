@@ -7,7 +7,6 @@ import (
 	"server/models"
 	"server/world"
 	"sync"
-	"time"
 )
 
 // RespawnEvent holds the data needed to respawn a monster after a delay.
@@ -16,7 +15,7 @@ type RespawnEvent struct {
 	MapID      int
 	SpawnX     int
 	SpawnZ     int
-	RespawnAt  time.Time
+	RespawnAt  uint64 // Tick when respawn should fire
 }
 
 // RespawnScheduler manages a thread-safe queue of pending respawn events.
@@ -28,8 +27,9 @@ type RespawnScheduler struct {
 // GlobalRespawnManager is the singleton respawn scheduler.
 var GlobalRespawnManager = &RespawnScheduler{}
 
-// ScheduleMonsterRespawn queues a monster for respawn after the given delay.
-func (rs *RespawnScheduler) ScheduleMonsterRespawn(templateID, mapID, spawnX, spawnZ int, delay time.Duration) {
+// ScheduleMonsterRespawn queues a monster for respawn after the given delay in ticks.
+// At 4 ticks/sec, delay is measured in ticks (e.g., 60 ticks = 15 seconds).
+func (rs *RespawnScheduler) ScheduleMonsterRespawn(templateID, mapID, spawnX, spawnZ int, delay uint64) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	rs.events = append(rs.events, RespawnEvent{
@@ -37,9 +37,9 @@ func (rs *RespawnScheduler) ScheduleMonsterRespawn(templateID, mapID, spawnX, sp
 		MapID:      mapID,
 		SpawnX:     spawnX,
 		SpawnZ:     spawnZ,
-		RespawnAt:  time.Now().Add(delay),
+		RespawnAt:  GetCurrentTick() + delay,
 	})
-	logger.Info("[RESPAWN] Scheduled %s (template %d) at (%d,%d) in %v",
+	logger.Info("[RESPAWN] Scheduled %s (template %d) at (%d,%d) in %d ticks",
 		monsterName(templateID), templateID, spawnX, spawnZ, delay)
 }
 
@@ -53,11 +53,11 @@ func (rs *RespawnScheduler) RunRespawnSystem() {
 		return
 	}
 
-	now := time.Now()
+	currentTick := GetCurrentTick()
 	remaining := rs.events[:0] // reuse backing array
 
 	for _, ev := range rs.events {
-		if now.After(ev.RespawnAt) {
+		if currentTick >= ev.RespawnAt {
 			// Timer expired — spawn the monster on the correct map.
 			id, err := models.SpawnMonsterFromTemplate(ev.TemplateID, ev.MapID, ev.SpawnX, ev.SpawnZ)
 			if err != nil {

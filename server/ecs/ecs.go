@@ -4,10 +4,9 @@ import (
 	"net"
 	"server/peakgo/astar"
 	"server/peakgo/threat"
-	"server/peakgo/timer" // Tích hợp chặt chẽ hệ thống TickTimer lõi
+	"server/peakgo/timer"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 // Entity đại diện cho mã định danh thực thể kiểu uint64 giúp tra cứu Map O(1).
@@ -76,7 +75,8 @@ type PositionComponent struct {
 }
 
 type ConnectionComponent struct {
-	Conn net.Conn // Interface bản chất là con trỏ, giữ nguyên.
+	Conn      net.Conn    // Interface bản chất là con trỏ, giữ nguyên.
+	Validator interface{} // *anticheat.Validator: stored as interface{} to avoid import cycle (anticheat imports ecs).
 }
 
 type MetadataComponent struct {
@@ -197,17 +197,19 @@ func (c InventoryComponent) Clone() InventoryComponent {
 	return InventoryComponent{Items: clone}
 }
 
+// LifetimeComponent tracks item despawn using tick-based expiry.
+// Floor items live for a fixed number of ticks instead of wall-clock seconds.
 type LifetimeComponent struct {
-	SpawnedAt time.Time     // The exact moment the item hit the floor
-	Duration  time.Duration // How long it is allowed to live (e.g., 60 * time.Second)
+	SpawnedTick uint64 // The global tick when the item was spawned
+	Duration    uint64 // How many ticks it is allowed to live (e.g., 240 ticks = 60s at 4 ticks/sec)
 }
 
 // ActiveEffect represents a single temporary modifier layer running on an entity.
 type ActiveEffect struct {
-	Type         string        // "poison", "burn", "haste_buff"
-	Value        int           // The damage or stat modifier amount
-	Duration     time.Duration // Total remaining time
-	LastTickTime time.Time     // Last time a DoT damage was applied
+	Type          string // "poison", "burn", "haste_buff"
+	Value         int    // The damage or stat modifier amount
+	DurationTicks int    // Total remaining ticks until expiry
+	DoTTickAccum  int    // Accumulated ticks since last DoT tick
 }
 
 // EffectsComponent is mapped directly to an entity row anchor inside the TypedSyncMap

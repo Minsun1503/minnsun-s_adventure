@@ -1,0 +1,24 @@
+# import config
+packagefile flag=C:\Users\ADMIN\AppData\Local\go-build\1e\1e5ed6e066deda8a06b515c63ac18f7e0580856a2436f55c7a47feacf72a350e-d
+packagefile net=C:\Users\ADMIN\AppData\Local\go-build\3b\3bd390ad9eb1f924999fb6e01115a5493e797a9b85068c9acda17e2b0df9981f-d
+packagefile os=C:\Users\ADMIN\AppData\Local\go-build\1f\1fdb4d48a4147d507d48bbc8aa2c553d6ff4ee4347742abee55f98d5c5ad03dc-d
+packagefile os/signal=C:\Users\ADMIN\AppData\Local\go-build\fd\fd7063b149c265f7a5fc5d2b37a258f4c56e7754585fad0a6098c82c64a9dcca-d
+packagefile runtime=C:\Users\ADMIN\AppData\Local\go-build\b9\b9ef32e29be838fafc6850e175a564710847b50fd938e85c7ae7535766e7e475-d
+packagefile runtime/pprof=C:\Users\ADMIN\AppData\Local\go-build\bd\bda76962f32d6b30f4aba7981438f4c21d10532e7aeff192bc3a0aceadcf4863-d
+packagefile server/auth=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build3658820742\b088\_pkg_.a
+packagefile server/db=C:\Users\ADMIN\AppData\Local\go-build\41\41270adc874a174cdc74dbf0c862196a3b2f50658a962bf392c23e80192d2d36-d
+packagefile server/ecs=C:\Users\ADMIN\AppData\Local\go-build\b2\b2399913679ce408a0696e42478f7163f44fae071eab3e0cb57c1fd0488d71ec-d
+packagefile server/game=C:\Users\ADMIN\AppData\Local\go-build\c8\c88b6212ecce4bcc19c5bd88c5f344fc83f015b208e013abe058f5358f8e1d60-d
+packagefile server/logger=C:\Users\ADMIN\AppData\Local\go-build\4d\4dcdabaeceb385d6f0afafd40c8a2e4fbb1ff3cd3ec35613fdf16182b584d95d-d
+packagefile server/mcp=C:\Users\ADMIN\AppData\Local\go-build\cf\cfb37649e73942d2f18d71d6c6f2ff5beda1227765578f7687dc06721f502dce-d
+packagefile server/models=C:\Users\ADMIN\AppData\Local\go-build\a4\a4aa3e225534c78823020f2993691c16c66e21b5b5c9518c488f7d8d3e68fe4a-d
+packagefile server/network=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build3658820742\b201\_pkg_.a
+packagefile server/peakgo/config=C:\Users\ADMIN\AppData\Local\go-build\a3\a3217b58e4c9af622c800640e9655caf6e2263d4d07c2f9b586850105d4a1a85-d
+packagefile server/peakgo/perf=C:\Users\ADMIN\AppData\Local\go-build\c4\c49f3ff0e41230e549fa8a0f83a698c3a8ddb86ca37a84e91ae4d42ae088f3e2-d
+packagefile server/protocol=C:\Users\ADMIN\AppData\Local\go-build\c3\c3cda55d4eb3c4ee121da0226b04ef7204273163b70bd8f0b81181bd66faf1aa-d
+packagefile server/systems=C:\Users\ADMIN\AppData\Local\go-build\ec\ec19fe5464fcb43820a91e490a49e5126d5e174ca002c4edd84d65b691b14783-d
+packagefile server/transport=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build3658820742\b240\_pkg_.a
+packagefile server/world=C:\Users\ADMIN\AppData\Local\go-build\92\92f350911dbd8344fe77a87a703a3d3f3f6acad275f97240ba0c7a0ab21afd6b-d
+packagefile sync/atomic=C:\Users\ADMIN\AppData\Local\go-build\a8\a8912e0d410bbc1f3d91f3c98cca876e4c6ada11f9c525a7d118da70552c1545-d
+packagefile syscall=C:\Users\ADMIN\AppData\Local\go-build\65\65d0aa6568754dcda4cd2d3264f5532db35cab468965fc4b09acffc1e9895153-d
+packagefile time=C:\Users\ADMIN\AppData\Local\go-build\d3\d3c9032fb1e11e160dda6e4fabf81517243996cc68710d1d03750443f2d68066-d

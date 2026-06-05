@@ -144,7 +144,7 @@ func init() {
 			return rpcError(req.ID, ErrCodeInvalidParams, "monster_template_id is required")
 		}
 
-		drops, ok := game.MonsterLootTables[p.MonsterTemplateID]
+		table, ok := game.MonsterLootTables[p.MonsterTemplateID]
 		if !ok {
 			return rpcResult(req.ID, map[string]any{
 				"monster_template_id": p.MonsterTemplateID,
@@ -152,16 +152,18 @@ func init() {
 			})
 		}
 
-		items := make([]map[string]any, len(drops))
-		for i, d := range drops {
-			name := fmt.Sprintf("Item #%d", d.ItemTemplateID)
-			if t, exists := game.ItemRegistry[d.ItemTemplateID]; exists {
+		entries := table.Entries()
+		items := make([]map[string]any, len(entries))
+		for i, d := range entries {
+			name := fmt.Sprintf("Item #%d", d.ItemID)
+			if t, exists := game.ItemRegistry[d.ItemID]; exists {
 				name = t.Name
 			}
+			dropChance := float64(d.Weight) / 1000.0
 			items[i] = map[string]any{
-				"item_template_id": d.ItemTemplateID,
+				"item_template_id": d.ItemID,
 				"name":             name,
-				"drop_chance":      d.DropChance,
+				"drop_chance":      dropChance,
 			}
 		}
 		return rpcResult(req.ID, map[string]any{

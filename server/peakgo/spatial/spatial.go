@@ -1,14 +1,14 @@
 // Package spatial provides high-level query helpers built on top of
-// world.SpatialGrid and peakgo/gmath.
+// the SpatialGrid engine.
 //
 // # Why this package exists
 //
-// world.SpatialGrid is a low-level data structure — it returns raw ChunkEntry
+// The SpatialGrid is a low-level data structure — it returns raw ChunkEntry
 // slices and requires callers to manually resolve ECS components. Every system
 // that needs "who is near entity X" must safely query, iterate, filter by type,
 // and remember to free query candidates to avoid GC pressure.
 //
-// This package wraps that sequence into named, typed functions so new systems
+// This file wraps that sequence into named, typed functions so new systems
 // only think in terms of game concepts ("find the nearest monster") rather
 // than spatial grid mechanics.
 //
@@ -22,7 +22,6 @@ import (
 	"math"
 	"server/ecs"
 	"server/peakgo/gmath"
-	"server/world"
 )
 
 // ─── Query Results Structures ────────────────────────────────────────────────
@@ -78,7 +77,7 @@ func CountInRadius(originID ecs.Entity, worldRadius float64, entityType ecs.Enti
 	if !ok {
 		return 0
 	}
-	defer world.FreeQueryCandidates(candidates)
+	defer FreeQueryCandidates(candidates)
 
 	if entityType == ecs.EntityAny {
 		return len(*candidates)
@@ -101,7 +100,7 @@ func IsAnyInRadius(originID ecs.Entity, worldRadius float64, entityType ecs.Enti
 	if !ok {
 		return false
 	}
-	defer world.FreeQueryCandidates(candidates)
+	defer FreeQueryCandidates(candidates)
 
 	if entityType == ecs.EntityAny {
 		return len(*candidates) > 0
@@ -123,7 +122,7 @@ func FilterInRadius(originID ecs.Entity, worldRadius float64, entityType ecs.Ent
 	if !ok {
 		return dst
 	}
-	defer world.FreeQueryCandidates(candidates)
+	defer FreeQueryCandidates(candidates)
 
 	for _, c := range *candidates {
 		if entityType == ecs.EntityAny {
@@ -171,16 +170,16 @@ func SameMap(aID, bID ecs.Entity) bool {
 // ─── Internal Helpers (Single Source of Truth) ───────────────────────────────
 
 // queryRadius abstracts the repetitive boilerplate sequence required to query the spatial grid.
-// Centralizes dependencies so changes to world.GlobalSpatialGrid only require editing this single block.
-func queryRadius(originID ecs.Entity, worldRadius float64) (ecs.PositionComponent, *[]world.ChunkEntry, bool) {
+// Uses GlobalGrid directly instead of going through the world package.
+func queryRadius(originID ecs.Entity, worldRadius float64) (ecs.PositionComponent, *[]ChunkEntry, bool) {
 	originPos, ok := ecs.DefaultRegistry.GetPosition(originID)
 	if !ok {
 		return ecs.PositionComponent{}, nil, false
 	}
 
-	candidates := world.GlobalSpatialGrid.QueryRadius(originPos, worldRadius, originID)
+	candidates := GlobalGrid.QueryRadius(originPos, worldRadius, originID)
 	if len(*candidates) == 0 {
-		world.FreeQueryCandidates(candidates) // Always clear slices cleanly
+		FreeQueryCandidates(candidates) // Always clear slices cleanly
 		return originPos, nil, false
 	}
 
@@ -193,7 +192,7 @@ func getNearestByType(originID ecs.Entity, worldRadius float64, entityType ecs.E
 	if !ok {
 		return NearestResult{}, false
 	}
-	defer world.FreeQueryCandidates(candidates)
+	defer FreeQueryCandidates(candidates)
 
 	var nearest NearestResult
 	nearestDSq := math.MaxInt // Optimized: Avoid tracking cumbersome found booleans

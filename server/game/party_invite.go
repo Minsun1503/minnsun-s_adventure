@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"server/ecs"
 	"sync"
-	"time"
 )
 
 // InviteRecord represents a pending party invitation.
 type InviteRecord struct {
 	PartyID   ecs.Entity
-	ExpiresAt time.Time
+	ExpiresAt uint64 // Tick-based expiration
 }
 
 // InviteCache is a thread-safe store for pending party invitations.
@@ -44,7 +43,7 @@ func (ic *InviteCache) Take(targetID ecs.Entity) (InviteRecord, bool) {
 	}
 	delete(ic.cache, targetID)
 
-	if time.Now().After(record.ExpiresAt) {
+	if GetCurrentTick() >= record.ExpiresAt {
 		return InviteRecord{}, false
 	}
 	return record, true
@@ -55,9 +54,9 @@ func (ic *InviteCache) Take(targetID ecs.Entity) (InviteRecord, bool) {
 func (ic *InviteCache) PurgeExpired() {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
-	now := time.Now()
+	currentTick := GetCurrentTick()
 	for id, record := range ic.cache {
-		if now.After(record.ExpiresAt) {
+		if currentTick >= record.ExpiresAt {
 			delete(ic.cache, id)
 		}
 	}
@@ -103,10 +102,10 @@ func SendPartyInviteSystem(inviterID, targetID ecs.Entity) (string, bool) {
 		return "Error: Target player is already in a party.\r\n", false
 	}
 
-	// Store the invitation with 30-second expiry.
+	// Store the invitation with 120-tick expiry (30 seconds at 4 ticks/sec).
 	GlobalInviteCache.Store(targetID, InviteRecord{
 		PartyID:   partyID,
-		ExpiresAt: time.Now().Add(30 * time.Second),
+		ExpiresAt: GetCurrentTick() + 120,
 	})
 
 	// Notify the target player.

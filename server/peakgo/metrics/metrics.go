@@ -3,6 +3,7 @@ package metrics
 import (
 	"fmt"
 	"net/http"
+	"server/peakgo/loggate"
 	"server/peakgo/perf"
 )
 
@@ -35,7 +36,7 @@ func NewMetricsServer(addr string, tm *perf.TickMonitor, pm *perf.PacketMonitor,
 func (ms *MetricsServer) Start() {
 	go func() {
 		if err := ms.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Printf("[metrics] server error: %v\n", err)
+			loggate.Errorf("[metrics] server error: %v", err)
 		}
 	}()
 }

@@ -7,6 +7,7 @@ import (
 	"net"
 	"server/ecs"
 	"server/logger"
+	"server/peakgo/anticheat"
 	"server/state"
 	"strings"
 	"time"
@@ -290,7 +291,10 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 		ecs.DefaultRegistry.SetEquipment(entityID, ecs.EquipmentComponent{WeaponID: 0, ArmorID: 0})
 	}
 
-	ecs.DefaultRegistry.SetConnection(entityID, ecs.ConnectionComponent{Conn: conn})
+	ecs.DefaultRegistry.SetConnection(entityID, ecs.ConnectionComponent{
+		Conn:      conn,
+		Validator: new(anticheat.Validator),
+	})
 	ecs.DefaultRegistry.SetMetadata(entityID, ecs.MetadataComponent{Name: username, Type: ecs.EntityPlayer})
 
 	// Track active player mapping.

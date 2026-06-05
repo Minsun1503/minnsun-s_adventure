@@ -4,7 +4,7 @@ import (
 	"server/ecs"
 	"server/game"
 	"server/peakgo/loggate"
-	"server/world"
+	"server/peakgo/spatial"
 )
 
 // ─── Combat Bot ───────────────────────────────────────────────────────────────
@@ -40,26 +40,25 @@ func TickCombatBots() int {
 			bot.TargetID = 0 // target dead or invalid
 		}
 
-		// Scan for a new monster target in the spatial grid.
-		nearby := world.GetNearbyMonsters(bot.ID, combatBotSearchRadius)
-		if len(nearby) == 0 {
+		// Scan for a new monster target using peakgo/spatial.
+		filtered := spatial.FilterInRadius(bot.ID, combatBotSearchRadius, ecs.EntityMonster, nil)
+		if len(filtered) == 0 {
 			continue
 		}
 
-		// Attack the first (closest) monster found.
-		target := nearby[0]
-		bot.TargetID = target.ID
+		// Attack the first monster found.
+		targetID := filtered[0]
+		bot.TargetID = targetID
 
-		_, errMsg := game.AttackSystem(bot.ID, target.ID)
+		_, errMsg := game.AttackSystem(bot.ID, targetID)
 		if errMsg == "" {
 			attacks++
 			if loggate.DebugEnabled() {
-				loggate.Debugf("[LOADTEST] Bot %d attacks monster %d", bot.ID, target.ID)
+				loggate.Debugf("[LOADTEST] Bot %d attacks monster %d", bot.ID, targetID)
 			}
 		} else {
 			bot.TargetID = 0
 		}
-		world.FreeNearbyMonsters(nearby)
 	}
 	return attacks
 }

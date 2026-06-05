@@ -11,7 +11,7 @@
 //
 // Usage:
 //
-//	logger.Init()           // Call once at server startup (reads data/config.json)
+//	logger.Init()           // Call once at server startup (reads config via peakgo/config)
 //	logger.Info("msg %v", x)
 //	logger.Warn("msg %v", x)
 //	logger.Error("msg %v", x)
@@ -20,16 +20,17 @@
 package logger
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"server/peakgo/config"
 )
 
-// ─── Log Levels ──────────────────────────────────────────────────────────────
+// ─── Log Levels ─────────────────────────────────────────────────────────────────
 
 type level int
 
@@ -52,15 +53,7 @@ var levelColors = [...]string{
 
 const ansiReset = "\033[0m"
 
-// ─── Config ──────────────────────────────────────────────────────────────────
-
-type serverConfig struct {
-	Debug    bool   `json:"debug"`
-	LogDir   string `json:"log_dir"`
-	LogMaxMB int    `json:"log_max_mb"`
-}
-
-// ─── Log Entry ───────────────────────────────────────────────────────────────
+// ─── Log Entry ─────────────────────────────────────────────────────────────────
 
 type logEntry struct {
 	lv     level
@@ -69,7 +62,7 @@ type logEntry struct {
 	args   []any
 }
 
-// ─── Logger State ────────────────────────────────────────────────────────────
+// ─── Logger State ──────────────────────────────────────────────────────────────
 
 var (
 	debugMode    atomic.Bool   // true = print DEBUG entries
@@ -89,12 +82,12 @@ var (
 
 const channelCapacity = 4096
 
-// ─── Public API ──────────────────────────────────────────────────────────────
+// ─── Public API ────────────────────────────────────────────────────────────────
 
-// Init reads data/config.json, creates the log directory, and starts the
+// Init reads config via peakgo/config, creates the log directory, and starts the
 // background writer goroutine. Must be called once at server startup.
 func Init() {
-	cfg := loadConfig("data/config.json")
+	cfg := config.C()
 
 	debugMode.Store(cfg.Debug)
 	logDir = cfg.LogDir
@@ -162,7 +155,7 @@ func IsDebug() bool {
 	return debugMode.Load()
 }
 
-// ─── Internal ────────────────────────────────────────────────────────────────
+// ─── Internal ──────────────────────────────────────────────────────────────────
 
 func push(lv level, format string, args ...any) {
 	if logChannel == nil || isClosed.Load() {
@@ -308,22 +301,4 @@ func getOrOpenFile(t time.Time) *os.File {
 	currentFile = f
 	currentDay = day
 	return f
-}
-
-// loadConfig reads and parses data/config.json. Falls back to safe defaults on error.
-func loadConfig(path string) serverConfig {
-	cfg := serverConfig{
-		Debug:    false,
-		LogDir:   "logs",
-		LogMaxMB: 10,
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[LOGGER] config.json not found at %q, using defaults.\n", path)
-		return cfg
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "[LOGGER] config.json parse error: %v, using defaults.\n", err)
-	}
-	return cfg
 }

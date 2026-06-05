@@ -1,0 +1,174 @@
+// Package spatial provides high-performance proximity queries built on top of
+// the SpatialGrid engine.
+//
+// # Why this package exists
+//
+// The SpatialGrid is a low-level data structure — it returns raw ChunkEntry
+// slices and requires callers to manually resolve ECS components. Every system
+// that needs "who is near entity X" must safely query, iterate, filter by type,
+// and remember to free query candidates to avoid GC pressure.
+//
+// This file wraps that sequence into named, typed functions so new systems
+// only think in terms of game concepts ("find the nearest monster") rather
+// than spatial grid mechanics.
+//
+// # Peak Go contract
+//
+// All functions delegate to pooled spatial grid queries.
+// No additional heap allocations beyond what the grid already amortises.
+package spatial
+
+import (
+	"server/ecs"
+	"server/peakgo/gmath"
+	"server/peakgo/loggate"
+	"sync"
+)
+
+// ProximityResult holds a nearby entity with its resolved components.
+// Returned by proximity queries so callers don't need follow-up ECS lookups.
+type ProximityResult struct {
+	ID    ecs.Entity
+	Pos   ecs.PositionComponent
+	Meta  ecs.MetadataComponent
+	Stats ecs.StatsComponent
+}
+
+var proximityPool = sync.Pool{
+	New: func() any {
+		s := make([]ProximityResult, 0, 16)
+		return &s
+	},
+}
+
+// FreeNearbyPlayers returns a pooled slice to the pool.
+func FreeNearbyPlayers(s []ProximityResult) {
+	if s == nil {
+		return
+	}
+	s = s[:0]
+	proximityPool.Put(&s)
+}
+
+// FreeNearbyMonsters returns a pooled monster result slice to the pool.
+func FreeNearbyMonsters(s []ProximityResult) {
+	if s == nil {
+		return
+	}
+	s = s[:0]
+	proximityPool.Put(&s)
+}
+
+// GetNearbyPlayers filters spatial grid candidates to player-type entities only,
+// resolving components with zero allocations via slice pooling.
+// Callers must call FreeNearbyPlayers(slice) when done to recycle memory.
+func GetNearbyPlayers(originID ecs.Entity, worldRadius float64) []ProximityResult {
+	pos, ok := ecs.DefaultRegistry.GetPosition(originID)
+	if !ok {
+		return nil
+	}
+
+	candidates := GlobalGrid.QueryRadius(pos, worldRadius, originID)
+	if len(*candidates) == 0 {
+		FreeQueryCandidates(candidates)
+		return nil
+	}
+
+	pSlice := proximityPool.Get().(*[]ProximityResult)
+	results := *pSlice
+	results = results[:0]
+
+	for _, c := range *candidates {
+		meta, hasMeta := ecs.DefaultRegistry.GetMetadata(c.ID)
+		if !hasMeta || meta.Type != ecs.EntityPlayer {
+			continue // Filter non-players early
+		}
+		stats, hasStats := ecs.DefaultRegistry.GetStats(c.ID)
+		if !hasStats {
+			continue
+		}
+		results = append(results, ProximityResult{
+			ID:    c.ID,
+			Pos:   c.Pos,
+			Meta:  meta,
+			Stats: stats,
+		})
+	}
+	FreeQueryCandidates(candidates)
+	return results
+}
+
+// GetNearbyMonsters filters spatial grid candidates to monster-type entities only,
+// resolving components with zero allocations via slice pooling.
+// Callers must call FreeNearbyMonsters(slice) when done to recycle memory.
+func GetNearbyMonsters(originID ecs.Entity, worldRadius float64) []ProximityResult {
+	pos, ok := ecs.DefaultRegistry.GetPosition(originID)
+	if !ok {
+		return nil
+	}
+
+	candidates := GlobalGrid.QueryRadius(pos, worldRadius, originID)
+	if len(*candidates) == 0 {
+		FreeQueryCandidates(candidates)
+		return nil
+	}
+
+	pSlice := proximityPool.Get().(*[]ProximityResult)
+	results := *pSlice
+	results = results[:0]
+
+	for _, c := range *candidates {
+		meta, hasMeta := ecs.DefaultRegistry.GetMetadata(c.ID)
+		if !hasMeta || meta.Type != ecs.EntityMonster {
+			continue // Filter non-monsters early
+		}
+		stats, hasStats := ecs.DefaultRegistry.GetStats(c.ID)
+		if !hasStats {
+			continue
+		}
+		results = append(results, ProximityResult{
+			ID:    c.ID,
+			Pos:   c.Pos,
+			Meta:  meta,
+			Stats: stats,
+		})
+	}
+	FreeQueryCandidates(candidates)
+	return results
+}
+
+// IsInRange checks whether a specific target entity is within worldRadius
+// of the origin entity. Used by AttackSystem for melee range validation.
+func IsInRange(originID, targetID ecs.Entity, worldRadius float64) bool {
+	originPos, ok1 := ecs.DefaultRegistry.GetPosition(originID)
+	targetPos, ok2 := ecs.DefaultRegistry.GetPosition(targetID)
+	if !ok1 || !ok2 {
+		return false
+	}
+
+	return gmath.InRange(originPos.X, originPos.Z, targetPos.X, targetPos.Z, worldRadius)
+}
+
+// NearbyEntitiesSystem is the game-loop facing system.
+// Called from UpdateWorldEntitiesSystem per monster tick to find aggro targets.
+func NearbyEntitiesSystem(monsterID ecs.Entity, aggroRadius float64) {
+	meta, ok := ecs.DefaultRegistry.GetMetadata(monsterID)
+	if !ok {
+		return
+	}
+
+	nearby := GetNearbyPlayers(monsterID, aggroRadius)
+	if len(nearby) == 0 {
+		return
+	}
+	defer FreeNearbyPlayers(nearby)
+
+	// loggate.Debugf: 0 allocs in production; full aggro trace in debug mode.
+	loggate.Debugf("[AGGRO] %s detects %d player(s) within %.0f units",
+		meta.Name, len(nearby), aggroRadius)
+
+	for _, p := range nearby {
+		loggate.Debugf("  → %s at (%d, %d) HP:%d",
+			p.Meta.Name, p.Pos.X, p.Pos.Z, p.Stats.HP)
+	}
+}

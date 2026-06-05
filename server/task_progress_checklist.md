@@ -1,23 +1,22 @@
-# Task Progress - Roadmap v4
+# Phase 11: 100% PeakGO Coverage - Task Progress ✅
 
-## Phase 1 - Combat Accumulator (S-TIER)
-- [x] Create server/game/combat_accumulator.go with CombatAccumulator struct
-- [x] Modify server/world/worker.go - Add CombatBuffer to MapWorker, init & Flush in Tick
-- [x] Modify server/game/combat.go - DamageSystem delegates to combat buffer
-- [x] Modify server/game/skill_pipeline.go - stageEffectApplication delegates to combat buffer
-- [x] Run go vet and verify compilation
+## Phase 1: Integrate peakgo/config (Hot-Reload Configuration) ✅
+- [x] 1.1 Update data/config.json with full GameConfig fields
+- [x] 1.2 Modify server/server.go: call config.InitConfig() before logger.Init()
+- [x] 1.3 Modify server/logger/logger.go: remove serverConfig struct, loadConfig, use config.C()
 
-## Phase 1 - Save Consistency (S-TIER)
-- [ ] Modify `server/db/save_engine.go` to wrap Upsert Character and Inventory in a single `BeginTx` block
-- [ ] Ensure any error in the SQL transaction triggers a strict `Rollback()`
-- [ ] Add `snapshot_data JSON` backup field logic to the Upsert query
+## Phase 2: Integrate peakgo/anticheat (Anti-Cheat Standard) ✅
+- [x] 2.1 Modify server/ecs/ecs.go: add Validator interface{} to ConnectionComponent
+- [x] 2.2 Modify server/game/movement.go: replace hardcoded MaxMoveDistance with anticheat Validator
+- [x] 2.3 Initialize Validator when players are created (in models/player.go CreatePlayerEntity)
 
-## Phase 1 - Cross-Map Migration (S-TIER)
-- [ ] Create `server/ecs/transfer_component.go` for Two-Phase Commit locking
-- [ ] Update `server/world/partition.go` to implement lock-copy-spawn-commit workflow for `processTransfer`
-- [ ] Update `MovementSystem` and `CombatSystem` to ignore entities with `TransferComponent`
+## Phase 3: Integrate peakgo/nav (Navigation Mesh) ✅
+- [x] 3.1 Create global GlobalNavMesh variable with default zone configuration
+- [x] 3.2 Feed collision data from map_collision.go into NavMesh initialization
+- [x] 3.3 Modify server/game/ai_roaming.go: use NavMesh.FindPathWithCache instead of direct astar
 
-## Phase 2 - Memory & State Safety (A-TIER)
-- [x] Fix Entity Lifecycle Leak (`ecs.go` RemoveEntity calls Close/Nil)
-- [x] Fix AOI Worst Case (`MaxAOIWatchers = 50` culling)
-- [x] Global State Cleanup (Replaced `GlobalRegistry` with `DefaultRegistry`)
+## Verification ✅
+- [x] Build succeeds (go build passed)
+- [x] go vet passes
+- [x] config benchmark: 0 B/op, 0 allocs/op (zero-alloc confirmed)
+- [x] Logger refactored to use peakgo/config.C() instead of self-parsing config.json

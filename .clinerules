@@ -12,8 +12,11 @@ ATOMIC TICK (systems/gameloop.go): CẤM gọi time.Now() hoặc time.Since() tr
 
 ANTI-CHEAT: Packet di chuyển phải được kiểm tra khoảng cách qua gmath.InRangeInt với MaxMoveDistance theo tick trước khi cập nhật vào Registry.
 
-REUSE UTILITIES: CẤM viết lại hoặc dùng thư viện ngoài cho A*, RNG, Heap, Pool, Math... BẮT BUỘC tái sử dụng các package tối ưu trong server/peakgo/ (ví dụ: astar, rng, pool, gmath, threat, combat).
-
+REUSE UTILITIES & PEAKGO-FIRST WORKFLOW: 
+1. CẤM viết lại hoặc dùng thư viện ngoài cho A*, RNG, Heap, Pool, Math... BẮT BUỘC tái sử dụng các package tối ưu trong server/peakgo/ (ví dụ: astar, rng, pool, gmath, threat, combat).
+2. Khi thêm một tính năng mới hay bất cứ logic nào, BẮT BUỘC phải áp dụng package peakgo trước. Nếu peakgo chưa có hàm/package phục vụ cho tính năng đó, phải báo cáo lại để tiến hành viết thêm package peakgo. 
+3. Sau khi viết/sửa peakgo package, phải tối ưu hóa với mục tiêu zero-allocs (0 B/op, 0 allocs/op) thông qua Benchmark. 
+4. Cuối cùng mới được phép dùng nó để xây dựng logic mới ở tầng ứng dụng (server/game/ v.v.).
 ZERO-ALLOC TARGET & BENCHMARK (0 ns/op, 0 B/op, 0 allocs/op): Mỗi khi chỉnh sửa bất kỳ file nào trong server/peakgo/, BẮT BUỘC chạy benchmark riêng cho gói đó bằng cú pháp CMD (cmd /c) an toàn:
 
 cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && go test -bench=. -benchmem ./peakgo/tên_gói/..."

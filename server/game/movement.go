@@ -3,11 +3,13 @@ package game
 import (
 	"net"
 	"server/ecs"
+	"server/peakgo/anticheat"
+	"server/peakgo/broadcast"
 	"server/peakgo/codec"
+	"server/peakgo/config"
 	"server/peakgo/gmath"
 	"server/peakgo/loggate"
 	"server/peakgo/netio"
-	"server/peakgo/broadcast"
 	"server/protocol"
 	"server/world"
 )
@@ -89,12 +91,30 @@ func MovementSystem(entity ecs.Entity, x, z int) bool {
 	}
 
 	// Hàng rào bảo vệ 2 (VÁ LỖI CHÍ MẠNG): Chống dịch chuyển tức thời (Anti-Teleport Hack).
-	// Ép buộc khoảng cách di chuyển giữa tick cũ và tick mới không được vượt quá giới hạn cấu hình (Max 2 ô/tick).
-	// Tận dụng hàm hệ số nguyên thuần túy gmath.InRangeInt, không dính bất kỳ một phép cast float nào.
-	const MaxMoveDistance = 2
-	if !gmath.InRangeInt(pos.X, pos.Z, x, z, MaxMoveDistance) {
-		SendNoticeSystem(entity, staticAntiCheatNotice)
-		return false
+	// Sử dụng anticheat.Validator per-connection để kiểm tra khoảng cách di chuyển.
+	// Lấy maxMoveDistance từ config (hot-reload) thay vì hardcode.
+	cfg := config.C()
+	maxMoveDist := int(cfg.MaxMoveDistance)
+
+	if connComp, ok := registry.GetConnection(entity); ok {
+		if v, ok2 := connComp.Validator.(*anticheat.Validator); ok2 && v != nil {
+			newPos := ecs.PositionComponent{MapID: pos.MapID, X: x, Z: z}
+			if !v.ValidateMovement(pos, newPos, maxMoveDist, GetCurrentTick()) {
+				SendNoticeSystem(entity, staticAntiCheatNotice)
+				return false
+			}
+		} else {
+			// Fallback: no validator (e.g. monster) — use simple distance check
+			if !gmath.InRangeInt(pos.X, pos.Z, x, z, maxMoveDist) {
+				SendNoticeSystem(entity, staticAntiCheatNotice)
+				return false
+			}
+		}
+	} else {
+		// No connection — use simple distance check (monster AI pathfinding)
+		if !gmath.InRangeInt(pos.X, pos.Z, x, z, maxMoveDist) {
+			return false
+		}
 	}
 
 	// Hàng rào bảo vệ 3: Kiểm tra va chạm vật cản địa hình từ dữ liệu bản đồ

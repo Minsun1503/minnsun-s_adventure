@@ -1,10 +1,10 @@
 package game
 
 import (
-	"fmt"
 	"io"
 	"net"
 	"server/ecs"
+	"server/peakgo/loggate"
 	"server/world"
 	"strings"
 	"testing"
@@ -29,7 +29,7 @@ func createMockConn() (net.Conn, chan string) {
 			if err != nil {
 				close(msgChan)
 				if err != io.EOF && !strings.Contains(err.Error(), "timeout") {
-					fmt.Printf("Mock read error: %v\n", err)
+					loggate.Errorf("Mock read error: %v", err)
 				}
 				return
 			}

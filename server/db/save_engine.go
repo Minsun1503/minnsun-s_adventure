@@ -6,6 +6,7 @@ import (
 	"server/ecs"
 	"server/logger"
 	"server/models"
+	"server/peakgo/circuitbreaker"
 	"strings"
 	"sync"
 	"time"
@@ -35,14 +36,30 @@ const recoveryLogPath = "data/recovery.log"
 // saveEngineMu protects the save engine's internal state.
 var saveEngineMu sync.Mutex
 
+// Global circuit breaker for database writes.
+// Prevents cascading failures when the database is down — operations are
+// queued to the WAL for replay once the connection is restored.
+var globalDBCircuitBreaker *circuitbreaker.CircuitBreaker
+
 // Global thread-safe buffered stream channel for saving snapshots
 var SaveQueue = make(chan SaveSnapshot, 1000)
 
+// StartSaveWorkerEngine spins up the background worker channel monitor loop.
 // StartSaveWorkerEngine spins up the background worker channel monitor loop.
 // After each successful drain cycle, it attempts to replay any buffered
 // snapshots from the disk-based emergency buffer.
 // Also starts the periodic memory snapshot goroutine.
 func StartSaveWorkerEngine() {
+	// Initialize the circuit breaker with WAL fallback
+	var err error
+	globalDBCircuitBreaker, err = circuitbreaker.NewCircuitBreaker(
+		circuitbreaker.DefaultConfig(),
+		recoveryLogPath, // WAL path for offline queuing
+	)
+	if err != nil {
+		logger.Error("[PERSISTENCE] Failed to init circuit breaker: %v", err)
+	}
+
 	// Initialize the emergency disk buffer for overflow protection.
 	if err := GlobalSaveBuffer.Init(); err != nil {
 		logger.Error("[PERSISTENCE] Failed to init emergency save buffer: %v", err)
@@ -184,6 +201,24 @@ func executeWriteToSQL(snap SaveSnapshot) {
 		return
 	}
 
+	if globalDBCircuitBreaker != nil {
+		// Use circuit breaker: retry → backoff → circuit open → WAL fallback
+		op := circuitbreaker.Op{
+			Label: "save_player_" + snap.Name,
+			Run: func() error {
+				return tryWrite(snap)
+			},
+		}
+		err := globalDBCircuitBreaker.Execute(op)
+		if err == nil {
+			logger.Info("[DB SAVE] Persisted entity #%d (%s).", snap.EntityID, snap.Name)
+		} else {
+			logger.Warn("[DB SAVE] Circuit breaker fallback for %s: %v", snap.Name, err)
+		}
+		return
+	}
+
+	// Legacy fallback path (no circuit breaker)
 	const maxRetries = 3
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -197,7 +232,6 @@ func executeWriteToSQL(snap SaveSnapshot) {
 			}
 			return
 		}
-		// Log failure and sleep with backoff for retry
 		logger.Warn("[SAVE] Attempt %d failed for %s: %v", attempt+1, snap.Name, err)
 		time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
 	}

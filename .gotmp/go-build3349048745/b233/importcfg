@@ -1,0 +1,23 @@
+# import config
+packagefile encoding/gob=C:\Users\ADMIN\AppData\Local\go-build\5f\5f15b3391be478a933a0cde754bc8024cceaf6b431afea08084fbd807509661f-d
+packagefile fmt=C:\Users\ADMIN\AppData\Local\go-build\40\4000d30d23188cb38449f61c759d0143495d1da30e9843200257422e199ca34e-d
+packagefile math=C:\Users\ADMIN\AppData\Local\go-build\85\85aa458a9fa0b12ddc9133a4b1a2db9a0384066ba71cc82fe47c0ca715d09656-d
+packagefile net=C:\Users\ADMIN\AppData\Local\go-build\3b\3bd390ad9eb1f924999fb6e01115a5493e797a9b85068c9acda17e2b0df9981f-d
+packagefile os=C:\Users\ADMIN\AppData\Local\go-build\1f\1fdb4d48a4147d507d48bbc8aa2c553d6ff4ee4347742abee55f98d5c5ad03dc-d
+packagefile path/filepath=C:\Users\ADMIN\AppData\Local\go-build\bd\bd81532734cbaf612217c177517cbd5ad3faa34308e9d868e4c78dff14980c74-d
+packagefile server/ecs=C:\Users\ADMIN\AppData\Local\go-build\b2\b2399913679ce408a0696e42478f7163f44fae071eab3e0cb57c1fd0488d71ec-d
+packagefile server/logger=C:\Users\ADMIN\AppData\Local\go-build\4d\4dcdabaeceb385d6f0afafd40c8a2e4fbb1ff3cd3ec35613fdf16182b584d95d-d
+packagefile server/peakgo/aabb=C:\Users\ADMIN\AppData\Local\go-build\9c\9c5dd2bd52c20893e46548aa5f9fb51af00e3e640b56d765ea9d9caea1ee5d48-d
+packagefile server/peakgo/aoi=C:\Users\ADMIN\AppData\Local\go-build\40\4012a02411bccd923484791d447d7c19279c5e9988bbf9d5097047d98661e1c9-d
+packagefile server/peakgo/astar=C:\Users\ADMIN\AppData\Local\go-build\35\35960d94d07bd2030148ca674ff0a8e8dc4cde8e0f90db7fd1f83b255003524e-d
+packagefile server/peakgo/broadcast=C:\Users\ADMIN\AppData\Local\go-build\75\75eaf9f78cb31208a5d67a4f079e2cbf9c07bd547155996559ee912b2b762324-d
+packagefile server/peakgo/codec=C:\Users\ADMIN\AppData\Local\go-build\4c\4cb706a48cdca8d92b2331680b8f19be4b7dbcca07202066e4136a26fb0f0d2e-d
+packagefile server/peakgo/loggate=C:\Users\ADMIN\AppData\Local\go-build\17\174786d714c97cd718752e6a44e59ec63cfd4561450bbf3d75a030ca422f64f6-d
+packagefile server/peakgo/nav=C:\Users\ADMIN\AppData\Local\go-build\fb\fb89389336458b5c3e8e7c5bd9a35b9fb76d96f2a9884051f7c92c5953b6fb5e-d
+packagefile server/peakgo/netio=C:\Users\ADMIN\AppData\Local\go-build\62\62caf0f203833da4249502f0c21c0d81c43d380046b5a9d5a22ba8b7c76d4748-d
+packagefile server/peakgo/perf=C:\Users\ADMIN\AppData\Local\go-build\c4\c49f3ff0e41230e549fa8a0f83a698c3a8ddb86ca37a84e91ae4d42ae088f3e2-d
+packagefile server/peakgo/spatial=C:\Users\ADMIN\AppData\Local\go-build\bf\bfb133f46325529f6df8125850ba7760b558d3cdd081b3d83786c18816731dd9-d
+packagefile sort=C:\Users\ADMIN\AppData\Local\go-build\7c\7cb5ea9e223614b1b01405ad65677c28021d721880879cd1bd7260c4b4e3c66d-d
+packagefile sync=C:\Users\ADMIN\AppData\Local\go-build\2e\2e2a56c4fb0662e67243a5ba1c7c8a58cb9d3d9502da34339df854d70b628846-d
+packagefile sync/atomic=C:\Users\ADMIN\AppData\Local\go-build\a8\a8912e0d410bbc1f3d91f3c98cca876e4c6ada11f9c525a7d118da70552c1545-d
+packagefile time=C:\Users\ADMIN\AppData\Local\go-build\d3\d3c9032fb1e11e160dda6e4fabf81517243996cc68710d1d03750443f2d68066-d

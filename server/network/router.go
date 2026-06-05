@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"server/db"
+
 	"server/ecs"
 	"server/game"
 	"server/logger"
@@ -11,6 +12,7 @@ import (
 	"server/peakgo/codec"
 	"server/peakgo/loggate"
 	"server/peakgo/netio"
+	"server/peakgo/ratelimit"
 	"server/systems"
 	"server/world"
 	"time"
@@ -19,6 +21,10 @@ import (
 // packetPool is the shared payload buffer pool for all client connections.
 // Exposed via netio.DefaultPool; defined here for documentation locality.
 var packetPool = netio.DefaultPool
+
+// Global rate limiter for all client connections.
+// Uses peakgo/ratelimit.TokenBucket — tick-based refill, zero time.Now() calls.
+var globalRateLimiter = ratelimit.NewRateLimiter()
 
 var opcodeNames = map[byte]string{
 	1: "MOVE", 2: "INV", 3: "USE", 4: "WARP", 5: "ATTACK",
@@ -48,8 +54,12 @@ func opcodeNameOf(op byte) string {
 func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapshot) {
 	isBot := len(snap.Meta.Name) >= 3 && snap.Meta.Name[:3] == "bot"
 
-	// Deferred cleanup: broadcast logout, remove from ECS, close socket.
+	// Register connection with rate limiter
+	globalRateLimiter.RegisterConnection(conn)
+
+	// Deferred cleanup: remove rate limiter, broadcast logout, remove from ECS, close socket.
 	defer func() {
+		globalRateLimiter.UnregisterConnection(conn)
 		name := snap.Meta.Name
 		if live, ok := ecs.DefaultRegistry.GetMetadata(playerEntity); ok {
 			name = live.Name
@@ -85,6 +95,14 @@ func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 
 	for {
 		// Zero-alloc header read: stack [2]byte + BigEndian.Uint16, no reflection.
+		// Rate limit check before reading any data.
+		// peakgo/ratelimit uses tick-based refill — zero time.Now() calls.
+		if !globalRateLimiter.Allow(conn, systems.CurrentTick()) {
+			loggate.Debugf("[RATE LIMIT] %s exceeded packet budget, dropping", conn.RemoteAddr())
+			_ = conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
+			continue
+		}
+
 		length, err := netio.ReadHeader(conn)
 		if err != nil {
 			break // Disconnected or read error
