@@ -94,11 +94,20 @@ func TestEntityLifecycle(t *testing.T) {
 		}
 	})
 
-	// Verify the entity ID is recycled and reused.
+	// Verify the entity ID is recycled and reused with incremented generation.
+	// With generational IDs, the index (low 32 bits) stays the same but the
+	// generation (high 32 bits) is incremented by 1.
 	t.Run("recycled_id_reused", func(t *testing.T) {
 		nextID := reg.NewEntity()
-		if nextID != eid {
-			t.Errorf("new entity ID %d should equal removed ID %d (ID recycling)", nextID, eid)
+		// Check that the index part is the same (same entity slot)
+		if EntityIndex(nextID) != EntityIndex(eid) {
+			t.Errorf("new entity index %d should equal removed entity index %d (ID recycling)",
+				EntityIndex(nextID), EntityIndex(eid))
+		}
+		// Check that the generation was incremented
+		if EntityGeneration(nextID) != EntityGeneration(eid)+1 {
+			t.Errorf("expected generation %d, got %d (generation should increment on recycle)",
+				EntityGeneration(eid)+1, EntityGeneration(nextID))
 		}
 	})
 }

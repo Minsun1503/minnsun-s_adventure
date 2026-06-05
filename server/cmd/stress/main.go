@@ -246,6 +246,9 @@ func runStressTick(tick uint64, bossID ecs.Entity, bots []*loadtest.PlayerBotSta
 		stats, ok := ecs.DefaultRegistry.GetStats(target)
 		if ok {
 			stats.HP -= batch.TotalDamage
+			if stats.HP < 0 {
+				stats.HP = 0
+			}
 			ecs.DefaultRegistry.SetStats(target, stats)
 		}
 	})

@@ -177,13 +177,19 @@ func processLogin(conn net.Conn) {
 
 		// Send the player's own StatsSync so the client can initialize the HUD.
 		selfStats := broadcast.BuildStatsSync(broadcast.StatsSyncPayload{
-			EntityID: uint64(playerEntity),
-			HP:       int32(snap.Stats.HP),
-			MaxHP:    int32(snap.Stats.MaxHP),
-			MP:       int32(snap.Stats.MP),
-			MaxMP:    int32(snap.Stats.MaxMP),
-			Dam:      int32(snap.Stats.Dam),
-			Level:    int32(snap.Stats.Level),
+			EntityID:     uint64(playerEntity),
+			HP:           int32(snap.Stats.HP),
+			MaxHP:        int32(snap.Stats.MaxHP),
+			MP:           int32(snap.Stats.MP),
+			MaxMP:        int32(snap.Stats.MaxMP),
+			Dam:          int32(snap.Stats.Dam),
+			Level:        int32(snap.Stats.Level),
+			Defense:      int32(snap.Stats.Defense),
+			MagicDefense: int32(snap.Stats.MagicDefense),
+			MagicAttack:  int32(snap.Stats.MagicAttack),
+			HitRate:      int32(snap.Stats.HitRate),
+			DodgeRate:    int32(snap.Stats.DodgeRate),
+			CritRate:     int32(snap.Stats.CritRate),
 		})
 		_ = netio.WritePacket(conn, selfStats)
 

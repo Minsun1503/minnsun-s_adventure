@@ -114,3 +114,6 @@
 [2026-06-05 14:12:54.891] [INFO ] [STRESS] Spawned 1000000 bots in 1.9482332s (513286 bots/sec)
 [2026-06-05 14:12:54.891] [INFO ] [STRESS] Starting stress simulation...
 [2026-06-05 14:12:54.891] [INFO ] [STRESS] All bots are attacking the boss (ID=1) at (50,50)
+[2026-06-05 14:14:01.092] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 14:19:01.092] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 14:24:01.092] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields

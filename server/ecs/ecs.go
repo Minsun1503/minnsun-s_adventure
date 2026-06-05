@@ -11,9 +11,30 @@ import (
 )
 
 // Entity đại diện cho mã định danh thực thể kiểu uint64 giúp tra cứu Map O(1).
+//
+// Generational ID layout:
+//
+//	Low  32 bits: Index (used for sparse array page/offset computation)
+//	High 32 bits: Generation (version, incremented on each recycle)
+//
+// The Dense array stores the full 64-bit Entity value, so the check
+//
+//	s.dense[idx-1] == id
+//
+// automatically fails when the generation doesn't match — completely
+// eliminating the ABA / Ghost-Process bug in RangeMutate without any
+// additional locks or overhead.
 type Entity uint64
 
-// Entity 0 is reserved.
+// EntityIndex extracts the low 32-bit index portion from a generational Entity ID.
+// This is used for sparse array page/offset calculations.
+func EntityIndex(id Entity) uint32 { return uint32(id) }
+
+// EntityGeneration extracts the high 32-bit generation (version) portion
+// from a generational Entity ID.
+func EntityGeneration(id Entity) uint32 { return uint32(id >> 32) }
+
+// Entity 0 is reserved (index=0, generation=0).
 // SparseSet uses 0 as "not present" marker inside the dense/sparse vectors.
 const InvalidEntity Entity = 0
 
@@ -248,8 +269,9 @@ type ComponentStore[T any] struct {
 func (s *ComponentStore[T]) Set(id Entity, val T) {
 	s.mu.Lock()
 
-	pageIndex := id / chunkSize
-	if pageIndex >= Entity(len(s.sparse)) {
+	idx32 := EntityIndex(id)
+	pageIndex := uint64(idx32 / chunkSize)
+	if pageIndex >= uint64(len(s.sparse)) {
 		newSparse := make([][]int32, pageIndex+1)
 		copy(newSparse, s.sparse)
 		s.sparse = newSparse
@@ -261,7 +283,7 @@ func (s *ComponentStore[T]) Set(id Entity, val T) {
 		s.sparse[pageIndex] = page
 	}
 
-	offset := id % chunkSize
+	offset := idx32 % chunkSize
 	idx := page[offset]
 
 	if idx != 0 && idx-1 < int32(len(s.dense)) && s.dense[idx-1] == id {
@@ -280,8 +302,9 @@ func (s *ComponentStore[T]) Set(id Entity, val T) {
 func (s *ComponentStore[T]) Get(id Entity) (T, bool) {
 	s.mu.RLock()
 
-	pageIndex := id / chunkSize
-	if pageIndex >= Entity(len(s.sparse)) {
+	idx32 := EntityIndex(id)
+	pageIndex := uint64(idx32 / chunkSize)
+	if pageIndex >= uint64(len(s.sparse)) {
 		s.mu.RUnlock()
 		var zero T
 		return zero, false
@@ -292,7 +315,7 @@ func (s *ComponentStore[T]) Get(id Entity) (T, bool) {
 		var zero T
 		return zero, false
 	}
-	idx := page[id%chunkSize]
+	idx := page[idx32%chunkSize]
 	if idx != 0 && idx-1 < int32(len(s.dense)) && s.dense[idx-1] == id {
 		val := s.values[idx-1]
 		s.mu.RUnlock()
@@ -306,8 +329,9 @@ func (s *ComponentStore[T]) Get(id Entity) (T, bool) {
 func (s *ComponentStore[T]) Delete(id Entity) {
 	s.mu.Lock()
 
-	pageIndex := id / chunkSize
-	if pageIndex >= Entity(len(s.sparse)) {
+	idx32 := EntityIndex(id)
+	pageIndex := uint64(idx32 / chunkSize)
+	if pageIndex >= uint64(len(s.sparse)) {
 		s.mu.Unlock()
 		return
 	}
@@ -317,7 +341,7 @@ func (s *ComponentStore[T]) Delete(id Entity) {
 		return
 	}
 
-	offset := id % chunkSize
+	offset := idx32 % chunkSize
 	idx := page[offset]
 
 	if idx == 0 || idx-1 >= int32(len(s.dense)) || s.dense[idx-1] != id {
@@ -333,8 +357,9 @@ func (s *ComponentStore[T]) Delete(id Entity) {
 		s.dense[actualIdx] = lastEntity
 		s.values[actualIdx] = s.values[lastIdx]
 
-		lastPageIndex := lastEntity / chunkSize
-		lastOffset := lastEntity % chunkSize
+		lastIdx32 := EntityIndex(lastEntity)
+		lastPageIndex := uint64(lastIdx32 / chunkSize)
+		lastOffset := lastIdx32 % chunkSize
 		s.sparse[lastPageIndex][lastOffset] = actualIdx + 1
 	}
 
@@ -423,6 +448,10 @@ func recycleEntityID(id Entity) {
 }
 
 // PopRecycledEntityID returns a recycled entity ID if one is available, or 0.
+// When recycling, the generation (high 32 bits) is incremented by 1 while
+// the index (low 32 bits) is preserved. This ensures that any stale copies
+// of the old Entity value held in RangeMutate snapshots will fail the
+// dense[idx-1] == id check, eliminating the ABA / Ghost-Process bug.
 // Exported for use by the world package's entity ID allocation.
 func PopRecycledEntityID() Entity {
 	recycledEntities.mu.Lock()
@@ -434,7 +463,11 @@ func PopRecycledEntityID() Entity {
 	id := recycledEntities.ids[last]
 	recycledEntities.ids = recycledEntities.ids[:last]
 	recycledEntities.mu.Unlock()
-	return id
+
+	// Increment generation by 1: extract old generation, add 1, combine with same index
+	gen := EntityGeneration(id) + 1
+	idx := EntityIndex(id)
+	return Entity(idx) | (Entity(gen) << 32)
 }
 
 // ─── MASTER REGISTRY SYSTEM ──────────────────────────────────────────────────
@@ -481,11 +514,16 @@ func NewRegistry() *Registry {
 // NewEntity returns a recycled entity ID if one is available, otherwise
 // allocates a fresh ID from the atomic counter. This prevents unbounded
 // growth of the entity ID space during long server uptimes.
+//
+// Generational ID format:
+//   - Fresh IDs: index = nextID counter, generation = 1
+//   - Recycled IDs: index preserved, generation incremented by 1
 func (r *Registry) NewEntity() Entity {
 	if recycled := PopRecycledEntityID(); recycled != 0 {
 		return recycled
 	}
-	return Entity(r.nextID.Add(1))
+	index := r.nextID.Add(1)
+	return Entity(index) | (1 << 32)
 }
 
 // RemoveEntity cleans up all components for an entity and recycles its ID.

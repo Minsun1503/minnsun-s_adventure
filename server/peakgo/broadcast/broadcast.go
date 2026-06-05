@@ -347,41 +347,64 @@ func WritePositionSync(dst []byte, p PositionSyncPayload) []byte {
 
 // StatsSyncPayload holds the fields for an S2C StatsSync packet (opcode 0x13).
 type StatsSyncPayload struct {
-	EntityID uint64
-	HP       int32
-	MaxHP    int32
-	MP       int32
-	MaxMP    int32
-	Dam      int32
-	Level    int32
+	EntityID     uint64
+	HP           int32
+	MaxHP        int32
+	MP           int32
+	MaxMP        int32
+	Dam          int32
+	Level        int32
+	Defense      int32
+	MagicDefense int32
+	MagicAttack  int32
+	HitRate      int32
+	DodgeRate    int32
+	CritRate     int32
 }
 
 // BuildStatsSync constructs an S2C StatsSync packet (opcode 0x13).
+// Wire format (59 bytes total: 2 length + 1 opcode + 56 payload):
+//
+//	[Length 2B][Opcode 1B]
+//	[EntityID 8B]
+//	[HP:MaxHP 8B]   (packed int32 pair)
+//	[MP:MaxMP 8B]   (packed int32 pair)
+//	[Dam:Level 8B]  (packed int32 pair)
+//	[Defense:MagicDefense 8B]  (packed int32 pair)
+//	[MagicAttack:HitRate 8B]   (packed int32 pair)
+//	[DodgeRate:CritRate 8B]    (packed int32 pair)
 func BuildStatsSync(p StatsSyncPayload) []byte {
-	pkt := make([]byte, 35)
-	binary.BigEndian.PutUint16(pkt[0:2], 33)
+	const needed = 59
+	pkt := make([]byte, needed)
+	binary.BigEndian.PutUint16(pkt[0:2], 57)
 	pkt[2] = OpcodeStatsSync
 	binary.BigEndian.PutUint64(pkt[3:11], p.EntityID)
 	binary.BigEndian.PutUint64(pkt[11:19], uint64(uint32(p.HP))<<32|uint64(uint32(p.MaxHP)))
 	binary.BigEndian.PutUint64(pkt[19:27], uint64(uint32(p.MP))<<32|uint64(uint32(p.MaxMP)))
 	binary.BigEndian.PutUint64(pkt[27:35], uint64(uint32(p.Dam))<<32|uint64(uint32(p.Level)))
+	binary.BigEndian.PutUint64(pkt[35:43], uint64(uint32(p.Defense))<<32|uint64(uint32(p.MagicDefense)))
+	binary.BigEndian.PutUint64(pkt[43:51], uint64(uint32(p.MagicAttack))<<32|uint64(uint32(p.HitRate)))
+	binary.BigEndian.PutUint64(pkt[51:59], uint64(uint32(p.DodgeRate))<<32|uint64(uint32(p.CritRate)))
 	return pkt
 }
 
 // WriteStatsSync writes an S2C StatsSync packet into dst (0 allocs).
 func WriteStatsSync(dst []byte, p StatsSyncPayload) []byte {
-	const needed = 35
+	const needed = 59
 	if cap(dst) >= needed {
 		dst = dst[:needed]
 	} else {
 		dst = make([]byte, needed)
 	}
-	binary.BigEndian.PutUint16(dst[0:2], 33)
+	binary.BigEndian.PutUint16(dst[0:2], 57)
 	dst[2] = OpcodeStatsSync
 	binary.BigEndian.PutUint64(dst[3:11], p.EntityID)
 	binary.BigEndian.PutUint64(dst[11:19], uint64(uint32(p.HP))<<32|uint64(uint32(p.MaxHP)))
 	binary.BigEndian.PutUint64(dst[19:27], uint64(uint32(p.MP))<<32|uint64(uint32(p.MaxMP)))
 	binary.BigEndian.PutUint64(dst[27:35], uint64(uint32(p.Dam))<<32|uint64(uint32(p.Level)))
+	binary.BigEndian.PutUint64(dst[35:43], uint64(uint32(p.Defense))<<32|uint64(uint32(p.MagicDefense)))
+	binary.BigEndian.PutUint64(dst[43:51], uint64(uint32(p.MagicAttack))<<32|uint64(uint32(p.HitRate)))
+	binary.BigEndian.PutUint64(dst[51:59], uint64(uint32(p.DodgeRate))<<32|uint64(uint32(p.CritRate)))
 	return dst
 }
 

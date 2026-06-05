@@ -192,6 +192,13 @@ func TestBuildStatsSync(t *testing.T) {
 	if pkt[2] != broadcast.OpcodeStatsSync {
 		t.Fatalf("expected stats sync opcode, got %02X", pkt[2])
 	}
+	if len(pkt) != 59 {
+		t.Fatalf("expected 59 bytes for StatsSync, got %d", len(pkt))
+	}
+	hp := binary.BigEndian.Uint32(pkt[11:15])
+	if int32(hp) != 80 {
+		t.Fatalf("expected HP 80, got %d", hp)
+	}
 }
 
 func TestBuildChatMessage(t *testing.T) {
@@ -271,14 +278,39 @@ func TestWritePositionSync(t *testing.T) {
 
 func TestWriteStatsSync(t *testing.T) {
 	dst := make([]byte, 0, 128)
-	p := broadcast.StatsSyncPayload{EntityID: 1, HP: 50, MaxHP: 100, MP: 20, MaxMP: 50, Dam: 10, Level: 1}
+	p := broadcast.StatsSyncPayload{
+		EntityID:     1,
+		HP:           50,
+		MaxHP:        100,
+		MP:           20,
+		MaxMP:        50,
+		Dam:          10,
+		Level:        1,
+		Defense:      5,
+		MagicDefense: 3,
+		MagicAttack:  2,
+		HitRate:      80,
+		DodgeRate:    10,
+		CritRate:     5,
+	}
 	result := broadcast.WriteStatsSync(dst, p)
 	if result[2] != broadcast.OpcodeStatsSync {
 		t.Fatalf("unexpected opcode: %02X", result[2])
 	}
+	if len(result) != 59 {
+		t.Fatalf("expected 59 bytes, got %d", len(result))
+	}
 	hp := binary.BigEndian.Uint32(result[11:15])
 	if int32(hp) != 50 {
 		t.Fatalf("expected HP 50, got %d", hp)
+	}
+	def := binary.BigEndian.Uint32(result[35:39])
+	if int32(def) != 5 {
+		t.Fatalf("expected Defense 5, got %d", def)
+	}
+	crit := binary.BigEndian.Uint32(result[55:59])
+	if int32(crit) != 5 {
+		t.Fatalf("expected CritRate 5, got %d", crit)
 	}
 }
 
@@ -356,7 +388,21 @@ func TestWritePositionSyncZeroAlloc(t *testing.T) {
 
 func TestWriteStatsSyncZeroAlloc(t *testing.T) {
 	dst := make([]byte, 0, 512)
-	p := broadcast.StatsSyncPayload{EntityID: 5, HP: 80, MaxHP: 100, MP: 50, MaxMP: 50, Dam: 12, Level: 10}
+	p := broadcast.StatsSyncPayload{
+		EntityID:     5,
+		HP:           80,
+		MaxHP:        100,
+		MP:           50,
+		MaxMP:        50,
+		Dam:          12,
+		Level:        10,
+		Defense:      5,
+		MagicDefense: 3,
+		MagicAttack:  2,
+		HitRate:      80,
+		DodgeRate:    10,
+		CritRate:     5,
+	}
 	allocs := testing.AllocsPerRun(500, func() {
 		dst = broadcast.WriteStatsSync(dst[:0], p)
 	})
@@ -407,7 +453,21 @@ func BenchmarkBuildPositionSync(b *testing.B) {
 }
 
 func BenchmarkBuildStatsSync(b *testing.B) {
-	p := broadcast.StatsSyncPayload{EntityID: 5, HP: 80, MaxHP: 100, MP: 60, MaxMP: 100, Dam: 25, Level: 3}
+	p := broadcast.StatsSyncPayload{
+		EntityID:     5,
+		HP:           80,
+		MaxHP:        100,
+		MP:           60,
+		MaxMP:        100,
+		Dam:          25,
+		Level:        3,
+		Defense:      10,
+		MagicDefense: 5,
+		MagicAttack:  8,
+		HitRate:      85,
+		DodgeRate:    12,
+		CritRate:     7,
+	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -428,7 +488,21 @@ func BenchmarkWritePositionSync(b *testing.B) {
 // BenchmarkWriteStatsSync bổ sung bài đo kiểm hiệu năng hot-path cho StatsSync.
 func BenchmarkWriteStatsSync(b *testing.B) {
 	dst := make([]byte, 0, 512)
-	p := broadcast.StatsSyncPayload{EntityID: 9, HP: 500, MaxHP: 500, MP: 100, MaxMP: 100, Dam: 88, Level: 50}
+	p := broadcast.StatsSyncPayload{
+		EntityID:     9,
+		HP:           500,
+		MaxHP:        500,
+		MP:           100,
+		MaxMP:        100,
+		Dam:          88,
+		Level:        50,
+		Defense:      30,
+		MagicDefense: 15,
+		MagicAttack:  20,
+		HitRate:      90,
+		DodgeRate:    10,
+		CritRate:     5,
+	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

@@ -259,12 +259,15 @@ func (mw *MapWorker) Free() {
 const combatBufferAOIRadius = 60.0
 
 // buildStatsSyncFrame builds a StatsSync binary frame for the given entity.
-// Layout: [Length 2B][Opcode 0x13][EntityID 8B][HP:MaxHP 8B][MP:MaxMP 8B][Dam:Level 8B]
-func buildStatsSyncFrame(entityID uint64, hp, maxHP, mp, maxMP, dam, level int32) []byte {
-	// StatsSync is 35 bytes total (2 length + 1 opcode + 8+8+8+8 payload)
-	frame := make([]byte, 35)
+// Layout: [Length 2B][Opcode 0x13][EntityID 8B]
+//
+//	[HP:MaxHP 8B][MP:MaxMP 8B][Dam:Level 8B]
+//	[Defense:MagicDefense 8B][MagicAttack:HitRate 8B][DodgeRate:CritRate 8B]
+func buildStatsSyncFrame(entityID uint64, hp, maxHP, mp, maxMP, dam, level, defense, magicDefense, magicAttack, hitRate, dodgeRate, critRate int32) []byte {
+	// StatsSync is 59 bytes total (2 length + 1 opcode + 56 payload)
+	frame := make([]byte, 59)
 	frame[0] = 0
-	frame[1] = 33 // length = 1 + 32 payload bytes
+	frame[1] = 57 // length = 1 + 56 payload bytes
 	frame[2] = 0x13
 	// EntityID (8 bytes BE)
 	v := entityID
@@ -303,6 +306,33 @@ func buildStatsSyncFrame(entityID uint64, hp, maxHP, mp, maxMP, dam, level int32
 	frame[32] = byte(uint32(level) >> 16)
 	frame[33] = byte(uint32(level) >> 8)
 	frame[34] = byte(uint32(level))
+	// Defense:MagicDefense packed (4 bytes each)
+	frame[35] = byte(uint32(defense) >> 24)
+	frame[36] = byte(uint32(defense) >> 16)
+	frame[37] = byte(uint32(defense) >> 8)
+	frame[38] = byte(uint32(defense))
+	frame[39] = byte(uint32(magicDefense) >> 24)
+	frame[40] = byte(uint32(magicDefense) >> 16)
+	frame[41] = byte(uint32(magicDefense) >> 8)
+	frame[42] = byte(uint32(magicDefense))
+	// MagicAttack:HitRate packed (4 bytes each)
+	frame[43] = byte(uint32(magicAttack) >> 24)
+	frame[44] = byte(uint32(magicAttack) >> 16)
+	frame[45] = byte(uint32(magicAttack) >> 8)
+	frame[46] = byte(uint32(magicAttack))
+	frame[47] = byte(uint32(hitRate) >> 24)
+	frame[48] = byte(uint32(hitRate) >> 16)
+	frame[49] = byte(uint32(hitRate) >> 8)
+	frame[50] = byte(uint32(hitRate))
+	// DodgeRate:CritRate packed (4 bytes each)
+	frame[51] = byte(uint32(dodgeRate) >> 24)
+	frame[52] = byte(uint32(dodgeRate) >> 16)
+	frame[53] = byte(uint32(dodgeRate) >> 8)
+	frame[54] = byte(uint32(dodgeRate))
+	frame[55] = byte(uint32(critRate) >> 24)
+	frame[56] = byte(uint32(critRate) >> 16)
+	frame[57] = byte(uint32(critRate) >> 8)
+	frame[58] = byte(uint32(critRate))
 	return frame
 }
 
@@ -343,6 +373,9 @@ func (mw *MapWorker) flushCombatBuffer() {
 				int32(stats.HP), int32(stats.MaxHP),
 				int32(stats.MP), int32(stats.MaxMP),
 				int32(stats.Dam), int32(stats.Level),
+				int32(stats.Defense), int32(stats.MagicDefense),
+				int32(stats.MagicAttack), int32(stats.HitRate),
+				int32(stats.DodgeRate), int32(stats.CritRate),
 			)
 			// Query neighbors from this map's spatial grid and send the frame
 			candidates := mw.SpatialGrid.QueryRadius(pos, combatBufferAOIRadius, target)
