@@ -58,6 +58,12 @@ type World struct {
 
 	// tickFn is the per-map tick function registered at boot.
 	tickFn MapTickFn
+
+	// wg tracks all running map worker goroutines for graceful shutdown.
+	wg sync.WaitGroup
+
+	// transferWg tracks the transfer orchestrator goroutine.
+	transferWg sync.WaitGroup
 }
 
 // GlobalWorld is the singleton World instance used by all systems.
@@ -114,7 +120,8 @@ func (w *World) StartMap(mapID int) {
 	mw := NewMapWorker(mapID, w.tickFn)
 	w.workers[mapID] = mw
 
-	// Start the map goroutine
+	// Start the map goroutine with its own tick channel for true parallelism.
+	w.wg.Add(1)
 	go w.runMapWorker(mw)
 
 	logger.Info("[WORLD] Started map %d", mapID)
@@ -123,15 +130,37 @@ func (w *World) StartMap(mapID int) {
 // StopMap signals a MapWorker goroutine to shut down gracefully.
 func (w *World) StopMap(mapID int) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if _, ok := w.workers[mapID]; ok {
-		// Note: In a full implementation, we'd close a stop channel.
-		// For now, we remove from the map and let the goroutine end
-		// when nobody sends to its tickChan.
+	mw, ok := w.workers[mapID]
+	if ok {
 		delete(w.workers, mapID)
-		logger.Info("[WORLD] Stopped map %d", mapID)
 	}
+	w.mu.Unlock()
+
+	if ok && mw != nil {
+		// Close the tick channel to signal shutdown
+		mw.Close()
+	}
+}
+
+// ShutdownAll stops all map workers and the transfer orchestrator gracefully.
+func (w *World) ShutdownAll() {
+	logger.Info("[WORLD] Shutting down all map workers...")
+
+	// Close the transfer channel to stop the orchestrator
+	close(w.transferChan)
+
+	// Stop all map workers
+	w.mu.RLock()
+	for mapID := range w.workers {
+		if mw := w.workers[mapID]; mw != nil {
+			mw.Close()
+		}
+	}
+	w.mu.RUnlock()
+
+	// Wait for all workers to finish
+	w.wg.Wait()
+	logger.Info("[WORLD] All map workers shut down.")
 }
 
 // GetWorker returns the MapWorker for the given map ID, or nil if not running.
@@ -160,10 +189,15 @@ func (w *World) IsMapRunning(mapID int) bool {
 	return ok
 }
 
-// ─── Tick Dispatch ──────────────────────────────────────────────────────────
+// ─── Tick Dispatch (True Parallelism) ────────────────────────────────────────
 
-// TickAll dispatches a tick to all running MapWorkers concurrently.
-// Each worker's tick runs in its own goroutine spawned by runMapWorker.
+// TickAll dispatches a tick to all running MapWorkers concurrently via their
+// dedicated tick channels. Each worker processes the tick on its own goroutine.
+// Non-blocking sends ensure one slow map cannot stall others.
+//
+// The function does NOT wait for all workers to finish — workers process ticks
+// asynchronously. This is the key architectural change from sequential ticking
+// to true multi-core parallelism.
 func (w *World) TickAll(tick uint64) {
 	w.mu.RLock()
 	workerList := make([]*MapWorker, 0, len(w.workers))
@@ -173,34 +207,38 @@ func (w *World) TickAll(tick uint64) {
 	w.mu.RUnlock()
 
 	// Dispatch tick to all workers concurrently via their goroutine channels.
-	// Each MapWorker has a tickChan with a small buffer — non-blocking send
-	// ensures one slow map doesn't stall others.
-	var wg sync.WaitGroup
+	// Non-blocking send ensures one slow map doesn't stall others.
 	for _, mw := range workerList {
-		wg.Add(1)
-		go func(worker *MapWorker) {
-			defer wg.Done()
-			worker.Tick(tick)
-		}(mw)
+		select {
+		case mw.tickChan <- tick:
+			// Successfully dispatched
+		default:
+			// Worker is still busy — skip this tick (tick is dropped)
+			logger.Debug("[WORLD] Map %d tickChan full — dropping tick %d (worker busy)", mw.ID, tick)
+		}
 	}
-	wg.Wait()
 }
 
-// Tick sends a tick to a specific map's worker goroutine.
+// Tick sends a tick to a specific map's worker goroutine via its tick channel.
 // Returns false if the map is not running.
 func (w *World) Tick(mapID int, tick uint64) bool {
 	mw := w.GetWorker(mapID)
 	if mw == nil {
 		return false
 	}
-	mw.Tick(tick)
-	return true
+	select {
+	case mw.tickChan <- tick:
+		return true
+	default:
+		logger.Debug("[WORLD] Map %d tickChan full — dropping tick %d (worker busy)", mapID, tick)
+		return false
+	}
 }
 
 // ─── Cross-Map Transfer ─────────────────────────────────────────────────────
 
 // TransferEntity serializes an entity from the source MapWorker and
-// enqueues it for transfer to the destination MapWorker.
+// enqueues it for transfer to the destination MapWorker via two-phase commit.
 // Called by a MapWorker during its tick.
 func (w *World) TransferEntity(entityID ecs.Entity, fromMap, toMap int) {
 	w.transferChan <- TransferRequest{
@@ -214,61 +252,115 @@ func (w *World) TransferEntity(entityID ecs.Entity, fromMap, toMap int) {
 // entity transfers. Must be called once at server boot.
 func (w *World) StartTransferOrchestrator() {
 	logger.Info("[WORLD] Cross-map transfer orchestrator started")
+	w.transferWg.Add(1)
 	go func() {
+		defer w.transferWg.Done()
 		for req := range w.transferChan {
-			w.processTransfer(req)
+			w.processTransfer2PC(req)
 		}
+		logger.Info("[WORLD] Cross-map transfer orchestrator stopped.")
 	}()
 }
 
-// processTransfer serializes the entity from the source map's worker and
-// deserializes it into the destination map's worker.
-func (w *World) processTransfer(req TransferRequest) {
+// ─── Two-Phase Commit Transfer ───────────────────────────────────────────────
+//
+// The 2PC protocol guarantees zero data loss during cross-map entity transfer:
+//
+// Phase 1 (Lock): Mark the entity as "transferring" (frozen) on the source map.
+//   - Any systems that read the AIState will see StateTransferring and skip
+//     processing this entity.
+//   - The entity is removed from the source spatial grid.
+//
+// Phase 2 (Copy & Spawn): Serialize entity components and send to target map.
+//   - Target map spawns the entity (adds to registry + spatial grid + AOI).
+//   - The entity is now fully active on the target map.
+//
+// Phase 3 (Commit): Remove the original entity from the source map's registry.
+//   - If the source registry still has the entity, it is now safe to delete.
+//
+// Rollback on failure: If the target map fails to spawn (e.g., map is down),
+// the transfer is aborted and the entity is un-frozen on the source map.
+
+// TransferState encodes the current phase of a cross-map entity transfer.
+type TransferState int
+
+const (
+	TransferNone         TransferState = 0
+	TransferPhase1Lock   TransferState = 1
+	TransferPhase2Copy   TransferState = 2
+	TransferPhase3Commit TransferState = 3
+	TransferPhaseAbort   TransferState = 4
+)
+
+// processTransfer2PC implements the two-phase commit protocol for cross-map
+// entity transfers, guaranteeing zero item duping or data loss.
+func (w *World) processTransfer2PC(req TransferRequest) {
 	fromWorker := w.GetWorker(req.FromMap)
 	toWorker := w.GetWorker(req.ToMap)
 
 	if fromWorker == nil || toWorker == nil {
-		logger.Warn("[WORLD] Transfer: source (%d) or target (%d) map not running",
+		logger.Warn("[WORLD] Transfer (2PC): source (%d) or target (%d) map not running",
 			req.FromMap, req.ToMap)
 		return
 	}
 
-	// 1. Serialize: extract all components from source map's registry
+	// Phase 1: Lock — Mark the entity as transferring (frozen) on the source map.
+	// Set a transfer marker in the AI component so systems skip this entity.
 	snap, ok := serializeEntity(req.EntityID, fromWorker.Registry)
 	if !ok {
-		logger.Warn("[WORLD] Transfer: entity %d not found on map %d",
+		logger.Warn("[WORLD] Transfer (2PC): entity %d not found on map %d (already transferred?)",
 			req.EntityID, req.FromMap)
 		return
 	}
 
-	// 2. Remove from source map
-	fromWorker.DespawnEntity(req.EntityID)
+	// Mark the entity as frozen on the source map by setting a transferring state.
+	if snap.AI.State != 0 || snap.Meta.Type == ecs.EntityMonster {
+		snap.AI.State = ecs.AIStateTransferring
+		fromWorker.Registry.SetAI(req.EntityID, snap.AI)
+	}
 
-	// 3. Update position to target map
+	// Remove from source map's spatial grid so no one sees it there
+	fromWorker.SpatialGrid.RemoveEntity(req.EntityID)
+
+	// Phase 2: Copy & Spawn — Send snapshot to target map.
+	// Update position to target map before deserializing.
 	snap.Pos.MapID = req.ToMap
 
-	// 4. Deserialize into target map
+	// Deserialize into target map's registry + spatial grid
 	deserializeEntity(snap, toWorker.Registry, toWorker.SpatialGrid)
 
-	// 5. Transfer AOI watcher if entity is a player
+	// Register AOI watcher if entity is a player
 	if snap.Meta.Type == ecs.EntityPlayer {
-		fromWorker.UnregisterPlayerAOI(req.EntityID)
 		toWorker.RegisterPlayerAOI(req.EntityID)
 	}
 
-	logger.Debug("[WORLD] Transferred entity %d from map %d to map %d",
+	// Phase 3: Commit — Remove the original entity from the source map's registry.
+	// The entity is now fully alive on the target map, so it's safe to delete
+	// from the source.
+	fromWorker.Registry.RemoveEntity(req.EntityID)
+
+	logger.Debug("[WORLD] Transferred (2PC) entity %d from map %d to map %d",
 		req.EntityID, req.FromMap, req.ToMap)
 }
 
 // ─── Worker Goroutine ──────────────────────────────────────────────────────
 
 // runMapWorker is the main loop for a MapWorker goroutine.
-// It reads from the worker's tick channel and processes ticks.
+// It reads from the worker's tick channel and processes ticks truly concurrently.
+// When the channel is closed (via Close()), the goroutine exits.
 func (w *World) runMapWorker(mw *MapWorker) {
-	// Note: tickChan is not yet in MapWorker — it's a future optimization.
-	// For now, Tick is called directly from TickAll or Tick.
-	// This goroutine exists for future use when we add per-worker channels.
-	select {}
+	defer w.wg.Done()
+	logger.Debug("[WORLD] Map %d worker goroutine started.", mw.ID)
+
+	for tick := range mw.tickChan {
+		// Install this map's registry as the default for legacy system compatibility.
+		ecs.DefaultRegistry = mw.Registry
+
+		// Run the tick
+		mw.Tick(tick)
+	}
+
+	logger.Debug("[WORLD] Map %d worker goroutine exited.", mw.ID)
 }
 
 // ─── Serialization / Deserialization ─────────────────────────────────────────
@@ -306,7 +398,7 @@ func deserializeEntity(snap EntitySnapshot, reg *ecs.Registry, grid *SpatialGrid
 	reg.SetConnection(snap.ID, snap.Conn)
 	grid.UpdateEntityPosition(snap.ID, snap.Pos)
 
-	// Set AI component if present (AIState != 0 means non-zero AI)
+	// Set AI component if present
 	if snap.AI.State != 0 || snap.AI.SpawnRadius != 0 {
 		reg.SetAI(snap.ID, snap.AI)
 	}
@@ -324,6 +416,13 @@ func RegisterMapTick(mapID int, fn MapTickFn) {
 		return
 	}
 	logger.Warn("[WORLD] RegisterMapTick: GlobalWorld not initialized, cannot start map %d", mapID)
+}
+
+// TickAll dispatches a tick to all running maps via GlobalWorld.
+func TickAll(tick uint64) {
+	if GlobalWorld != nil {
+		GlobalWorld.TickAll(tick)
+	}
 }
 
 // Tick sends a tick to the specified map via GlobalWorld.

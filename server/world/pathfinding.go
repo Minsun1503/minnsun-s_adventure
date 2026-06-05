@@ -27,9 +27,16 @@ func FindPath(from, to ecs.PositionComponent) (int, int) {
 
 // StepToward computes the next single step from 'from' toward 'to'.
 // This is the primary function used by AI movement systems.
-func StepToward(from, to ecs.PositionComponent) (int, int) {
+// Accepts an optional *astar.PathCache for zero-alloc hot-path reuse.
+// If pc is nil, a fresh PathResult is allocated (fallback path).
+func StepToward(from, to ecs.PositionComponent, pc *astar.PathCache) (int, int) {
 	walkable := IsWalkableForMap(from.MapID)
-	result := astar.FindPath(from.X, from.Z, to.X, to.Z, walkable, astar.MaxPathNodes)
+	var result astar.PathResult
+	if pc != nil {
+		result = astar.FindPathWithCache(pc, from.X, from.Z, to.X, to.Z, walkable, astar.MaxPathNodes)
+	} else {
+		result = astar.FindPath(from.X, from.Z, to.X, to.Z, walkable, astar.MaxPathNodes)
+	}
 	if !result.Found || result.Len == 0 {
 		return from.X, from.Z
 	}

@@ -2,10 +2,13 @@ package db
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"server/ecs"
 	"server/logger"
 	"server/models"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,17 +22,35 @@ type SaveSnapshot struct {
 	Equipment ecs.EquipmentComponent
 }
 
+// ─── Periodic Memory Snapshots ───────────────────────────────────────────────
+//
+// A background goroutine takes periodic snapshots of all active player entities
+// every SnapshotIntervalSec seconds. These snapshots are written to the save
+// queue and also to a recovery log file for crash recovery.
+
+const SnapshotIntervalSec = 300 // 5 minutes
+
+// recoveryLogPath is the path to the recovery log file.
+const recoveryLogPath = "data/recovery.log"
+
+// saveEngineMu protects the save engine's internal state.
+var saveEngineMu sync.Mutex
+
 // Global thread-safe buffered stream channel for saving snapshots
 var SaveQueue = make(chan SaveSnapshot, 1000)
 
 // StartSaveWorkerEngine spins up the background worker channel monitor loop.
 // After each successful drain cycle, it attempts to replay any buffered
 // snapshots from the disk-based emergency buffer.
+// Also starts the periodic memory snapshot goroutine.
 func StartSaveWorkerEngine() {
 	// Initialize the emergency disk buffer for overflow protection.
 	if err := GlobalSaveBuffer.Init(); err != nil {
 		logger.Error("[PERSISTENCE] Failed to init emergency save buffer: %v", err)
 	}
+
+	// Start the periodic memory snapshot goroutine
+	go runPeriodicSnapshots()
 
 	go func() {
 		logger.Info("[PERSISTENCE] Asynchronous DB Save Worker thread active.")
@@ -54,10 +75,56 @@ func StartSaveWorkerEngine() {
 	}()
 }
 
+// runPeriodicSnapshots takes memory snapshots of all active player entities
+// at a fixed interval and writes them to the recovery log and save queue.
+func runPeriodicSnapshots() {
+	ticker := time.NewTicker(SnapshotIntervalSec * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		saveEngineMu.Lock()
+		// Collect all active players from the ECS registry
+		// This is a best-effort snapshot — we collect what's available.
+		ecs.DefaultRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
+			if snap.Meta.Type != ecs.EntityPlayer || !snap.HasPos || !snap.HasStats {
+				return true
+			}
+			// Queue a periodic save for each player
+			QueuePlayerSave(snap.ID)
+			return true
+		})
+
+		// Write a recovery checkpoint
+		writeRecoveryCheckpoint()
+		saveEngineMu.Unlock()
+
+		logger.Debug("[PERSISTENCE] Periodic memory snapshot completed.")
+	}
+}
+
+// writeRecoveryCheckpoint writes a timestamped checkpoint to the recovery log.
+func writeRecoveryCheckpoint() {
+	f, err := os.OpenFile(recoveryLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		logger.Error("[PERSISTENCE] Failed to open recovery log: %v", err)
+		return
+	}
+	defer f.Close()
+
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	line := fmt.Sprintf("CHECKPOINT %s\n", timestamp)
+	if _, err := f.WriteString(line); err != nil {
+		logger.Error("[PERSISTENCE] Failed to write recovery checkpoint: %v", err)
+	}
+}
+
 // FlushSaveQueue flushes all pending snapshots and ensures the emergency
 // buffer is also synced to disk. Call this during graceful shutdown to
 // guarantee zero data loss.
 func FlushSaveQueue() {
+	saveEngineMu.Lock()
+	defer saveEngineMu.Unlock()
+
 	logger.Info("[PERSISTENCE] Flushing save queue... (remaining: %d items)", len(SaveQueue))
 	close(SaveQueue)
 

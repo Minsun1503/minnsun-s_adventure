@@ -32,6 +32,11 @@ import (
 type MapWorker struct {
 	ID int
 
+	// tickChan is the dedicated channel for receiving tick signals.
+	// The World dispatches ticks via non-blocking sends to this channel,
+	// and the runMapWorker goroutine reads from it.
+	tickChan chan uint64
+
 	// Registry is this map's ECS component store. All entities on this map
 	// are registered here. The central World's nextID counter ensures global
 	// uniqueness of entity IDs across all maps.
@@ -68,6 +73,7 @@ type MapWorker struct {
 func NewMapWorker(mapID int, fn MapTickFn) *MapWorker {
 	mw := &MapWorker{
 		ID:               mapID,
+		tickChan:         make(chan uint64, 8), // small buffer to absorb burst peaks
 		Registry:         ecs.NewRegistry(),
 		SpatialGrid:      newSpatialGrid(),
 		AOIManager:       aoi.NewAOIManager(),
@@ -232,6 +238,12 @@ func (mw *MapWorker) Tick(tick uint64) {
 
 	// Process region wake buffer
 	mw.FlushRegionWakeBuffer()
+}
+
+// Close shuts down this worker's tick channel, causing the runMapWorker
+// goroutine to exit on the next range iteration.
+func (mw *MapWorker) Close() {
+	close(mw.tickChan)
 }
 
 // Free releases pooled resources held by this worker.

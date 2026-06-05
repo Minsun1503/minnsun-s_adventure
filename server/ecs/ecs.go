@@ -94,6 +94,7 @@ const (
 	AIStateChasing
 	AIStateAttacking
 	AIStateReturning
+	AIStateTransferring // Entity is being transferred between maps (frozen)
 )
 
 func (s AIState) String() string {
@@ -108,6 +109,8 @@ func (s AIState) String() string {
 		return "Attacking"
 	case AIStateReturning:
 		return "Returning"
+	case AIStateTransferring:
+		return "Transferring"
 	default:
 		return "Unknown"
 	}

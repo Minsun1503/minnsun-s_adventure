@@ -94,8 +94,13 @@ func perMapTick(mapID int, tick uint64, cmdBuf *ecs.CommandBuffer) {
 	reg := mw.Registry
 
 	// Query monsters on this map and process AI.
+	// Entities in AIStateTransferring are frozen — skip them entirely.
 	reg.QueryPositionAI(func(id ecs.Entity, ai ecs.AIComponent, pos ecs.PositionComponent, stats ecs.StatsComponent) bool {
 		if pos.MapID != mapID {
+			return true
+		}
+		// Skip transferring entities (frozen during cross-map migration)
+		if ai.State == ecs.AIStateTransferring {
 			return true
 		}
 		// Frame bucket filtering: only process monsters in the current bucket.
@@ -150,11 +155,9 @@ func tickWorld(tick uint64) {
 	}
 
 	// Dispatch ticks to all running maps in parallel via their goroutines.
-	// Each map's MapInstance goroutine receives the tick on its channel,
-	// runs the registered tick function, and flushes its CommandBuffer.
-	for _, mapID := range world.RunningMapIDs() {
-		world.Tick(mapID, tick)
-	}
+	// Each map's MapWorker goroutine receives the tick on its dedicated tickChan.
+	// Non-blocking dispatch ensures one slow map cannot stall others.
+	world.TickAll(tick)
 }
 
 // debugLogMonsterState logs active monster state at DEBUG level only.

@@ -19,16 +19,17 @@ func writeConn(c net.Conn, data []byte) {
 }
 
 // broadcastToMap sends data to all players on targetMapID.
-// Uses GlobalRegistry for backward compatibility during migration.
+// Uses the map worker's registry for the target map.
 func broadcastToMap(targetMapID int, data []byte) {
-	ecs.DefaultRegistry.RangeConnections(func(playerID ecs.Entity, netComp ecs.ConnectionComponent) bool {
+	mw := GlobalWorld.GetWorker(targetMapID)
+	if mw == nil {
+		return
+	}
+	mw.Registry.RangeConnections(func(playerID ecs.Entity, netComp ecs.ConnectionComponent) bool {
 		if netComp.Conn == nil {
 			return true
 		}
-		playerPos, posExists := ecs.DefaultRegistry.GetPosition(playerID)
-		if posExists && playerPos.MapID == targetMapID {
-			writeConn(netComp.Conn, data)
-		}
+		writeConn(netComp.Conn, data)
 		return true
 	})
 }
@@ -48,11 +49,9 @@ func HandleWarpSystem(playerID ecs.Entity, payload []byte) (string, bool) {
 	return ExecuteMapTransfer(playerID, targetMapID, targetX, targetZ)
 }
 
-// ExecuteMapTransfer handles moving a player entity row safely from one zone to another.
-// It orchestrates clear notifications to both the old and new spatial maps.
-//
-// This version uses the World transfer orchestrator when available, falling back
-// to the legacy direct-transfer path for backward compatibility.
+// ExecuteMapTransfer handles moving a player entity from one map to another
+// using the World transfer orchestrator (two-phase commit).
+// This replaces the legacy direct-coordinate-migration path.
 func ExecuteMapTransfer(playerID ecs.Entity, targetMapID int, targetX int, targetZ int) (string, bool) {
 	// 1. Authoritative Map Zone Validation
 	if targetMapID < 1 || targetMapID > 3 {
@@ -64,7 +63,7 @@ func ExecuteMapTransfer(playerID ecs.Entity, targetMapID int, targetX int, targe
 		return "Warp Denied: Landing coordinates out of world boundaries (0-100)!\r\n", false
 	}
 
-	// 2. COPY: Fetch the player's current spatial position record
+	// 2. Fetch the player's current spatial position record
 	oldPos, exists := ecs.DefaultRegistry.GetPosition(playerID)
 	if !exists {
 		return "Warp Error: Your spatial position record was not found.\r\n", false
@@ -78,27 +77,17 @@ func ExecuteMapTransfer(playerID ecs.Entity, targetMapID int, targetX int, targe
 	exitNotice := []byte(fmt.Sprintf("[PORTAL]: Player %s vanished into a warping rift!\r\n", meta.Name))
 	broadcastToMap(oldMapID, exitNotice)
 
-	// Phase 2: THE COORDINATE MIGRATION
-	// Use World transfer orchestrator when running in multi-map mode.
-	// This properly serializes/deserializes the entity between map workers.
-	if GlobalWorld != nil {
-		// Update position in GlobalRegistry for backward compat
-		oldPos.MapID = targetMapID
-		oldPos.X = targetX
-		oldPos.Z = targetZ
-		ecs.DefaultRegistry.SetPosition(playerID, oldPos)
-		GlobalSpatialGrid.UpdateEntityPosition(playerID, oldPos)
+	// Phase 2: THE COORDINATE MIGRATION via World transfer orchestrator.
+	// This properly serializes/deserializes the entity between map workers
+	// using the two-phase commit protocol.
+	oldPos.MapID = targetMapID
+	oldPos.X = targetX
+	oldPos.Z = targetZ
+	ecs.DefaultRegistry.SetPosition(playerID, oldPos)
+	GlobalSpatialGrid.UpdateEntityPosition(playerID, oldPos)
 
-		// Enqueue cross-map transfer via orchestrator
-		GlobalWorld.TransferEntity(playerID, oldMapID, targetMapID)
-	} else {
-		// Legacy path: direct coordinate migration
-		oldPos.MapID = targetMapID
-		oldPos.X = targetX
-		oldPos.Z = targetZ
-		ecs.DefaultRegistry.SetPosition(playerID, oldPos)
-		GlobalSpatialGrid.UpdateEntityPosition(playerID, oldPos)
-	}
+	// Enqueue cross-map transfer via orchestrator
+	GlobalWorld.TransferEntity(playerID, oldMapID, targetMapID)
 
 	// Phase 3: THE MAP ENTRANCE
 	// Alert all witnesses on the NEW map that this entity has materialized

@@ -173,7 +173,13 @@ func main() {
 		lis.Close()
 		logger.Info("[SHUTDOWN] TCP listener closed.")
 
-		// Step 4: Log shutdown complete.
+		// Step 4: Shutdown all MapWorkers gracefully.
+		if world.GlobalWorld != nil {
+			world.GlobalWorld.ShutdownAll()
+		}
+		logger.Info("[SHUTDOWN] All MapWorkers shut down.")
+
+		// Step 5: Log shutdown complete.
 		logger.Info("[SHUTDOWN] Server shut down gracefully.")
 		os.Exit(0)
 	}()
