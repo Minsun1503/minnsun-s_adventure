@@ -1,0 +1,24 @@
+# import config
+packagefile fmt=C:\Users\ADMIN\AppData\Local\go-build\40\4000d30d23188cb38449f61c759d0143495d1da30e9843200257422e199ca34e-d
+packagefile math=C:\Users\ADMIN\AppData\Local\go-build\85\85aa458a9fa0b12ddc9133a4b1a2db9a0384066ba71cc82fe47c0ca715d09656-d
+packagefile net=C:\Users\ADMIN\AppData\Local\go-build\3b\3bd390ad9eb1f924999fb6e01115a5493e797a9b85068c9acda17e2b0df9981f-d
+packagefile server/ecs=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b066\_pkg_.a
+packagefile server/logger=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b079\_pkg_.a
+packagefile server/models=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b089\_pkg_.a
+packagefile server/peakgo/astar=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b075\_pkg_.a
+packagefile server/peakgo/broadcast=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b191\_pkg_.a
+packagefile server/peakgo/codec=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b192\_pkg_.a
+packagefile server/peakgo/combat=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b193\_pkg_.a
+packagefile server/peakgo/eventbus=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b195\_pkg_.a
+packagefile server/peakgo/fsm=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b196\_pkg_.a
+packagefile server/peakgo/gmath=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b076\_pkg_.a
+packagefile server/peakgo/loggate=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b078\_pkg_.a
+packagefile server/peakgo/netio=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b197\_pkg_.a
+packagefile server/peakgo/rng=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b194\_pkg_.a
+packagefile server/peakgo/spatial=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b199\_pkg_.a
+packagefile server/peakgo/threat=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b086\_pkg_.a
+packagefile server/protocol=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b203\_pkg_.a
+packagefile server/world=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b200\_pkg_.a
+packagefile strings=C:\Users\ADMIN\AppData\Local\go-build\44\443b92438e1c52de972f8d942b064a27bec5076fab15c839f5a31f73bdf5d40b-d
+packagefile sync=C:\Users\ADMIN\AppData\Local\go-build\2e\2e2a56c4fb0662e67243a5ba1c7c8a58cb9d3d9502da34339df854d70b628846-d
+packagefile time=C:\Users\ADMIN\AppData\Local\go-build\d3\d3c9032fb1e11e160dda6e4fabf81517243996cc68710d1d03750443f2d68066-d

@@ -1,0 +1,5 @@
+# import config
+packagefile runtime=C:\Users\ADMIN\AppData\Local\go-build\b9\b9ef32e29be838fafc6850e175a564710847b50fd938e85c7ae7535766e7e475-d
+packagefile server/peakgo/loggate=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b078\_pkg_.a
+packagefile sync/atomic=C:\Users\ADMIN\AppData\Local\go-build\a8\a8912e0d410bbc1f3d91f3c98cca876e4c6ada11f9c525a7d118da70552c1545-d
+packagefile time=C:\Users\ADMIN\AppData\Local\go-build\d3\d3c9032fb1e11e160dda6e4fabf81517243996cc68710d1d03750443f2d68066-d

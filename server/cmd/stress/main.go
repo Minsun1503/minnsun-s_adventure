@@ -67,6 +67,7 @@ func main() {
 
 	// Create a fresh ECS registry for the stress test
 	ecs.DefaultRegistry = ecs.NewRegistry()
+	ecs.CurrentCombatBuffer = ecs.NewCombatAccumulator()
 
 	// Initialize AOI
 	world.InitAOIManager()
@@ -239,6 +240,15 @@ func runStressTick(tick uint64, bossID ecs.Entity, bots []*loadtest.PlayerBotSta
 
 	// Track stats
 	totalBotsPerTick.Add(int64(botsInAction))
+
+	// Flush accumulated combat damage
+	ecs.CurrentCombatBuffer.Flush(func(target ecs.Entity, batch *ecs.DamageBatch) {
+		stats, ok := ecs.DefaultRegistry.GetStats(target)
+		if ok {
+			stats.HP -= batch.TotalDamage
+			ecs.DefaultRegistry.SetStats(target, stats)
+		}
+	})
 
 	// Update boss stats after damage accumulation
 	newStats, ok := ecs.DefaultRegistry.GetStats(bossID)

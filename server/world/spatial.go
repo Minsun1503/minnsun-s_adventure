@@ -25,9 +25,6 @@ type ChunkEntry struct {
 	Pos ecs.PositionComponent
 }
 
-// Memory pool for chunk bucket slices to completely avoid slice allocation churn during movement.
-var chunkSlicePool = pool.NewSlicePool[ChunkEntry](8)
-
 // Memory pool for QueryRadius outputs to avoid heap allocations in the game loop.
 var queryResultPool = pool.NewSlicePool[ChunkEntry](256)
 
@@ -40,11 +37,11 @@ func FreeQueryCandidates(s *[]ChunkEntry) {
 }
 
 // SpatialGrid is the authoritative spatial partition registry.
-// It maintains a map of ChunkKey → slice of entities in that chunk,
+// It maintains a map of ChunkKey → map of entities in that chunk,
 // and a reverse map of Entity → current ChunkKey for O(1) move/remove.
 type SpatialGrid struct {
 	chunkMu sync.RWMutex
-	chunks  map[ChunkKey][]ChunkEntry
+	chunks  map[ChunkKey]map[ecs.Entity]ecs.PositionComponent
 
 	indexMu     sync.RWMutex
 	entityIndex map[ecs.Entity]ChunkKey // reverse lookup: entity → its current chunk
@@ -55,7 +52,7 @@ var GlobalSpatialGrid = newSpatialGrid()
 
 func newSpatialGrid() *SpatialGrid {
 	return &SpatialGrid{
-		chunks:      make(map[ChunkKey][]ChunkEntry),
+		chunks:      make(map[ChunkKey]map[ecs.Entity]ecs.PositionComponent),
 		entityIndex: make(map[ecs.Entity]ChunkKey),
 	}
 }
@@ -82,13 +79,12 @@ func worldToChunk(pos ecs.PositionComponent) ChunkKey {
 
 // UpdateEntityPosition is the single write path for spatial data.
 // It handles same-chunk updates in-place, and different-chunk movements
-// using swap-and-slice removals combined with pooled slice allocations.
+// using O(1) map operations.
 //
 // Lock ordering: indexMu.Lock() → chunkMu.Lock() → chunkMu.Unlock() → indexMu.Unlock().
 // Both index and chunk buckets are updated atomically as a transaction.
 func (g *SpatialGrid) UpdateEntityPosition(id ecs.Entity, pos ecs.PositionComponent) {
 	newChunk := worldToChunk(pos)
-	entry := ChunkEntry{ID: id, Pos: pos}
 
 	g.indexMu.Lock()
 	g.chunkMu.Lock()
@@ -97,46 +93,28 @@ func (g *SpatialGrid) UpdateEntityPosition(id ecs.Entity, pos ecs.PositionCompon
 
 	if existed && oldChunk == newChunk {
 		// Same chunk: only update the position entry in-place
-		bucket := g.chunks[newChunk]
-		for i, e := range bucket {
-			if e.ID == id {
-				bucket[i].Pos = pos
-				break
-			}
-		}
+		g.chunks[newChunk][id] = pos
 		g.chunkMu.Unlock()
 		g.indexMu.Unlock()
 		return
 	}
 
 	if existed {
-		// Remove from old chunk bucket
-		oldBucket := g.chunks[oldChunk]
-		for i, e := range oldBucket {
-			if e.ID == id {
-				lastIdx := len(oldBucket) - 1
-				if i != lastIdx {
-					oldBucket[i] = oldBucket[lastIdx]
-				}
-				oldBucket = oldBucket[:lastIdx]
-				break
-			}
-		}
-		if len(oldBucket) == 0 {
+		// Remove from old chunk bucket O(1)
+		bucket := g.chunks[oldChunk]
+		delete(bucket, id)
+		if len(bucket) == 0 {
 			delete(g.chunks, oldChunk)
-			chunkSlicePool.Put(&oldBucket)
-		} else {
-			g.chunks[oldChunk] = oldBucket
 		}
 	}
 
-	// Insert into new chunk bucket
-	newBucket, ok := g.chunks[newChunk]
+	// Insert into new chunk bucket O(1)
+	bucket, ok := g.chunks[newChunk]
 	if !ok {
-		newBucket = *chunkSlicePool.Get()
+		bucket = make(map[ecs.Entity]ecs.PositionComponent)
+		g.chunks[newChunk] = bucket
 	}
-	newBucket = append(newBucket, entry)
-	g.chunks[newChunk] = newBucket
+	bucket[id] = pos
 
 	// Update reverse index atomically with chunk state.
 	g.entityIndex[id] = newChunk
@@ -159,21 +137,9 @@ func (g *SpatialGrid) RemoveEntity(id ecs.Entity) {
 
 	g.chunkMu.Lock()
 	bucket := g.chunks[chunk]
-	for i, e := range bucket {
-		if e.ID == id {
-			lastIdx := len(bucket) - 1
-			if i != lastIdx {
-				bucket[i] = bucket[lastIdx]
-			}
-			bucket = bucket[:lastIdx]
-			break
-		}
-	}
+	delete(bucket, id)
 	if len(bucket) == 0 {
 		delete(g.chunks, chunk)
-		chunkSlicePool.Put(&bucket)
-	} else {
-		g.chunks[chunk] = bucket
 	}
 	delete(g.entityIndex, id)
 	g.chunkMu.Unlock()
@@ -208,14 +174,14 @@ func (g *SpatialGrid) QueryRadius(
 			if !ok {
 				continue
 			}
-			for _, entry := range bucket {
-				if entry.ID == excludeID {
+			for entID, pos := range bucket {
+				if entID == excludeID {
 					continue
 				}
-				ddx := float64(entry.Pos.X - origin.X)
-				ddz := float64(entry.Pos.Z - origin.Z)
+				ddx := float64(pos.X - origin.X)
+				ddz := float64(pos.Z - origin.Z)
 				if ddx*ddx+ddz*ddz <= radiusSq {
-					*results = append(*results, entry)
+					*results = append(*results, ChunkEntry{ID: entID, Pos: pos})
 				}
 			}
 		}
@@ -232,9 +198,9 @@ func (g *SpatialGrid) QueryChunk(pos ecs.PositionComponent, excludeID ecs.Entity
 	g.chunkMu.RLock()
 	defer g.chunkMu.RUnlock()
 
-	for _, entry := range g.chunks[key] {
-		if entry.ID != excludeID {
-			results = append(results, entry)
+	for entID, pos := range g.chunks[key] {
+		if entID != excludeID {
+			results = append(results, ChunkEntry{ID: entID, Pos: pos})
 		}
 	}
 	return results
@@ -250,9 +216,9 @@ func (g *SpatialGrid) QueryChunkByKey(key ChunkKey, excludeID ecs.Entity) *[]Chu
 	g.chunkMu.RLock()
 	defer g.chunkMu.RUnlock()
 
-	for _, entry := range g.chunks[key] {
-		if entry.ID != excludeID {
-			*results = append(*results, entry)
+	for entID, pos := range g.chunks[key] {
+		if entID != excludeID {
+			*results = append(*results, ChunkEntry{ID: entID, Pos: pos})
 		}
 	}
 	return results

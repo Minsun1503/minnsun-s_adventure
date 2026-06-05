@@ -150,7 +150,9 @@ func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
 		}
 	} else {
 		// Target survived — broadcast the hit to everyone on the map.
-		broadcastHit(result)
+		if ecs.CurrentCombatBuffer == nil {
+			broadcastHit(result)
+		}
 	}
 
 	return result, ""

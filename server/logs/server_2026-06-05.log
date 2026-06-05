@@ -32,3 +32,85 @@
 [2026-06-05 12:09:01.084] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
 [2026-06-05 12:14:01.087] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
 [2026-06-05 12:19:01.092] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 12:24:01.092] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 12:29:01.084] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 12:34:01.088] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 12:39:01.093] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 12:44:01.084] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 12:49:01.086] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 12:54:01.086] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 12:59:01.089] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 13:04:01.095] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 13:09:01.092] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 13:14:01.084] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 13:19:01.118] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 13:23:46.163] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-05 13:23:46.163] [INFO ] [STRESS] === Combat Scale Stress Test ===
+[2026-06-05 13:23:46.163] [INFO ] [STRESS] Boss Boss_Malakar (ID=1) spawned at (50,50) with 10000000 HP
+[2026-06-05 13:23:46.163] [INFO ] [STRESS] Spawning 1000 player bots...
+[2026-06-05 13:23:46.165] [INFO ] [STRESS] Spawned 1000 bots in 2.0061ms (498480 bots/sec)
+[2026-06-05 13:23:46.165] [INFO ] [STRESS] Starting stress simulation...
+[2026-06-05 13:23:46.165] [INFO ] [STRESS] All bots are attacking the boss (ID=1) at (50,50)
+[2026-06-05 13:24:01.084] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 13:29:01.091] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 13:32:32.739] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-05 13:32:32.739] [INFO ] [STRESS] === Combat Scale Stress Test ===
+[2026-06-05 13:32:32.739] [INFO ] [STRESS] Boss Boss_Malakar (ID=1) spawned at (50,50) with 10000000 HP
+[2026-06-05 13:32:32.739] [INFO ] [STRESS] Spawning 1000 player bots...
+[2026-06-05 13:32:32.741] [INFO ] [STRESS] Spawned 1000 bots in 2.1969ms (455187 bots/sec)
+[2026-06-05 13:32:32.741] [INFO ] [STRESS] Starting stress simulation...
+[2026-06-05 13:32:32.741] [INFO ] [STRESS] All bots are attacking the boss (ID=1) at (50,50)
+[2026-06-05 13:34:01.084] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 13:39:01.092] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 13:44:01.092] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 13:49:01.085] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 13:51:07.447] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-05 13:51:07.447] [INFO ] [STRESS] === Combat Scale Stress Test ===
+[2026-06-05 13:51:07.448] [INFO ] [STRESS] Boss Boss_Malakar (ID=1) spawned at (50,50) with 10000000 HP
+[2026-06-05 13:51:07.448] [INFO ] [STRESS] Spawning 1000 player bots...
+[2026-06-05 13:51:07.450] [INFO ] [STRESS] Spawned 1000 bots in 1.626ms (615006 bots/sec)
+[2026-06-05 13:51:07.450] [INFO ] [STRESS] Starting stress simulation...
+[2026-06-05 13:51:07.450] [INFO ] [STRESS] All bots are attacking the boss (ID=1) at (50,50)
+[2026-06-05 13:52:03.200] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-05 13:52:03.200] [INFO ] [STRESS] === Combat Scale Stress Test ===
+[2026-06-05 13:52:03.200] [INFO ] [STRESS] Using custom bot count: 100000
+[2026-06-05 13:52:03.200] [INFO ] [STRESS] Boss Boss_Malakar (ID=1) spawned at (50,50) with 10000000 HP
+[2026-06-05 13:52:03.200] [INFO ] [STRESS] Spawning 100000 player bots...
+[2026-06-05 13:52:03.350] [INFO ] [STRESS] Spawned 100000 bots in 149.7133ms (667943 bots/sec)
+[2026-06-05 13:52:03.350] [INFO ] [STRESS] Starting stress simulation...
+[2026-06-05 13:52:03.350] [INFO ] [STRESS] All bots are attacking the boss (ID=1) at (50,50)
+[2026-06-05 13:54:01.092] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 13:59:01.092] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 14:01:54.267] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-05 14:01:54.267] [INFO ] [STRESS] === Combat Scale Stress Test ===
+[2026-06-05 14:01:54.267] [INFO ] [STRESS] Using custom bot count: 100000
+[2026-06-05 14:01:54.267] [INFO ] [STRESS] Boss Boss_Malakar (ID=1) spawned at (50,50) with 10000000 HP
+[2026-06-05 14:01:54.267] [INFO ] [STRESS] Spawning 100000 player bots...
+[2026-06-05 14:01:54.499] [INFO ] [STRESS] Spawned 100000 bots in 231.9963ms (431041 bots/sec)
+[2026-06-05 14:01:54.499] [INFO ] [STRESS] Starting stress simulation...
+[2026-06-05 14:01:54.499] [INFO ] [STRESS] All bots are attacking the boss (ID=1) at (50,50)
+[2026-06-05 14:03:28.520] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-05 14:03:28.520] [INFO ] [STRESS] === Combat Scale Stress Test ===
+[2026-06-05 14:03:28.520] [INFO ] [STRESS] Boss Boss_Malakar (ID=1) spawned at (50,50) with 10000000 HP
+[2026-06-05 14:03:28.520] [INFO ] [STRESS] Spawning 1000 player bots...
+[2026-06-05 14:03:28.522] [INFO ] [STRESS] Spawned 1000 bots in 2.1477ms (465614 bots/sec)
+[2026-06-05 14:03:28.522] [INFO ] [STRESS] Starting stress simulation...
+[2026-06-05 14:03:28.522] [INFO ] [STRESS] All bots are attacking the boss (ID=1) at (50,50)
+[2026-06-05 14:04:01.091] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 14:09:01.092] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 14:11:33.846] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-05 14:11:33.846] [INFO ] [STRESS] === Combat Scale Stress Test ===
+[2026-06-05 14:11:33.846] [INFO ] [STRESS] Using custom bot count: 100000
+[2026-06-05 14:11:33.846] [INFO ] [STRESS] Boss Boss_Malakar (ID=1) spawned at (50,50) with 10000000 HP
+[2026-06-05 14:11:33.846] [INFO ] [STRESS] Spawning 100000 player bots...
+[2026-06-05 14:11:34.072] [INFO ] [STRESS] Spawned 100000 bots in 225.6904ms (443085 bots/sec)
+[2026-06-05 14:11:34.072] [INFO ] [STRESS] Starting stress simulation...
+[2026-06-05 14:11:34.072] [INFO ] [STRESS] All bots are attacking the boss (ID=1) at (50,50)
+[2026-06-05 14:12:52.942] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-05 14:12:52.942] [INFO ] [STRESS] === Combat Scale Stress Test ===
+[2026-06-05 14:12:52.942] [INFO ] [STRESS] Using custom bot count: 1000000
+[2026-06-05 14:12:52.942] [INFO ] [STRESS] Boss Boss_Malakar (ID=1) spawned at (50,50) with 10000000 HP
+[2026-06-05 14:12:52.942] [INFO ] [STRESS] Spawning 1000000 player bots...
+[2026-06-05 14:12:54.891] [INFO ] [STRESS] Spawned 1000000 bots in 1.9482332s (513286 bots/sec)
+[2026-06-05 14:12:54.891] [INFO ] [STRESS] Starting stress simulation...
+[2026-06-05 14:12:54.891] [INFO ] [STRESS] All bots are attacking the boss (ID=1) at (50,50)

@@ -1,0 +1,9 @@
+# import config
+packagefile net=C:\Users\ADMIN\AppData\Local\go-build\3b\3bd390ad9eb1f924999fb6e01115a5493e797a9b85068c9acda17e2b0df9981f-d
+packagefile server/peakgo/astar=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b075\_pkg_.a
+packagefile server/peakgo/perf=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b077\_pkg_.a
+packagefile server/peakgo/threat=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b086\_pkg_.a
+packagefile server/peakgo/timer=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b087\_pkg_.a
+packagefile sync=C:\Users\ADMIN\AppData\Local\go-build\2e\2e2a56c4fb0662e67243a5ba1c7c8a58cb9d3d9502da34339df854d70b628846-d
+packagefile sync/atomic=C:\Users\ADMIN\AppData\Local\go-build\a8\a8912e0d410bbc1f3d91f3c98cca876e4c6ada11f9c525a7d118da70552c1545-d
+packagefile time=C:\Users\ADMIN\AppData\Local\go-build\d3\d3c9032fb1e11e160dda6e4fabf81517243996cc68710d1d03750443f2d68066-d

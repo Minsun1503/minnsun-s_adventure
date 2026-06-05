@@ -1,0 +1,5 @@
+# import config
+packagefile math=C:\Users\ADMIN\AppData\Local\go-build\85\85aa458a9fa0b12ddc9133a4b1a2db9a0384066ba71cc82fe47c0ca715d09656-d
+packagefile server/ecs=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b066\_pkg_.a
+packagefile server/peakgo/gmath=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b076\_pkg_.a
+packagefile server/world=c:\Users\ADMIN\Desktop\minnsun-s_adventure\.gotmp\go-build105157097\b200\_pkg_.a
