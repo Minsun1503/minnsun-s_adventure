@@ -27,13 +27,13 @@ func HandleItemUsageSystem(playerID ecs.Entity, payload []byte) (string, bool) {
 	}
 
 	// 3. COPY & VALIDATE PLAYER INVENTORY BAG
-	inv, hasInv := ecs.GlobalRegistry.GetInventory(playerID)
+	inv, hasInv := ecs.DefaultRegistry.GetInventory(playerID)
 	if !hasInv || inv.Items[itemID] <= 0 {
 		return fmt.Sprintf("Error: You do not own any %s!\r\n", itemTemplate.Name), false
 	}
 
 	// 4. COPY & VALIDATE PLAYER STATS PROFILE
-	stats, hasStats := ecs.GlobalRegistry.GetStats(playerID)
+	stats, hasStats := ecs.DefaultRegistry.GetStats(playerID)
 	if !hasStats {
 		return "Error: Your character stats profile was not found.\r\n", false
 	}
@@ -59,10 +59,10 @@ func HandleItemUsageSystem(playerID ecs.Entity, payload []byte) (string, bool) {
 	actualHealed := stats.HP - oldHP
 
 	// 6. OVERWRITE STEP: Commit both updated value copies back to database tables
-	ecs.GlobalRegistry.SetInventory(playerID, inv)
-	ecs.GlobalRegistry.SetStats(playerID, stats)
+	ecs.DefaultRegistry.SetInventory(playerID, inv)
+	ecs.DefaultRegistry.SetStats(playerID, stats)
 
-	meta, _ := ecs.GlobalRegistry.GetMetadata(playerID)
+	meta, _ := ecs.DefaultRegistry.GetMetadata(playerID)
 	successMsg := fmt.Sprintf("[CONSUME] Player %s drank %s! Restored +%d HP. (Vitals: %d/%d HP)\r\n",
 		meta.Name, itemTemplate.Name, actualHealed, stats.HP, stats.MaxHP)
 

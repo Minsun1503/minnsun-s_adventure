@@ -32,18 +32,18 @@ var playerBots []*PlayerBotState
 // SpawnPlayerBot creates a new dummy player entity in the ECS registry.
 // Returns a PlayerBotState that the load test harness uses to drive simulation.
 func SpawnPlayerBot(name string, mapID, x, z int) *PlayerBotState {
-	id := ecs.GlobalRegistry.NewEntity()
+	id := ecs.DefaultRegistry.NewEntity()
 
-	ecs.GlobalRegistry.SetMetadata(id, ecs.MetadataComponent{
+	ecs.DefaultRegistry.SetMetadata(id, ecs.MetadataComponent{
 		Name: name,
 		Type: ecs.EntityPlayer,
 	})
-	ecs.GlobalRegistry.SetPosition(id, ecs.PositionComponent{
+	ecs.DefaultRegistry.SetPosition(id, ecs.PositionComponent{
 		MapID: mapID,
 		X:     x,
 		Z:     z,
 	})
-	ecs.GlobalRegistry.SetStats(id, ecs.StatsComponent{
+	ecs.DefaultRegistry.SetStats(id, ecs.StatsComponent{
 		Level:     10,
 		HP:        500,
 		MaxHP:     500,
@@ -55,7 +55,7 @@ func SpawnPlayerBot(name string, mapID, x, z int) *PlayerBotState {
 		DodgeRate: 50,
 		CritRate:  50,
 	})
-	ecs.GlobalRegistry.SetInventory(id, ecs.InventoryComponent{
+	ecs.DefaultRegistry.SetInventory(id, ecs.InventoryComponent{
 		Items: make(map[uint64]int),
 	})
 
@@ -82,7 +82,7 @@ func SpawnPlayerBot(name string, mapID, x, z int) *PlayerBotState {
 func DespawnPlayerBot(bot *PlayerBotState) {
 	world.GlobalSpatialGrid.RemoveEntity(bot.ID)
 	world.UnregisterPlayerAOI(bot.ID)
-	ecs.GlobalRegistry.RemoveEntity(bot.ID)
+	ecs.DefaultRegistry.RemoveEntity(bot.ID)
 	bot.Alive = false
 }
 

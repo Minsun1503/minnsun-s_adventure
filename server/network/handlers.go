@@ -118,7 +118,7 @@ func handleEquip(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 	itemID := codec.ReadUint64(payload[0:8])
 	feedback, success := game.HandleEquipmentSystem(playerEntity, itemID)
 	if success {
-		pos, _ := ecs.GlobalRegistry.GetPosition(playerEntity)
+		pos, _ := ecs.DefaultRegistry.GetPosition(playerEntity)
 		frame := broadcast.BuildNotice(broadcast.NoticePayload{Message: feedback})
 		protocol.BroadcastToNeighbors(pos, frame, playerEntity)
 	} else {

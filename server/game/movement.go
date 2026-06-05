@@ -38,7 +38,7 @@ func HandlePlayerMovementSystem(playerID ecs.Entity, payload []byte) (string, bo
 	}
 
 	// After successful movement, process AOI events to detect enter/leave neighbors.
-	if pos, ok := ecs.GlobalRegistry.GetPosition(playerID); ok {
+	if pos, ok := ecs.DefaultRegistry.GetPosition(playerID); ok {
 		world.ProcessAOIEvents(playerID, pos)
 	}
 	return "", true
@@ -46,7 +46,7 @@ func HandlePlayerMovementSystem(playerID ecs.Entity, payload []byte) (string, bo
 
 // SendNoticeSystem đẩy trực tiếp mảng byte thông báo xuống cổng kết nối socket của thực thể.
 func SendNoticeSystem(entity ecs.Entity, data []byte) {
-	conn, ok := ecs.GlobalRegistry.GetConnection(entity)
+	conn, ok := ecs.DefaultRegistry.GetConnection(entity)
 	if ok && conn.Conn != nil {
 		frame := broadcast.BuildNotice(broadcast.NoticePayload{Message: string(data)})
 		writeConn(conn.Conn, frame)
@@ -54,7 +54,7 @@ func SendNoticeSystem(entity ecs.Entity, data []byte) {
 }
 
 func SendNoticeBinary(entity ecs.Entity, frame []byte) {
-	conn, ok := ecs.GlobalRegistry.GetConnection(entity)
+	conn, ok := ecs.DefaultRegistry.GetConnection(entity)
 	if ok && conn.Conn != nil {
 		writeConn(conn.Conn, frame)
 	}
@@ -82,7 +82,7 @@ func MovementSystem(entity ecs.Entity, x, z int) bool {
 		return false
 	}
 
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 	pos, ok := registry.GetPosition(entity)
 	if !ok {
 		return false
@@ -132,7 +132,7 @@ func broadcastBinaryMovement(entity ecs.Entity, pos ecs.PositionComponent) {
 	protocol.BroadcastToNeighbors(pos, buf, entity)
 
 	if loggate.DebugEnabled() {
-		if meta, ok := ecs.GlobalRegistry.GetMetadata(entity); ok {
+		if meta, ok := ecs.DefaultRegistry.GetMetadata(entity); ok {
 			loggate.Debugf("[MOVEMENT] %s → (%d, %d) on Map %d", meta.Name, pos.X, pos.Z, pos.MapID)
 		}
 	}

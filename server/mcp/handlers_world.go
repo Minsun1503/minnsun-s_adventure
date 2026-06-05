@@ -56,7 +56,7 @@ func init() {
 			p.Radius = 10.0
 		}
 
-		pos, ok := ecs.GlobalRegistry.GetPosition(ecs.Entity(p.EntityID))
+		pos, ok := ecs.DefaultRegistry.GetPosition(ecs.Entity(p.EntityID))
 		if !ok {
 			return rpcError(req.ID, ErrCodeInternal, "entity position not found")
 		}

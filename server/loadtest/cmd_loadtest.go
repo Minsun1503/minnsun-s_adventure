@@ -49,7 +49,7 @@ func RunLoadTest(cfg Config) string {
 	logger.Info("[LOADTEST] Bot spawn took %v", time.Since(botStart))
 
 	// Phase 3: Start simulation
-	entityCount := ecs.GlobalRegistry.TotalEntityIDs()
+	entityCount := ecs.DefaultRegistry.TotalEntityIDs()
 	logger.Info("[LOADTEST] Total ECS entities after spawn: %d", entityCount)
 
 	harness.Start()

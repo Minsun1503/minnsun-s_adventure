@@ -7,7 +7,7 @@ import (
 // RecalculateActiveStats aggregates base attributes and equipment modifications
 // to update the final authoritative StatsComponent row inline.
 func RecalculateActiveStats(playerID ecs.Entity) {
-	currentStats, hasStats := ecs.GlobalRegistry.GetStats(playerID)
+	currentStats, hasStats := ecs.DefaultRegistry.GetStats(playerID)
 
 	baseMaxHP := 100
 	baseDamage := 15
@@ -20,7 +20,7 @@ func RecalculateActiveStats(playerID ecs.Entity) {
 	}
 
 	// 2. Fetch equipment component layout data columns
-	eq, hasEq := ecs.GlobalRegistry.GetEquipment(playerID)
+	eq, hasEq := ecs.DefaultRegistry.GetEquipment(playerID)
 
 	// If equipment row exists, accumulate bonus values from registries
 	if hasEq {
@@ -43,5 +43,5 @@ func RecalculateActiveStats(playerID ecs.Entity) {
 	}
 
 	// 4. OVERWRITE: Force-push values back into your lock-free database columns
-	ecs.GlobalRegistry.SetStats(playerID, currentStats)
+	ecs.DefaultRegistry.SetStats(playerID, currentStats)
 }

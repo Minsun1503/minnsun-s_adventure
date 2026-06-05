@@ -26,7 +26,7 @@ func init() {
 }
 
 func TestAttackSystemValidations(t *testing.T) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 	playerID := registry.NewEntity()
 	monsterID := registry.NewEntity()
 
@@ -76,7 +76,7 @@ func TestAttackSystemValidations(t *testing.T) {
 }
 
 func TestAttackSystemKillingBlow(t *testing.T) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 	playerID := registry.NewEntity()
 	monsterID := registry.NewEntity()
 

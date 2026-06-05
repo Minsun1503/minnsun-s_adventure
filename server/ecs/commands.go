@@ -145,7 +145,7 @@ func (cb *CommandBuffer) Len() int {
 	return len(cb.moves) + len(cb.damages) + len(cb.spawns) + len(cb.destroys)
 }
 
-// Flush applies all queued commands sequentially to GlobalRegistry and the
+// Flush applies all queued commands sequentially to DefaultRegistry and the
 // spatial grid, then resets all buffers for reuse in the next tick.
 //
 // Execution order is deterministic: Moves → Damages → Spawns → Destroys.
@@ -159,7 +159,7 @@ func (cb *CommandBuffer) Len() int {
 // (world imports ecs; ecs cannot import world).
 func (cb *CommandBuffer) Flush(grid SpatialGrid) {
 	// Phase 1: Move commands — update positions and spatial grid
-	r := GlobalRegistry
+	r := DefaultRegistry
 	for _, cmd := range cb.moves {
 		pos := PositionComponent{
 			MapID: cmd.MapID,

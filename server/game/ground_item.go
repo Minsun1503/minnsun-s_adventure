@@ -19,7 +19,7 @@ func SpawnItemOnGround(itemTemplateID uint64, mapID int, x int, z int) ecs.Entit
 	name := itemTemplate.Name
 
 	// 2. Generate a lock-free atomic entity row ID
-	itemEntity := ecs.GlobalRegistry.NewEntity()
+	itemEntity := ecs.DefaultRegistry.NewEntity()
 
 	// 3. Populate spatial position columns and register with the Spatial Grid
 	pos := ecs.PositionComponent{
@@ -27,22 +27,22 @@ func SpawnItemOnGround(itemTemplateID uint64, mapID int, x int, z int) ecs.Entit
 		X:     x,
 		Z:     z,
 	}
-	ecs.GlobalRegistry.SetPosition(itemEntity, pos)
+	ecs.DefaultRegistry.SetPosition(itemEntity, pos)
 	world.GlobalSpatialGrid.UpdateEntityPosition(itemEntity, pos)
 
 	// 4. Populate metadata classification columns
-	ecs.GlobalRegistry.SetMetadata(itemEntity, ecs.MetadataComponent{
+	ecs.DefaultRegistry.SetMetadata(itemEntity, ecs.MetadataComponent{
 		Name: name,
 		Type: ecs.EntityGroundItem,
 	})
 
 	// 5. Populate ItemTemplateComponent so systems don't have to parse names
-	ecs.GlobalRegistry.SetItemTemplate(itemEntity, ecs.ItemTemplateComponent{
+	ecs.DefaultRegistry.SetItemTemplate(itemEntity, ecs.ItemTemplateComponent{
 		TemplateID: itemTemplateID,
 	})
 
 	// 6. Populate lifetime expiry columns (Set item to despawn in 60 seconds)
-	ecs.GlobalRegistry.SetLifetime(itemEntity, ecs.LifetimeComponent{
+	ecs.DefaultRegistry.SetLifetime(itemEntity, ecs.LifetimeComponent{
 		SpawnedAt: time.Now(),
 		Duration:  60 * time.Second,
 	})
@@ -60,13 +60,13 @@ func SpawnItemOnGround(itemTemplateID uint64, mapID int, x int, z int) ecs.Entit
 func RunGroundItemDecaySystem() {
 	now := time.Now()
 
-	ecs.GlobalRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
+	ecs.DefaultRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
 		// 1. Only process ground items with a lifetime component
 		if snap.Meta.Type != ecs.EntityGroundItem {
 			return true // Skip players, permanent monsters, etc.
 		}
 
-		lifetime, hasLifetime := ecs.GlobalRegistry.GetLifetime(snap.ID)
+		lifetime, hasLifetime := ecs.DefaultRegistry.GetLifetime(snap.ID)
 		if !hasLifetime {
 			return true
 		}
@@ -74,8 +74,8 @@ func RunGroundItemDecaySystem() {
 		// 2. Evaluate if the expiry threshold duration has been crossed
 		if now.After(lifetime.SpawnedAt.Add(lifetime.Duration)) {
 			// Fetch data for the exit notification before clearing columns
-			pos, posOk := ecs.GlobalRegistry.GetPosition(snap.ID)
-			meta, metaOk := ecs.GlobalRegistry.GetMetadata(snap.ID)
+			pos, posOk := ecs.DefaultRegistry.GetPosition(snap.ID)
+			meta, metaOk := ecs.DefaultRegistry.GetMetadata(snap.ID)
 
 			if posOk && metaOk {
 				decayNotice := fmt.Sprintf("[DECAY]: The %s sitting at (%d, %d) faded away into dust.\r\n",
@@ -85,7 +85,7 @@ func RunGroundItemDecaySystem() {
 
 			// 3. PURGE TRANSACTION: Clean up spatial grid and parallel memory tables completely
 			world.GlobalSpatialGrid.RemoveEntity(snap.ID)
-			ecs.GlobalRegistry.RemoveEntity(snap.ID)
+			ecs.DefaultRegistry.RemoveEntity(snap.ID)
 		}
 
 		return true

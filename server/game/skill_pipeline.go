@@ -88,7 +88,7 @@ func (sp *SkillPipeline) Execute(attackerID, targetID ecs.Entity, skillID uint64
 
 // run executes the pipeline stages in sequence.
 func (sp *SkillPipeline) run(ctx *CombatContext) (CombatResult, string) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 
 	// ── Stage 0: Target Selection & Validation ─────────────────────────────
 	if ctx.Attacker == ctx.Target {
@@ -201,7 +201,7 @@ func (sp *SkillPipeline) stageResourceCheck(ctx *CombatContext) {
 	stats := ctx.AttackerStats
 	stats.MP -= ctx.Skill.ManaCost
 	stats.HP -= ctx.Skill.HPCost
-	ecs.GlobalRegistry.SetStats(ctx.Attacker, stats)
+	ecs.DefaultRegistry.SetStats(ctx.Attacker, stats)
 	ctx.AttackerStats = stats
 }
 
@@ -243,21 +243,34 @@ func (sp *SkillPipeline) stageDamageCalculation(ctx *CombatContext) {
 
 	// Record threat when a player attacks a monster
 	if ctx.IsPlayer && ctx.TargetMeta.Type == ecs.EntityMonster {
-		if ai, hasAI := ecs.GlobalRegistry.GetAI(ctx.Target); hasAI {
+		if ai, hasAI := ecs.DefaultRegistry.GetAI(ctx.Target); hasAI {
 			if ai.ThreatTable == nil {
 				ai.ThreatTable = threat.NewThreatTable()
 				ai.ThreatTable.SetDecayRate(threat.DefaultThreatDecay)
 			}
 			ai.ThreatTable.Add(uint64(ctx.Attacker), int64(ctx.Damage))
-			ecs.GlobalRegistry.SetAI(ctx.Target, ai)
+			ecs.DefaultRegistry.SetAI(ctx.Target, ai)
 		}
 	}
 }
 
 // stageEffectApplication applies damage to the target.
+//
+// If a CombatAccumulator is active (ecs.CurrentCombatBuffer != nil), damage
+// is buffered and the killed flag is set to false because the real HP
+// subtraction and death check happen during the tick-end Flush.
+// When no accumulator is active, damage is applied immediately (legacy path).
 func (sp *SkillPipeline) stageEffectApplication(ctx *CombatContext) {
 	ctx.RemainingHP = DamageSystem(ctx.Target, ctx.Damage)
-	ctx.Killed = ctx.RemainingHP <= 0
+
+	// When the accumulator is active, the killed check happens during Flush.
+	// We optimistically report the hit as non-lethal so the per-hit broadcast
+	// is NOT sent — the consolidated StatsSync from Flush replaces it.
+	if ecs.CurrentCombatBuffer != nil {
+		ctx.Killed = false // deferred to accumulator flush
+	} else {
+		ctx.Killed = ctx.RemainingHP <= 0
+	}
 
 	if ctx.Skill != nil && ctx.Skill.HealValue > 0 {
 		// Apply heal to caster
@@ -265,12 +278,15 @@ func (sp *SkillPipeline) stageEffectApplication(ctx *CombatContext) {
 		newHP, _ := combat.ApplyHealing(ctx.AttackerStats.HP, ctx.AttackerStats.MaxHP, healResult)
 		stats := ctx.AttackerStats
 		stats.HP = newHP
-		ecs.GlobalRegistry.SetStats(ctx.Attacker, stats)
+		ecs.DefaultRegistry.SetStats(ctx.Attacker, stats)
 		ctx.AttackerStats = stats
 	}
 }
 
 // stageBroadcast sends hit/kill notification to neighbors.
+//
+// When CombatAccumulator is active, per-hit broadcasts are skipped entirely
+// because the accumulator flush sends one consolidated StatsSync per target.
 func (sp *SkillPipeline) stageBroadcast(ctx *CombatContext) CombatResult {
 	result := CombatResult{
 		Hit:          true,
@@ -283,6 +299,11 @@ func (sp *SkillPipeline) stageBroadcast(ctx *CombatContext) CombatResult {
 		Killed:       ctx.Killed,
 	}
 
+	// When accumulator is active, skip per-hit broadcasts
+	if ecs.CurrentCombatBuffer != nil {
+		return result
+	}
+
 	if !ctx.Killed {
 		broadcastHit(result)
 	} else {
@@ -293,7 +314,7 @@ func (sp *SkillPipeline) stageBroadcast(ctx *CombatContext) CombatResult {
 				msg = fmt.Sprintf("[SPELL] %s unleashed %s on %s dealing %d damage!\r\n",
 					ctx.AttackerMeta.Name, ctx.Skill.Name, ctx.TargetMeta.Name, ctx.Damage)
 			}
-			pos, _ := ecs.GlobalRegistry.GetPosition(ctx.Attacker)
+			pos, _ := ecs.DefaultRegistry.GetPosition(ctx.Attacker)
 			protocol.BroadcastToNeighbors(pos, []byte(msg), ctx.Attacker)
 		}
 	}
@@ -302,14 +323,26 @@ func (sp *SkillPipeline) stageBroadcast(ctx *CombatContext) CombatResult {
 }
 
 // stagePostProcess handles death cleanup, loot, XP, and respawn scheduling.
+//
+// When CombatAccumulator is active, death is deferred to the tick-end Flush.
+// The hit damage and threat are added to the buffer so the flush callback
+// can resolve the top damager as the killer.
 func (sp *SkillPipeline) stagePostProcess(ctx *CombatContext) {
 	if !ctx.Killed {
 		return
 	}
 
-	DeathSystem(ctx.Target, ctx.Attacker, ctx.TargetMeta, ctx.AttackerMeta, ctx.Damage)
+	// When accumulator is active, death is deferred until the accumulator flush
+	// at map tick end. We skip the immediate DeathSystem call.
+	if ecs.CurrentCombatBuffer == nil {
+		DeathSystem(ctx.Target, ctx.Attacker, ctx.TargetMeta, ctx.AttackerMeta, ctx.Damage)
+	} else {
+		// Add the killer as threat so the accumulator flush can resolve
+		// the top damager for death attribution.
+		ecs.CurrentCombatBuffer.AddDamage(ctx.Target, ctx.Attacker, ctx.Damage, float64(ctx.Damage))
+	}
 
-	// Personal feedback for skills
+	// Personal feedback for skills (works in both paths)
 	if ctx.Skill != nil && ctx.IsPlayer {
 		ctx.PersonalFeedback = fmt.Sprintf("Spent -%d MP. (Current: %d/%d MP)\r\n",
 			ctx.Skill.ManaCost, ctx.AttackerStats.MP, ctx.AttackerStats.MaxMP)

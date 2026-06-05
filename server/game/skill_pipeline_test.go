@@ -28,7 +28,7 @@ func init() {
 
 func setupPipelineTestEntities(t testing.TB) (playerID, monsterID ecs.Entity) {
 	t.Helper()
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 	playerID = registry.NewEntity()
 	monsterID = registry.NewEntity()
 
@@ -68,8 +68,8 @@ func setupPipelineTestEntities(t testing.TB) (playerID, monsterID ecs.Entity) {
 func cleanupPipelineEntities(playerID, monsterID ecs.Entity) {
 	world.GlobalSpatialGrid.RemoveEntity(playerID)
 	world.GlobalSpatialGrid.RemoveEntity(monsterID)
-	ecs.GlobalRegistry.RemoveEntity(playerID)
-	ecs.GlobalRegistry.RemoveEntity(monsterID)
+	ecs.DefaultRegistry.RemoveEntity(playerID)
+	ecs.DefaultRegistry.RemoveEntity(monsterID)
 }
 
 func TestPipelineSelfAttack(t *testing.T) {
@@ -88,7 +88,7 @@ func TestPipelineOutOfRange(t *testing.T) {
 	defer cleanupPipelineEntities(playerID, monsterID)
 
 	// Move monster out of range
-	ecs.GlobalRegistry.SetPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 100, Z: 100})
+	ecs.DefaultRegistry.SetPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 100, Z: 100})
 	world.GlobalSpatialGrid.UpdateEntityPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 100, Z: 100})
 
 	pipeline := NewSkillPipeline()
@@ -112,7 +112,7 @@ func TestPipelineValidAttack(t *testing.T) {
 	}
 
 	// Verify HP reduced
-	stats, ok := ecs.GlobalRegistry.GetStats(monsterID)
+	stats, ok := ecs.DefaultRegistry.GetStats(monsterID)
 	if !ok || stats.HP >= 100 {
 		t.Fatalf("Expected HP reduced, got stats ok=%t HP=%d", ok, stats.HP)
 	}
@@ -123,9 +123,9 @@ func TestPipelineKillingBlow(t *testing.T) {
 	defer cleanupPipelineEntities(playerID, monsterID)
 
 	// Set monster HP to 1 so it dies
-	stats, _ := ecs.GlobalRegistry.GetStats(monsterID)
+	stats, _ := ecs.DefaultRegistry.GetStats(monsterID)
 	stats.HP = 1
-	ecs.GlobalRegistry.SetStats(monsterID, stats)
+	ecs.DefaultRegistry.SetStats(monsterID, stats)
 
 	// Reset respawn queue size
 	GlobalRespawnManager.mu.Lock()
@@ -142,13 +142,13 @@ func TestPipelineKillingBlow(t *testing.T) {
 	}
 
 	// Verify monster removed from registry
-	_, ok := ecs.GlobalRegistry.GetMetadata(monsterID)
+	_, ok := ecs.DefaultRegistry.GetMetadata(monsterID)
 	if ok {
 		t.Error("Expected monster metadata to be deleted after kill")
 	}
 
 	// Verify XP rewarded
-	playerStats, _ := ecs.GlobalRegistry.GetStats(playerID)
+	playerStats, _ := ecs.DefaultRegistry.GetStats(playerID)
 	if playerStats.XP != 50 {
 		t.Errorf("Expected player to gain 50 XP, got %d", playerStats.XP)
 	}
@@ -167,13 +167,13 @@ func TestPipelineSkillFireball(t *testing.T) {
 	defer cleanupPipelineEntities(playerID, monsterID)
 
 	// Ensure monste is in skill cast range
-	ecs.GlobalRegistry.SetPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 13, Z: 13})
+	ecs.DefaultRegistry.SetPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 13, Z: 13})
 	world.GlobalSpatialGrid.UpdateEntityPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 13, Z: 13})
 
 	// Give player enough MP
-	stats, _ := ecs.GlobalRegistry.GetStats(playerID)
+	stats, _ := ecs.DefaultRegistry.GetStats(playerID)
 	stats.MP = 50
-	ecs.GlobalRegistry.SetStats(playerID, stats)
+	ecs.DefaultRegistry.SetStats(playerID, stats)
 
 	pipeline := NewSkillPipeline()
 	result, errMsg := pipeline.Execute(playerID, monsterID, 1) // Fireball
@@ -185,7 +185,7 @@ func TestPipelineSkillFireball(t *testing.T) {
 	}
 
 	// Verify MP consumed
-	playerStats, _ := ecs.GlobalRegistry.GetStats(playerID)
+	playerStats, _ := ecs.DefaultRegistry.GetStats(playerID)
 	if playerStats.MP != 30 { // Started with 50, fireball costs 20
 		t.Errorf("Expected MP to be 30 after Fireball, got %d", playerStats.MP)
 	}
@@ -196,13 +196,13 @@ func TestPipelineSkillInsufficientMana(t *testing.T) {
 	defer cleanupPipelineEntities(playerID, monsterID)
 
 	// Ensure monster is in range
-	ecs.GlobalRegistry.SetPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 13, Z: 13})
+	ecs.DefaultRegistry.SetPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 13, Z: 13})
 	world.GlobalSpatialGrid.UpdateEntityPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 13, Z: 13})
 
 	// Set MP to 0
-	stats, _ := ecs.GlobalRegistry.GetStats(playerID)
+	stats, _ := ecs.DefaultRegistry.GetStats(playerID)
 	stats.MP = 0
-	ecs.GlobalRegistry.SetStats(playerID, stats)
+	ecs.DefaultRegistry.SetStats(playerID, stats)
 
 	pipeline := NewSkillPipeline()
 	_, errMsg := pipeline.Execute(playerID, monsterID, 1) // Fireball costs 20 MP
@@ -233,7 +233,7 @@ func TestPipelineThreatTracking(t *testing.T) {
 	}
 
 	// Verify threat was recorded
-	ai, hasAI := ecs.GlobalRegistry.GetAI(monsterID)
+	ai, hasAI := ecs.DefaultRegistry.GetAI(monsterID)
 	if !hasAI {
 		t.Fatal("Expected monster to have AI component")
 	}

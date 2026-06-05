@@ -43,7 +43,7 @@ func (tr *TradeSystemRegistry) InitializeTradeSession(playerA, playerB ecs.Entit
 	}
 
 	// Verify target player exists
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 	targetMeta, hasMeta := registry.GetMetadata(playerB)
 	if !hasMeta {
 		return "Error: Target player does not exist.\r\n", false
@@ -116,7 +116,7 @@ func (tr *TradeSystemRegistry) OfferItemToTrade(playerID ecs.Entity, itemID uint
 	}
 
 	// Verify player actually owns the items inside their ECS data column right now
-	inv, hasInv := ecs.GlobalRegistry.GetInventory(playerID)
+	inv, hasInv := ecs.DefaultRegistry.GetInventory(playerID)
 	if !hasInv {
 		return "Error: Inventory not found.\r\n", false
 	}
@@ -191,8 +191,8 @@ func (tr *TradeSystemRegistry) executeSwapLocked(sessionID ecs.Entity) (string, 
 	pB := session.OfferB.PlayerID
 
 	// Copy current inventories
-	invA, hasInvA := ecs.GlobalRegistry.GetInventory(pA)
-	invB, hasInvB := ecs.GlobalRegistry.GetInventory(pB)
+	invA, hasInvA := ecs.DefaultRegistry.GetInventory(pA)
+	invB, hasInvB := ecs.DefaultRegistry.GetInventory(pB)
 
 	if !hasInvA || !hasInvB {
 		tr.cancelTradeSessionLocked(pA)
@@ -248,8 +248,8 @@ func (tr *TradeSystemRegistry) executeSwapLocked(sessionID ecs.Entity) (string, 
 	}
 
 	// OVERWRITE BOTH DATA TABLES LOCK-FREE
-	ecs.GlobalRegistry.SetInventory(pA, invA)
-	ecs.GlobalRegistry.SetInventory(pB, invB)
+	ecs.DefaultRegistry.SetInventory(pA, invA)
+	ecs.DefaultRegistry.SetInventory(pB, invB)
 
 	// PURGE TEMPORARY TRADE SESSION RECORDS
 	delete(tr.bindings, pA)

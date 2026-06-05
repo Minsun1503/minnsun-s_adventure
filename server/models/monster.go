@@ -83,17 +83,17 @@ func SpawnMonsterFromTemplate(templateID, mapID, spawnX, spawnZ int) (ecs.Entity
 	}
 
 	// Sinh ID thực thể duy nhất từ bộ đếm nguyên tử của ECS Registry
-	id := ecs.GlobalRegistry.NewEntity()
+	id := ecs.DefaultRegistry.NewEntity()
 
-	ecs.GlobalRegistry.SetMetadata(id, ecs.MetadataComponent{
+	ecs.DefaultRegistry.SetMetadata(id, ecs.MetadataComponent{
 		Name: t.Name,
 		Type: ecs.EntityMonster,
 	})
 
 	spawnPos := ecs.PositionComponent{MapID: mapID, X: spawnX, Z: spawnZ}
-	ecs.GlobalRegistry.SetPosition(id, spawnPos)
+	ecs.DefaultRegistry.SetPosition(id, spawnPos)
 
-	ecs.GlobalRegistry.SetStats(id, ecs.StatsComponent{
+	ecs.DefaultRegistry.SetStats(id, ecs.StatsComponent{
 		HP:    t.HP,
 		MaxHP: t.HP,
 		Dam:   t.Dam,
@@ -109,7 +109,7 @@ func SpawnMonsterFromTemplate(templateID, mapID, spawnX, spawnZ int) (ecs.Entity
 	leashRadius := int(t.AggroRadius * 2.0)
 
 	// Khởi tạo cấu hình FSM AI đồng bộ 100% với kiến trúc ai_roaming.go mới
-	ecs.GlobalRegistry.SetAI(id, ecs.AIComponent{
+	ecs.DefaultRegistry.SetAI(id, ecs.AIComponent{
 		State:       ecs.AIStateIdle,
 		SpawnX:      spawnX,
 		SpawnZ:      spawnZ,

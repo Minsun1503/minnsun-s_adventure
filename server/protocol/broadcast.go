@@ -16,11 +16,11 @@ const broadcastAOIRadius = 60.0
 // Pre-allocates once via string → []byte conversion before looping.
 func BroadcastToMap(targetMapID int, data string) {
 	b := []byte(data)
-	ecs.GlobalRegistry.RangeConnections(func(playerID ecs.Entity, netComp ecs.ConnectionComponent) bool {
+	ecs.DefaultRegistry.RangeConnections(func(playerID ecs.Entity, netComp ecs.ConnectionComponent) bool {
 		if netComp.Conn == nil {
 			return true
 		}
-		playerPos, posExists := ecs.GlobalRegistry.GetPosition(playerID)
+		playerPos, posExists := ecs.DefaultRegistry.GetPosition(playerID)
 		if posExists && playerPos.MapID == targetMapID {
 			writeConn(netComp.Conn, b)
 		}
@@ -34,7 +34,7 @@ func BroadcastToMap(targetMapID int, data string) {
 func BroadcastToNeighbors(origin ecs.PositionComponent, data []byte, excludeID ecs.Entity) {
 	candidates := world.GlobalSpatialGrid.QueryRadius(origin, broadcastAOIRadius, excludeID)
 	for _, entry := range *candidates {
-		connComp, hasConn := ecs.GlobalRegistry.GetConnection(entry.ID)
+		connComp, hasConn := ecs.DefaultRegistry.GetConnection(entry.ID)
 		if !hasConn || connComp.Conn == nil {
 			continue
 		}
@@ -57,7 +57,7 @@ func BroadcastToNeighborsMap(mapID int, x, z int, data []byte, excludeID ecs.Ent
 func BroadcastToChunk(pos ecs.PositionComponent, data []byte, excludeID ecs.Entity) {
 	candidates := world.GlobalSpatialGrid.QueryChunk(pos, excludeID)
 	for _, entry := range candidates {
-		connComp, hasConn := ecs.GlobalRegistry.GetConnection(entry.ID)
+		connComp, hasConn := ecs.DefaultRegistry.GetConnection(entry.ID)
 		if !hasConn || connComp.Conn == nil {
 			continue
 		}
@@ -71,7 +71,7 @@ func BroadcastToChunk(pos ecs.PositionComponent, data []byte, excludeID ecs.Enti
 func BroadcastToChunkWithRadius(pos ecs.PositionComponent, data []byte, excludeID ecs.Entity) {
 	candidates := world.GlobalSpatialGrid.QueryRadius(pos, broadcastAOIRadius, excludeID)
 	for _, entry := range *candidates {
-		connComp, hasConn := ecs.GlobalRegistry.GetConnection(entry.ID)
+		connComp, hasConn := ecs.DefaultRegistry.GetConnection(entry.ID)
 		if !hasConn || connComp.Conn == nil {
 			continue
 		}

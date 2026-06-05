@@ -24,12 +24,12 @@ func CalculateXPThreshold(level int) uint64 {
 // AddExperienceSystem safely injects XP into a player row, running cascading level checking steps.
 func AddExperienceSystem(playerID ecs.Entity, xpGained uint64) {
 	// 1. COPY: Pull active stat columns out of our lock-free database
-	stats, hasStats := ecs.GlobalRegistry.GetStats(playerID)
+	stats, hasStats := ecs.DefaultRegistry.GetStats(playerID)
 	if !hasStats {
 		return
 	}
 
-	meta, _ := ecs.GlobalRegistry.GetMetadata(playerID)
+	meta, _ := ecs.DefaultRegistry.GetMetadata(playerID)
 	
 	// Add the incoming bounty to the pool
 	stats.XP += xpGained
@@ -62,7 +62,7 @@ func AddExperienceSystem(playerID ecs.Entity, xpGained uint64) {
 			meta.Name, stats.Level, stats.MaxHP, stats.MaxMP, stats.Dam)
 		
 		// Broadcast the event notification to local area map witnesses only
-		pos, _ := ecs.GlobalRegistry.GetPosition(playerID)
+		pos, _ := ecs.DefaultRegistry.GetPosition(playerID)
 		protocol.BroadcastToNeighbors(pos, []byte(levelNotice), playerID)
 
 		// Publish level-up event
@@ -78,5 +78,5 @@ func AddExperienceSystem(playerID ecs.Entity, xpGained uint64) {
 	}
 
 	// Save structural modifications back lock-free
-	ecs.GlobalRegistry.SetStats(playerID, stats)
+	ecs.DefaultRegistry.SetStats(playerID, stats)
 }

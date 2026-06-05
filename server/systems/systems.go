@@ -12,7 +12,7 @@ import (
 // BroadcastSystem sends a raw byte payload to every entity with an active connection.
 func BroadcastSystem(data []byte) {
 	frame := broadcast.BuildNotice(broadcast.NoticePayload{Message: string(data)})
-	ecs.GlobalRegistry.RangeConnections(func(_ ecs.Entity, conn ecs.ConnectionComponent) bool {
+	ecs.DefaultRegistry.RangeConnections(func(_ ecs.Entity, conn ecs.ConnectionComponent) bool {
 		writeConn(conn.Conn, frame)
 		return true
 	})
@@ -20,7 +20,7 @@ func BroadcastSystem(data []byte) {
 
 // BroadcastExcept sends a payload to all connected entities except the excluded one.
 func BroadcastExcept(exclude ecs.Entity, data []byte) {
-	ecs.GlobalRegistry.RangeConnections(func(id ecs.Entity, conn ecs.ConnectionComponent) bool {
+	ecs.DefaultRegistry.RangeConnections(func(id ecs.Entity, conn ecs.ConnectionComponent) bool {
 		if id != exclude {
 			writeConn(conn.Conn, data)
 		}
@@ -46,7 +46,7 @@ func writeConn(c net.Conn, data []byte) {
 
 // GetInfoSystem retrieves formatted combat stats for a target entity.
 func GetInfoSystem(target ecs.Entity) (string, error) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 
 	meta, metaOk := registry.GetMetadata(target)
 	stats, statsOk := registry.GetStats(target)

@@ -45,7 +45,7 @@ func FreeNearbyMonsters(s []ProximityResult) {
 // resolving components with zero allocations via slice pooling.
 // Callers must call FreeNearbyPlayers(slice) when done to recycle memory.
 func GetNearbyPlayers(originID ecs.Entity, worldRadius float64) []ProximityResult {
-	pos, ok := ecs.GlobalRegistry.GetPosition(originID)
+	pos, ok := ecs.DefaultRegistry.GetPosition(originID)
 	if !ok {
 		return nil
 	}
@@ -61,11 +61,11 @@ func GetNearbyPlayers(originID ecs.Entity, worldRadius float64) []ProximityResul
 	results = results[:0]
 
 	for _, c := range *candidates {
-		meta, hasMeta := ecs.GlobalRegistry.GetMetadata(c.ID)
+		meta, hasMeta := ecs.DefaultRegistry.GetMetadata(c.ID)
 		if !hasMeta || meta.Type != ecs.EntityPlayer {
 			continue // Filter non-players early
 		}
-		stats, hasStats := ecs.GlobalRegistry.GetStats(c.ID)
+		stats, hasStats := ecs.DefaultRegistry.GetStats(c.ID)
 		if !hasStats {
 			continue
 		}
@@ -84,7 +84,7 @@ func GetNearbyPlayers(originID ecs.Entity, worldRadius float64) []ProximityResul
 // resolving components with zero allocations via slice pooling.
 // Callers must call FreeNearbyPlayers(slice) when done to recycle memory.
 func GetNearbyMonsters(originID ecs.Entity, worldRadius float64) []ProximityResult {
-	pos, ok := ecs.GlobalRegistry.GetPosition(originID)
+	pos, ok := ecs.DefaultRegistry.GetPosition(originID)
 	if !ok {
 		return nil
 	}
@@ -100,11 +100,11 @@ func GetNearbyMonsters(originID ecs.Entity, worldRadius float64) []ProximityResu
 	results = results[:0]
 
 	for _, c := range *candidates {
-		meta, hasMeta := ecs.GlobalRegistry.GetMetadata(c.ID)
+		meta, hasMeta := ecs.DefaultRegistry.GetMetadata(c.ID)
 		if !hasMeta || meta.Type != ecs.EntityMonster {
 			continue // Filter non-monsters early
 		}
-		stats, hasStats := ecs.GlobalRegistry.GetStats(c.ID)
+		stats, hasStats := ecs.DefaultRegistry.GetStats(c.ID)
 		if !hasStats {
 			continue
 		}
@@ -122,8 +122,8 @@ func GetNearbyMonsters(originID ecs.Entity, worldRadius float64) []ProximityResu
 // IsInRange checks whether a specific target entity is within worldRadius
 // of the origin entity. Used by AttackSystem for melee range validation.
 func IsInRange(originID, targetID ecs.Entity, worldRadius float64) bool {
-	originPos, ok1 := ecs.GlobalRegistry.GetPosition(originID)
-	targetPos, ok2 := ecs.GlobalRegistry.GetPosition(targetID)
+	originPos, ok1 := ecs.DefaultRegistry.GetPosition(originID)
+	targetPos, ok2 := ecs.DefaultRegistry.GetPosition(targetID)
 	if !ok1 || !ok2 {
 		return false
 	}
@@ -134,7 +134,7 @@ func IsInRange(originID, targetID ecs.Entity, worldRadius float64) bool {
 // NearbyEntitiesSystem is the game-loop facing system.
 // Called from UpdateWorldEntitiesSystem per monster tick to find aggro targets.
 func NearbyEntitiesSystem(monsterID ecs.Entity, aggroRadius float64) {
-	meta, ok := ecs.GlobalRegistry.GetMetadata(monsterID)
+	meta, ok := ecs.DefaultRegistry.GetMetadata(monsterID)
 	if !ok {
 		return
 	}

@@ -56,7 +56,7 @@ func main() {
 	if models.DBEngine != nil {
 		var maxID uint64
 		if err := models.DBEngine.QueryRow("SELECT COALESCE(MAX(id), 0) FROM characters").Scan(&maxID); err == nil {
-			ecs.GlobalRegistry.SetNextID(maxID)
+			ecs.DefaultRegistry.SetNextID(maxID)
 		} else {
 			logger.Error("[BOOT] Failed to scan max character ID: %v", err)
 		}
@@ -93,7 +93,7 @@ func main() {
 			logger.Warn("[BOOT] Failed to spawn template %d (%s): %v", t.ID, t.Name, err)
 			continue
 		}
-		if pos, ok := ecs.GlobalRegistry.GetPosition(id); ok {
+		if pos, ok := ecs.DefaultRegistry.GetPosition(id); ok {
 			world.GlobalSpatialGrid.UpdateEntityPosition(id, pos)
 		}
 		spawned++

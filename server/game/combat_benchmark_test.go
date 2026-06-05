@@ -9,7 +9,7 @@ import (
 // setupCombatBenchEntities creates a player and monster at melee range for benchmarking.
 func setupCombatBenchEntities(b *testing.B) (ecs.Entity, ecs.Entity) {
 	b.Helper()
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 	playerID := registry.NewEntity()
 	monsterID := registry.NewEntity()
 
@@ -50,8 +50,8 @@ func setupCombatBenchEntities(b *testing.B) (ecs.Entity, ecs.Entity) {
 func cleanupCombatBenchEntities(playerID, monsterID ecs.Entity) {
 	world.GlobalSpatialGrid.RemoveEntity(playerID)
 	world.GlobalSpatialGrid.RemoveEntity(monsterID)
-	ecs.GlobalRegistry.RemoveEntity(playerID)
-	ecs.GlobalRegistry.RemoveEntity(monsterID)
+	ecs.DefaultRegistry.RemoveEntity(playerID)
+	ecs.DefaultRegistry.RemoveEntity(monsterID)
 }
 
 // ─── Benchmarks ───────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ func BenchmarkAttackSystemMiss(b *testing.B) {
 	defer cleanupCombatBenchEntities(playerID, monsterID)
 
 	// Move monster out of range
-	ecs.GlobalRegistry.SetPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 100, Z: 100})
+	ecs.DefaultRegistry.SetPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 100, Z: 100})
 	world.GlobalSpatialGrid.UpdateEntityPosition(monsterID, ecs.PositionComponent{MapID: 1, X: 100, Z: 100})
 
 	b.ResetTimer()
@@ -82,7 +82,7 @@ func BenchmarkAttackSystemMiss(b *testing.B) {
 }
 
 func BenchmarkDamageSystem(b *testing.B) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 	monsterID := registry.NewEntity()
 	registry.SetStats(monsterID, ecs.StatsComponent{HP: 10000, MaxHP: 10000})
 	defer registry.RemoveEntity(monsterID)
@@ -98,12 +98,12 @@ func BenchmarkDeathSystemMonster(b *testing.B) {
 	defer cleanupCombatBenchEntities(playerID, monsterID)
 
 	// Set monster HP to 1 so it dies
-	stats, _ := ecs.GlobalRegistry.GetStats(monsterID)
+	stats, _ := ecs.DefaultRegistry.GetStats(monsterID)
 	stats.HP = 1
-	ecs.GlobalRegistry.SetStats(monsterID, stats)
+	ecs.DefaultRegistry.SetStats(monsterID, stats)
 
-	targetMeta, _ := ecs.GlobalRegistry.GetMetadata(monsterID)
-	attackerMeta, _ := ecs.GlobalRegistry.GetMetadata(playerID)
+	targetMeta, _ := ecs.DefaultRegistry.GetMetadata(monsterID)
+	attackerMeta, _ := ecs.DefaultRegistry.GetMetadata(playerID)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -139,7 +139,7 @@ func BenchmarkAttackSystemAllocs(b *testing.B) {
 }
 
 func BenchmarkDamageSystemAllocs(b *testing.B) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 	monsterID := registry.NewEntity()
 	registry.SetStats(monsterID, ecs.StatsComponent{HP: 10000, MaxHP: 10000})
 	defer registry.RemoveEntity(monsterID)

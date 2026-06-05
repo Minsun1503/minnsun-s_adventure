@@ -43,7 +43,7 @@ const meleeRange = 5.0 // world units; tune per game design
 // Returns a CombatResult and an error string if the attack was rejected.
 // On rejection, error string is ready to send directly to the attacker.
 func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 
 	// --- Attacker validation ---
 	if attackerID == targetID {
@@ -74,7 +74,7 @@ func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
 
 	// ← NEW: range check using spatial system
 	if !world.IsInRange(attackerID, targetID, meleeRange) {
-		targetMeta, _ := ecs.GlobalRegistry.GetMetadata(targetID)
+		targetMeta, _ := ecs.DefaultRegistry.GetMetadata(targetID)
 		return CombatResult{}, fmt.Sprintf(
 			"%s is out of melee range (%.0f units).\r\n", targetMeta.Name, meleeRange,
 		)
@@ -92,13 +92,13 @@ func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
 
 	// Record threat when a player attacks a monster
 	if attackerMeta.Type == ecs.EntityPlayer && targetMeta.Type == ecs.EntityMonster {
-		if ai, hasAI := ecs.GlobalRegistry.GetAI(targetID); hasAI {
+		if ai, hasAI := ecs.DefaultRegistry.GetAI(targetID); hasAI {
 			if ai.ThreatTable == nil {
 				ai.ThreatTable = threat.NewThreatTable()
 				ai.ThreatTable.SetDecayRate(threat.DefaultThreatDecay)
 			}
 			ai.ThreatTable.Add(uint64(attackerID), int64(damage))
-			ecs.GlobalRegistry.SetAI(targetID, ai)
+			ecs.DefaultRegistry.SetAI(targetID, ai)
 		}
 	}
 
@@ -186,22 +186,40 @@ func statsToCombatStats(s ecs.StatsComponent) combat.Stats {
 	}
 }
 
-// DamageSystem applies a damage value to a target entity using the
-// copy-modify-overwrite pattern required by inline ECS values.
-// It does NOT check for death — that is AttackSystem's responsibility.
+// DamageSystem applies a damage value to a target entity.
+//
+// If a CombatAccumulator is currently installed (via ecs.CurrentCombatBuffer),
+// the damage is buffered and NOT applied immediately — it will be flushed at
+// the end of the current map tick, coalescing all hits on the same target
+// into a single HP write and broadcast.
+//
+// If no CombatAccumulator is installed (legacy mode), damage is applied
+// immediately using the old copy-modify-overwrite pattern.
 //
 // Parameters:
 //   - targetID: entity to damage.
 //   - amount:   damage points to subtract from HP.
 //
-// Returns the target's HP after damage (may be negative).
+// Returns the target's HP after damage (may be negative, or 0 if buffered).
 func DamageSystem(targetID ecs.Entity, amount int) int {
-	stats, ok := ecs.GlobalRegistry.GetStats(targetID)
+	// Route through CombatAccumulator if active (1000-vs-1 boss storm path)
+	if ecs.CurrentCombatBuffer != nil {
+		ecs.CurrentCombatBuffer.AddDamage(targetID, 0, amount, 0)
+		// Return current HP without modification — the real HP change
+		// happens during CombatAccumulator.Flush at tick end.
+		if stats, ok := ecs.DefaultRegistry.GetStats(targetID); ok {
+			return stats.HP
+		}
+		return 0
+	}
+
+	// Legacy immediate-damage path (no accumulator installed)
+	stats, ok := ecs.DefaultRegistry.GetStats(targetID)
 	if !ok {
 		return 0
 	}
 	stats.HP -= amount                           // MODIFY
-	ecs.GlobalRegistry.SetStats(targetID, stats) // OVERWRITE
+	ecs.DefaultRegistry.SetStats(targetID, stats) // OVERWRITE
 	return stats.HP
 }
 
@@ -219,7 +237,7 @@ func DamageSystem(targetID ecs.Entity, amount int) int {
 //   - targetMeta:  pre-fetched metadata (entity is about to be removed).
 //   - killerMeta:  attacker's metadata for the kill broadcast message.
 func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.MetadataComponent, damage int) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 
 	var killMsg string
 	if killerMeta.Type == ecs.EntityMonster {
@@ -328,7 +346,7 @@ func broadcastHit(r CombatResult) {
 		Killed:     killed,
 	}
 	frame := broadcast.BuildCombatHit(payload)
-	attackerPos, _ := ecs.GlobalRegistry.GetPosition(r.AttackerID)
+	attackerPos, _ := ecs.DefaultRegistry.GetPosition(r.AttackerID)
 	protocol.BroadcastToNeighbors(attackerPos, frame, r.AttackerID)
 	loggate.Debugf("[HIT] %s → %s | dmg=%d hp_left=%d",
 		r.AttackerName, r.TargetName, r.Damage, r.TargetHP)

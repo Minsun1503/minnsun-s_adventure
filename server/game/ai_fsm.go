@@ -106,7 +106,7 @@ func MonsterFSMSend(id ecs.Entity, ai *ecs.AIComponent, ev MonsterEvent) bool {
 	// Log state changes
 	if newState != oldState {
 		name := fmt.Sprintf("entity_%d", id)
-		if meta, ok := ecs.GlobalRegistry.GetMetadata(id); ok {
+		if meta, ok := ecs.DefaultRegistry.GetMetadata(id); ok {
 			name = meta.Name
 		}
 		loggate.Debugf("[AI·FSM] %s: %s --[%s]--> %s", name, oldState, ev, newState)

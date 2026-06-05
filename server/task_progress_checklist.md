@@ -1,37 +1,23 @@
-# Implementation Roadmap v3 - Progress Checklist
+# Task Progress - Roadmap v4
 
-## Phase 3: Data Safety
+## Phase 1 - Combat Accumulator (S-TIER)
+- [x] Create server/game/combat_accumulator.go with CombatAccumulator struct
+- [x] Modify server/world/worker.go - Add CombatBuffer to MapWorker, init & Flush in Tick
+- [x] Modify server/game/combat.go - DamageSystem delegates to combat buffer
+- [x] Modify server/game/skill_pipeline.go - stageEffectApplication delegates to combat buffer
+- [x] Run go vet and verify compilation
 
-### 7. Save Queue Hardening (★★★★★)
-- [x] Implement SaveBuffer with persistent disk-backed fallback
-- [x] Add backpressure mechanism to QueuePlayerSave (TryWriteToQueue)
-- [x] Add emergency flush that drains buffer to disk on shutdown
+## Phase 1 - Save Consistency (S-TIER)
+- [ ] Modify `server/db/save_engine.go` to wrap Upsert Character and Inventory in a single `BeginTx` block
+- [ ] Ensure any error in the SQL transaction triggers a strict `Rollback()`
+- [ ] Add `snapshot_data JSON` backup field logic to the Upsert query
 
-### 8. World Snapshot System (★★★★☆)
-- [x] Enhanced periodic snapshot to serialize full world state (entities, inventory, party, AI, effects)
-- [x] Add snapshot metadata (timestamp, entity count, version, snapshot type)
-- [x] Add snapshot to disk serialization (gob format with marker file)
+## Phase 1 - Cross-Map Migration (S-TIER)
+- [ ] Create `server/ecs/transfer_component.go` for Two-Phase Commit locking
+- [ ] Update `server/world/partition.go` to implement lock-copy-spawn-commit workflow for `processTransfer`
+- [ ] Update `MovementSystem` and `CombatSystem` to ignore entities with `TransferComponent`
 
-### 9. Crash Recovery (★★★★☆)
-- [x] Load latest snapshot on startup (LoadLatestSnapshot with fallback)
-- [x] Replay pending saves from disk buffer on drain
-- [x] Restore entities, components, inventory, party, effects from snapshot
-- [x] Shutdown snapshot for clean recovery
-
-## Phase 4: ECS Maturity
-
-### 10. Query Cache (★★★☆☆)
-- [x] Add query planning cache (GlobalQueryCache with atomic pointer swap)
-- [x] Cache smallest store selection to avoid repeated planning
-- [x] Lock-free read path for hot-path queries
-
-### 11. ECS Diagnostics (★★★☆☆)
-- [x] Add entity/component/query count tracking (ECSDiagnostics)
-- [x] Add query duration tracking per system (RecordQuery)
-- [x] Expose diagnostics via MCP handlers (ecs_diagnostics, ecs_diagnostics_snapshot)
-
-### 12. Component Leak Detector (★★★☆☆)
-- [x] Detect orphan entities (missing required components like Position/Stats)
-- [x] Detect forgotten components (component without parent Metadata)
-- [x] Detect invalid references (party/AI target IDs pointing to non-existent entities)
-- [x] Expose via MCP handler (ecs_leak_scan)
+## Phase 2 - Memory & State Safety (A-TIER)
+- [x] Fix Entity Lifecycle Leak (`ecs.go` RemoveEntity calls Close/Nil)
+- [x] Fix AOI Worst Case (`MaxAOIWatchers = 50` culling)
+- [x] Global State Cleanup (Replaced `GlobalRegistry` with `DefaultRegistry`)

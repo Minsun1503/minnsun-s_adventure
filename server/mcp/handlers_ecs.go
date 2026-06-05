@@ -20,7 +20,7 @@ func init() {
 		}
 
 		var entities []EntityInfo
-		ecs.GlobalRegistry.RangeMetadata(func(id ecs.Entity, meta ecs.MetadataComponent) bool {
+		ecs.DefaultRegistry.RangeMetadata(func(id ecs.Entity, meta ecs.MetadataComponent) bool {
 			if p.Type == "" || meta.Type.String() == p.Type {
 				info := buildEntityInfo(id)
 				entities = append(entities, info)
@@ -55,7 +55,7 @@ func init() {
 		if err != nil {
 			return rpcError(req.ID, ErrCodeInvalidParams, err.Error())
 		}
-		stats, ok := ecs.GlobalRegistry.GetStats(id)
+		stats, ok := ecs.DefaultRegistry.GetStats(id)
 		if !ok {
 			return rpcError(req.ID, ErrCodeInternal, fmt.Sprintf("stats for entity %d not found", id))
 		}
@@ -67,7 +67,7 @@ func init() {
 		if err != nil {
 			return rpcError(req.ID, ErrCodeInvalidParams, err.Error())
 		}
-		pos, ok := ecs.GlobalRegistry.GetPosition(id)
+		pos, ok := ecs.DefaultRegistry.GetPosition(id)
 		if !ok {
 			return rpcError(req.ID, ErrCodeInternal, fmt.Sprintf("position for entity %d not found", id))
 		}
@@ -79,7 +79,7 @@ func init() {
 		if err != nil {
 			return rpcError(req.ID, ErrCodeInvalidParams, err.Error())
 		}
-		inv, ok := ecs.GlobalRegistry.GetInventory(id)
+		inv, ok := ecs.DefaultRegistry.GetInventory(id)
 		if !ok || len(inv.Items) == 0 {
 			return rpcResult(req.ID, map[string]any{
 				"entity_id": uint64(id),
@@ -109,7 +109,7 @@ func init() {
 		if err != nil {
 			return rpcError(req.ID, ErrCodeInvalidParams, err.Error())
 		}
-		ai, ok := ecs.GlobalRegistry.GetAI(id)
+		ai, ok := ecs.DefaultRegistry.GetAI(id)
 		if !ok {
 			return rpcError(req.ID, ErrCodeInternal, fmt.Sprintf("AI for entity %d not found", id))
 		}
@@ -133,7 +133,7 @@ func init() {
 		if err != nil {
 			return rpcError(req.ID, ErrCodeInvalidParams, err.Error())
 		}
-		eq, ok := ecs.GlobalRegistry.GetEquipment(id)
+		eq, ok := ecs.DefaultRegistry.GetEquipment(id)
 		if !ok {
 			return rpcResult(req.ID, map[string]any{
 				"entity_id": uint64(id),
@@ -149,7 +149,7 @@ func init() {
 		if err != nil {
 			return rpcError(req.ID, ErrCodeInvalidParams, err.Error())
 		}
-		party, ok := ecs.GlobalRegistry.GetParty(id)
+		party, ok := ecs.DefaultRegistry.GetParty(id)
 		if !ok {
 			return rpcError(req.ID, ErrCodeInternal, fmt.Sprintf("party for entity %d not found", id))
 		}
@@ -170,7 +170,7 @@ func init() {
 		if err != nil {
 			return rpcError(req.ID, ErrCodeInvalidParams, err.Error())
 		}
-		eff, ok := ecs.GlobalRegistry.GetEffects(id)
+		eff, ok := ecs.DefaultRegistry.GetEffects(id)
 		if !ok || len(eff.ActiveList) == 0 {
 			return rpcResult(req.ID, map[string]any{
 				"entity_id": uint64(id),
@@ -205,7 +205,7 @@ func init() {
 			return rpcError(req.ID, ErrCodeInternal, err.Error())
 		}
 
-		if pos, ok := ecs.GlobalRegistry.GetPosition(id); ok {
+		if pos, ok := ecs.DefaultRegistry.GetPosition(id); ok {
 			world.GlobalSpatialGrid.UpdateEntityPosition(id, pos)
 		}
 
@@ -217,11 +217,11 @@ func init() {
 		if err != nil {
 			return rpcError(req.ID, ErrCodeInvalidParams, err.Error())
 		}
-		if meta, ok := ecs.GlobalRegistry.GetMetadata(id); ok && meta.Type == ecs.EntityPlayer {
+		if meta, ok := ecs.DefaultRegistry.GetMetadata(id); ok && meta.Type == ecs.EntityPlayer {
 			return rpcError(req.ID, ErrCodeInternal, "cannot remove a player entity via MCP; use admin_kick_player instead")
 		}
 		world.GlobalSpatialGrid.RemoveEntity(id)
-		ecs.GlobalRegistry.RemoveEntity(id)
+		ecs.DefaultRegistry.RemoveEntity(id)
 		return rpcResult(req.ID, map[string]string{
 			"status": fmt.Sprintf("entity %d removed", id),
 		})

@@ -127,7 +127,7 @@ func takeWorldSnapshot(snapshotType string) {
 	start := time.Now()
 
 	// Collect all entities
-	allEntities := ecs.GlobalRegistry.GetAllEntities()
+	allEntities := ecs.DefaultRegistry.GetAllEntities()
 	if len(allEntities) == 0 {
 		logger.Info("[SNAPSHOT] No entities to snapshot.")
 		return
@@ -138,13 +138,13 @@ func takeWorldSnapshot(snapshotType string) {
 	monsterCount := 0
 
 	for _, id := range allEntities {
-		meta, ok := ecs.GlobalRegistry.GetMetadata(id)
+		meta, ok := ecs.DefaultRegistry.GetMetadata(id)
 		if !ok {
 			continue
 		}
 
-		pos, hasPos := ecs.GlobalRegistry.GetPosition(id)
-		stats, hasStats := ecs.GlobalRegistry.GetStats(id)
+		pos, hasPos := ecs.DefaultRegistry.GetPosition(id)
+		stats, hasStats := ecs.DefaultRegistry.GetStats(id)
 
 		data := EntitySnapshotData{
 			ID:       id,
@@ -156,25 +156,25 @@ func takeWorldSnapshot(snapshotType string) {
 		}
 
 		// Capture optional components (only if present)
-		if inv, ok := ecs.GlobalRegistry.GetInventory(id); ok {
+		if inv, ok := ecs.DefaultRegistry.GetInventory(id); ok {
 			clone := inv.Clone()
 			data.Inventory = &clone
 		}
-		if eq, ok := ecs.GlobalRegistry.GetEquipment(id); ok {
+		if eq, ok := ecs.DefaultRegistry.GetEquipment(id); ok {
 			data.Equipment = &eq
 		}
-		if eff, ok := ecs.GlobalRegistry.GetEffects(id); ok {
+		if eff, ok := ecs.DefaultRegistry.GetEffects(id); ok {
 			clone := eff.Clone()
 			data.Effects = &clone
 		}
-		if ai, ok := ecs.GlobalRegistry.GetAI(id); ok {
+		if ai, ok := ecs.DefaultRegistry.GetAI(id); ok {
 			data.AI = &ai
 		}
-		if party, ok := ecs.GlobalRegistry.GetParty(id); ok {
+		if party, ok := ecs.DefaultRegistry.GetParty(id); ok {
 			clone := party.Clone()
 			data.Party = &clone
 		}
-		if itemTemp, ok := ecs.GlobalRegistry.GetItemTemplate(id); ok {
+		if itemTemp, ok := ecs.DefaultRegistry.GetItemTemplate(id); ok {
 			data.ItemTemp = &itemTemp
 		}
 
@@ -423,36 +423,36 @@ func RestoreWorldFromSnapshot(snapshot *WorldSnapshotData) int {
 		entity := snapshot.Entities[i]
 
 		// Restore metadata (always present)
-		ecs.GlobalRegistry.SetMetadata(entity.ID, entity.Meta)
+		ecs.DefaultRegistry.SetMetadata(entity.ID, entity.Meta)
 
 		// Restore position
 		if entity.HasPos {
-			ecs.GlobalRegistry.SetPosition(entity.ID, entity.Pos)
+			ecs.DefaultRegistry.SetPosition(entity.ID, entity.Pos)
 		}
 
 		// Restore stats
 		if entity.HasStats {
-			ecs.GlobalRegistry.SetStats(entity.ID, entity.Stats)
+			ecs.DefaultRegistry.SetStats(entity.ID, entity.Stats)
 		}
 
 		// Restore optional components
 		if entity.Inventory != nil {
-			ecs.GlobalRegistry.SetInventory(entity.ID, *entity.Inventory)
+			ecs.DefaultRegistry.SetInventory(entity.ID, *entity.Inventory)
 		}
 		if entity.Equipment != nil {
-			ecs.GlobalRegistry.SetEquipment(entity.ID, *entity.Equipment)
+			ecs.DefaultRegistry.SetEquipment(entity.ID, *entity.Equipment)
 		}
 		if entity.Effects != nil {
-			ecs.GlobalRegistry.SetEffects(entity.ID, *entity.Effects)
+			ecs.DefaultRegistry.SetEffects(entity.ID, *entity.Effects)
 		}
 		if entity.AI != nil {
-			ecs.GlobalRegistry.SetAI(entity.ID, *entity.AI)
+			ecs.DefaultRegistry.SetAI(entity.ID, *entity.AI)
 		}
 		if entity.Party != nil {
-			ecs.GlobalRegistry.SetParty(entity.ID, *entity.Party)
+			ecs.DefaultRegistry.SetParty(entity.ID, *entity.Party)
 		}
 		if entity.ItemTemp != nil {
-			ecs.GlobalRegistry.SetItemTemplate(entity.ID, *entity.ItemTemp)
+			ecs.DefaultRegistry.SetItemTemplate(entity.ID, *entity.ItemTemp)
 		}
 
 		restored++

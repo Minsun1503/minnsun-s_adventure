@@ -72,7 +72,7 @@ func (ic *InviteCache) PurgeExpired() {
 //
 // Returns a feedback message and success flag.
 func SendPartyInviteSystem(inviterID, targetID ecs.Entity) (string, bool) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 
 	// Validate inviter is the party leader.
 	partyID := GetPlayerPartyID(inviterID)
@@ -128,7 +128,7 @@ func SendPartyInviteSystem(inviterID, targetID ecs.Entity) (string, bool) {
 // Validates the invitation exists, hasn't expired, and matches the party ID.
 // Adds the player to the party and broadcasts a roster update.
 func AcceptPartyInviteSystem(playerID, targetPartyID ecs.Entity) (string, bool) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 
 	// Verify invitation exists and is still valid.
 	record, ok := GlobalInviteCache.Take(playerID)

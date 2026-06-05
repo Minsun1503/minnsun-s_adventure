@@ -86,7 +86,7 @@ func CountInRadius(originID ecs.Entity, worldRadius float64, entityType ecs.Enti
 
 	count := 0
 	for _, c := range *candidates {
-		meta, hasMeta := ecs.GlobalRegistry.GetMetadata(c.ID)
+		meta, hasMeta := ecs.DefaultRegistry.GetMetadata(c.ID)
 		if hasMeta && meta.Type == entityType {
 			count++
 		}
@@ -108,7 +108,7 @@ func IsAnyInRadius(originID ecs.Entity, worldRadius float64, entityType ecs.Enti
 	}
 
 	for _, c := range *candidates {
-		meta, hasMeta := ecs.GlobalRegistry.GetMetadata(c.ID)
+		meta, hasMeta := ecs.DefaultRegistry.GetMetadata(c.ID)
 		if hasMeta && meta.Type == entityType {
 			return true
 		}
@@ -130,7 +130,7 @@ func FilterInRadius(originID ecs.Entity, worldRadius float64, entityType ecs.Ent
 			dst = append(dst, c.ID)
 			continue
 		}
-		meta, hasMeta := ecs.GlobalRegistry.GetMetadata(c.ID)
+		meta, hasMeta := ecs.DefaultRegistry.GetMetadata(c.ID)
 		if hasMeta && meta.Type == entityType {
 			dst = append(dst, c.ID)
 		}
@@ -151,8 +151,8 @@ func IsInRadius(aID ecs.Entity, bID ecs.Entity, radius float64) bool {
 // DistanceBetween returns the squared Euclidean distance between two entities using pure integers.
 // Returns (0, false) if either entity's position cannot be resolved.
 func DistanceBetween(aID, bID ecs.Entity) (int, bool) {
-	aPos, okA := ecs.GlobalRegistry.GetPosition(aID)
-	bPos, okB := ecs.GlobalRegistry.GetPosition(bID)
+	aPos, okA := ecs.DefaultRegistry.GetPosition(aID)
+	bPos, okB := ecs.DefaultRegistry.GetPosition(bID)
 	if !okA || !okB {
 		return 0, false
 	}
@@ -163,8 +163,8 @@ func DistanceBetween(aID, bID ecs.Entity) (int, bool) {
 // SameMap reports whether two entities are on the same map zone identifier.
 // Useful as a lightning-fast pre-check before expensive spatial grid math.
 func SameMap(aID, bID ecs.Entity) bool {
-	aPos, okA := ecs.GlobalRegistry.GetPosition(aID)
-	bPos, okB := ecs.GlobalRegistry.GetPosition(bID)
+	aPos, okA := ecs.DefaultRegistry.GetPosition(aID)
+	bPos, okB := ecs.DefaultRegistry.GetPosition(bID)
 	return okA && okB && aPos.MapID == bPos.MapID
 }
 
@@ -173,7 +173,7 @@ func SameMap(aID, bID ecs.Entity) bool {
 // queryRadius abstracts the repetitive boilerplate sequence required to query the spatial grid.
 // Centralizes dependencies so changes to world.GlobalSpatialGrid only require editing this single block.
 func queryRadius(originID ecs.Entity, worldRadius float64) (ecs.PositionComponent, *[]world.ChunkEntry, bool) {
-	originPos, ok := ecs.GlobalRegistry.GetPosition(originID)
+	originPos, ok := ecs.DefaultRegistry.GetPosition(originID)
 	if !ok {
 		return ecs.PositionComponent{}, nil, false
 	}
@@ -199,7 +199,7 @@ func getNearestByType(originID ecs.Entity, worldRadius float64, entityType ecs.E
 	nearestDSq := math.MaxInt // Optimized: Avoid tracking cumbersome found booleans
 
 	for _, c := range *candidates {
-		meta, hasMeta := ecs.GlobalRegistry.GetMetadata(c.ID)
+		meta, hasMeta := ecs.DefaultRegistry.GetMetadata(c.ID)
 		if !hasMeta || meta.Type != entityType {
 			continue
 		}

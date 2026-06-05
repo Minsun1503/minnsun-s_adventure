@@ -14,19 +14,19 @@ import (
 func cleanupEntities(ids ...ecs.Entity) {
 	for _, id := range ids {
 		world.GlobalSpatialGrid.RemoveEntity(id)
-		ecs.GlobalRegistry.RemoveEntity(id)
+		ecs.DefaultRegistry.RemoveEntity(id)
 	}
 }
 
 // setupEntity là helper khởi tạo nhanh một thực thể với vị trí không gian cụ thể.
 // Nhận vào testing.TB để hỗ trợ báo lỗi chính xác ngữ cảnh cả trong Test lẫn Benchmark.
 func setupEntity(t testing.TB, name string, typ ecs.EntityType, mapID, x, z int) ecs.Entity {
-	id := ecs.GlobalRegistry.NewEntity()
+	id := ecs.DefaultRegistry.NewEntity()
 
-	ecs.GlobalRegistry.SetMetadata(id, ecs.MetadataComponent{Name: name, Type: typ})
+	ecs.DefaultRegistry.SetMetadata(id, ecs.MetadataComponent{Name: name, Type: typ})
 
 	pos := ecs.PositionComponent{MapID: mapID, X: x, Z: z}
-	ecs.GlobalRegistry.SetPosition(id, pos)
+	ecs.DefaultRegistry.SetPosition(id, pos)
 	world.GlobalSpatialGrid.UpdateEntityPosition(id, pos)
 	return id
 }

@@ -48,7 +48,7 @@ func (as *AdminServer) handleDebugEntities(w http.ResponseWriter, r *http.Reques
 	}
 
 	var details []EntityDetail
-	ecs.GlobalRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
+	ecs.DefaultRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
 		detail := entityDetailFromSnapshot(snap)
 		details = append(details, detail)
 		return true
@@ -81,7 +81,7 @@ func (as *AdminServer) handleDebugEntityByID(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	snap, ok := ecs.GlobalRegistry.GetSnapshot(ecs.Entity(entityID))
+	snap, ok := ecs.DefaultRegistry.GetSnapshot(ecs.Entity(entityID))
 	if !ok {
 		http.Error(w, `{"error":"entity not found"}`, http.StatusNotFound)
 		return
@@ -106,16 +106,16 @@ func (as *AdminServer) handleDebugEntityByID(w http.ResponseWriter, r *http.Requ
 	full.HasPosition = snap.HasPos
 	full.HasStats = snap.HasStats
 
-	if _, ok := ecs.GlobalRegistry.GetAI(ecs.Entity(entityID)); ok {
+	if _, ok := ecs.DefaultRegistry.GetAI(ecs.Entity(entityID)); ok {
 		full.HasAI = true
 	}
-	if _, ok := ecs.GlobalRegistry.GetEquipment(ecs.Entity(entityID)); ok {
+	if _, ok := ecs.DefaultRegistry.GetEquipment(ecs.Entity(entityID)); ok {
 		full.HasEquip = true
 	}
-	if _, ok := ecs.GlobalRegistry.GetInventory(ecs.Entity(entityID)); ok {
+	if _, ok := ecs.DefaultRegistry.GetInventory(ecs.Entity(entityID)); ok {
 		full.HasInv = true
 	}
-	if _, ok := ecs.GlobalRegistry.GetEffects(ecs.Entity(entityID)); ok {
+	if _, ok := ecs.DefaultRegistry.GetEffects(ecs.Entity(entityID)); ok {
 		full.HasEffects = true
 	}
 
@@ -144,11 +144,11 @@ func entityDetailFromSnapshot(snap ecs.EntitySnapshot) EntityDetail {
 		detail.XP = snap.Stats.XP
 	}
 	// Get optional components
-	if eq, ok := ecs.GlobalRegistry.GetEquipment(snap.ID); ok {
+	if eq, ok := ecs.DefaultRegistry.GetEquipment(snap.ID); ok {
 		detail.Weapon = eq.WeaponID
 		detail.Armor = eq.ArmorID
 	}
-	if ai, ok := ecs.GlobalRegistry.GetAI(snap.ID); ok {
+	if ai, ok := ecs.DefaultRegistry.GetAI(snap.ID); ok {
 		detail.AIState = ai.State.String()
 	}
 	return detail

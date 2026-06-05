@@ -20,6 +20,12 @@ type AOIEvent struct {
 	Target ecs.Entity
 }
 
+// MaxAOIWatchers is the hard limit on the number of entities returned per AOI update.
+// When 500 players stand on the same tile, only the 50 closest are tracked.
+// This prevents eventsPtr from containing 500+ events per player, keeping tick rate
+// under 50ms even in worst-case stacking scenarios.
+const MaxAOIWatchers = 50
+
 // EntityListPool recycles *[]ecs.Entity slices for AOI spatial queries.
 // Used by aoiSpatialQuery in world/aoi_bridge.go to avoid per-frame slice allocation.
 var EntityListPool = pool.NewSlicePool[ecs.Entity](32)
@@ -73,7 +79,7 @@ func (m *AOIManager) UnregisterWatcher(entity ecs.Entity) {
 
 // UpdateAll computes enter/leave events for all registered watchers and calls onEvent for each.
 // This callback-based approach eliminates all per-frame map and slice allocations (0 B/op, 0 allocs/op).
-// posGetter provides the position for each entity (decoupled from ecs.GlobalRegistry for testability).
+// posGetter provides the position for each entity (decoupled from ecs.DefaultRegistry for testability).
 // Return false from onEvent to stop processing events for the current watcher early.
 func (m *AOIManager) UpdateAll(
 	posGetter func(ecs.Entity) (ecs.PositionComponent, bool),
@@ -91,6 +97,12 @@ func (m *AOIManager) UpdateAll(
 
 // updateOne computes enter/leave events for a single watcher given its position.
 // Events are dispatched directly via onEvent callback, eliminating allocation.
+//
+// Note: worst-case AOI culling (sort by distance, keep closest MaxAOIWatchers)
+// is handled upstream in the bridge layer (world/aoi_bridge.go's aoiSpatialQuery
+// and aoiSpatialQueryFromGrid) where entity positions are available from the
+// spatial grid's ChunkEntry results. By the time entities reach this function,
+// the count is already ≤ MaxAOIWatchers.
 func (m *AOIManager) updateOne(entity ecs.Entity, w *Watcher, pos ecs.PositionComponent, query SpatialQueryFunc, onEvent AOIEventCallback) {
 	raw := query(pos, w.radius, entity)
 	if raw == nil {
@@ -134,6 +146,10 @@ func sliceContainsEntity(slice []ecs.Entity, target ecs.Entity) bool {
 // UpdateOne computes enter/leave events for a single entity given its position.
 // Returns a pointer to a pooled []AOIEvent slice, or nil if no changes.
 // The caller MUST Put the returned pointer back into AOIEventPool after use.
+//
+// Note: worst-case AOI culling (sort by distance, keep closest MaxAOIWatchers)
+// is handled upstream in the bridge layer where entity positions are available.
+//
 // Deprecated: Prefer UpdateAll with callback for zero-allocation hot-path.
 func (m *AOIManager) UpdateOne(entity ecs.Entity, pos ecs.PositionComponent, query SpatialQueryFunc) *[]AOIEvent {
 	w, ok := m.watchers[entity]

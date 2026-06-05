@@ -312,167 +312,40 @@ func deserializeEntity(snap EntitySnapshot, reg *ecs.Registry, grid *SpatialGrid
 	}
 }
 
-// ─── Legacy Compatibility ────────────────────────────────────────────────────
-//
-// The following functions maintain backward compatibility with the old
-// single-registry dispatch model. They delegate to the new World/MapWorker
-// system internally.
-//
-// These wrappers are kept to avoid breaking existing callers (e.g. server.go
-// and systems/gameloop.go) during the incremental migration. They route through
-// GlobalWorld if available, or fall back to the old GlobalRegistry behavior.
-
+// ─── MapTickFn ───────────────────────────────────────────────────────────────
 // MapTickFn is the per-map tick function signature.
 type MapTickFn func(mapID int, tick uint64, cmdBuf *ecs.CommandBuffer)
 
-// instances holds legacy map instances (for backward compat during migration).
-// Deprecated: use GlobalWorld directly.
-var instances = make(map[int]*MapInstance)
-
-// transferChan is the legacy orchestrator channel (for backward compat).
-// Deprecated: use GlobalWorld.transferChan directly.
-var transferChan = make(chan TransferRequest, 256)
-
-// RequestTransfer legacy wrapper — routes through GlobalWorld if available.
-func RequestTransfer(entityID ecs.Entity, fromMap, toMap int) {
-	if GlobalWorld != nil {
-		GlobalWorld.TransferEntity(entityID, fromMap, toMap)
-		return
-	}
-	transferChan <- TransferRequest{
-		EntityID: entityID,
-		FromMap:  fromMap,
-		ToMap:    toMap,
-	}
-}
-
-// StartTransferOrchestrator legacy wrapper — routes through GlobalWorld if available.
-func StartTransferOrchestrator() {
-	if GlobalWorld != nil {
-		GlobalWorld.StartTransferOrchestrator()
-		return
-	}
-	logger.Info("[WORLD] (legacy) Cross-map transfer orchestrator started")
-	go func() {
-		for req := range transferChan {
-			processLegacyTransfer(req)
-		}
-	}()
-}
-
-// processLegacyTransfer handles a transfer using the old GlobalRegistry model.
-func processLegacyTransfer(req TransferRequest) {
-	pos, ok := ecs.GlobalRegistry.GetPosition(req.EntityID)
-	if !ok {
-		logger.Warn("[WORLD] Transfer: entity %d not found (from map %d to %d)",
-			req.EntityID, req.FromMap, req.ToMap)
-		return
-	}
-	pos.MapID = req.ToMap
-	ecs.GlobalRegistry.SetPosition(req.EntityID, pos)
-	GlobalSpatialGrid.UpdateEntityPosition(req.EntityID, pos)
-	logger.Debug("[WORLD] Transferred entity %d from map %d to map %d",
-		req.EntityID, req.FromMap, req.ToMap)
-}
-
-// RegisterMapTick registers a tick function and starts the map for the given ID.
-// Uses GlobalWorld if available, otherwise falls back to legacy MapInstance.
+// RegisterMapTick sets the tick function on GlobalWorld and starts the map.
 func RegisterMapTick(mapID int, fn MapTickFn) {
 	if GlobalWorld != nil {
 		GlobalWorld.tickFn = fn
 		GlobalWorld.StartMap(mapID)
 		return
 	}
-	// Legacy path: start a MapInstance
-	inst := &MapInstance{
-		ID:       mapID,
-		CmdBuf:   ecs.NewCommandBuffer(),
-		tickFn:   fn,
-		tickChan: make(chan uint64, 4),
-		stop:     make(chan struct{}),
-	}
-	instances[mapID] = inst
-	logger.Info("[WORLD] (legacy) Started map instance %d", mapID)
-	go inst.run()
+	logger.Warn("[WORLD] RegisterMapTick: GlobalWorld not initialized, cannot start map %d", mapID)
 }
 
-// Tick legacy wrapper — routes through GlobalWorld if available.
+// Tick sends a tick to the specified map via GlobalWorld.
 func Tick(mapID int, tick uint64) bool {
 	if GlobalWorld != nil {
 		return GlobalWorld.Tick(mapID, tick)
 	}
-	if inst, ok := instances[mapID]; ok {
-		select {
-		case inst.tickChan <- tick:
-		default:
-			logger.Warn("[WORLD] Map %d tick channel full, dropping tick %d", mapID, tick)
-		}
-		return true
-	}
 	return false
 }
 
-// RunningMapIDs returns all running map IDs (from GlobalWorld or legacy).
+// RunningMapIDs returns all running map IDs from GlobalWorld.
 func RunningMapIDs() []int {
 	if GlobalWorld != nil {
 		return GlobalWorld.RunMapIDs()
 	}
-	ids := make([]int, 0, len(instances))
-	for id := range instances {
-		ids = append(ids, id)
-	}
-	return ids
+	return nil
 }
 
-// IsMapRunning returns true if the given map ID has a running instance.
+// IsMapRunning returns true if the given map has a running worker.
 func IsMapRunning(mapID int) bool {
 	if GlobalWorld != nil {
 		return GlobalWorld.IsMapRunning(mapID)
 	}
-	_, ok := instances[mapID]
-	return ok
-}
-
-// ─── MapInstance (Legacy) ─────────────────────────────────────────────────────
-
-// MapInstance represents an isolated game map with its own command buffer.
-// Used only when GlobalWorld is nil (legacy mode).
-type MapInstance struct {
-	ID       int
-	CmdBuf   *ecs.CommandBuffer
-	tickFn   MapTickFn
-	tickChan chan uint64
-	stop     chan struct{}
-}
-
-func (m *MapInstance) run() {
-	for {
-		select {
-		case <-m.stop:
-			m.CmdBuf.Free()
-			return
-		case tick := <-m.tickChan:
-			m.tickFn(m.ID, tick, m.CmdBuf)
-			m.CmdBuf.Flush(GlobalSpatialGrid)
-		}
-	}
-}
-
-// StopInstance legacy wrapper — stops a legacy MapInstance.
-func StopInstance(mapID int) {
-	if inst, ok := instances[mapID]; ok {
-		close(inst.stop)
-		delete(instances, mapID)
-		logger.Info("[WORLD] (legacy) Stopped map instance %d", mapID)
-	}
-}
-
-// StartInstance legacy wrapper — starts a legacy MapInstance.
-func StartInstance(mapID int, fn MapTickFn) {
-	RegisterMapTick(mapID, fn)
-}
-
-// TickMap legacy wrapper — sends tick to a legacy MapInstance.
-func TickMap(mapID int, tick uint64) {
-	Tick(mapID, tick)
+	return false
 }

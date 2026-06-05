@@ -11,7 +11,7 @@ import (
 // It verifies spatial ranges and securely transfers the ground item to the player's backpack.
 func HandleItemPickupSystem(playerID ecs.Entity, itemEntityID ecs.Entity) (string, bool) {
 	// 1. FETCH ITEM METADATA: Verify this entity is actually a piece of ground floor loot
-	itemMeta, hasMeta := ecs.GlobalRegistry.GetMetadata(itemEntityID)
+	itemMeta, hasMeta := ecs.DefaultRegistry.GetMetadata(itemEntityID)
 	if !hasMeta || itemMeta.Type != ecs.EntityGroundItem {
 		return "Error: That item is either not on the ground or has already vanished!\r\n", false
 	}
@@ -26,13 +26,13 @@ func HandleItemPickupSystem(playerID ecs.Entity, itemEntityID ecs.Entity) (strin
 	// 3. ATOMIC PURGE STEP (The Anti-Duplication Lock)
 	// We extract the item's position and template ID, then immediately delete it.
 	// This is transaction-safe since registry map lookups are safe.
-	itemPos, hasPos := ecs.GlobalRegistry.GetPosition(itemEntityID)
+	itemPos, hasPos := ecs.DefaultRegistry.GetPosition(itemEntityID)
 	if !hasPos {
 		return "Error: Item state has already been modified by another player.\r\n", false
 	}
 
 	// Query template component before purging the entity
-	templateComp, hasTemplate := ecs.GlobalRegistry.GetItemTemplate(itemEntityID)
+	templateComp, hasTemplate := ecs.DefaultRegistry.GetItemTemplate(itemEntityID)
 	var resolvedTemplateID uint64 = 101 // Fallback default if not found
 	if hasTemplate {
 		resolvedTemplateID = templateComp.TemplateID
@@ -40,10 +40,10 @@ func HandleItemPickupSystem(playerID ecs.Entity, itemEntityID ecs.Entity) (strin
 
 	// Remove the item from both spatial grid and registry immediately to lock it to this routine
 	world.GlobalSpatialGrid.RemoveEntity(itemEntityID)
-	ecs.GlobalRegistry.RemoveEntity(itemEntityID)
+	ecs.DefaultRegistry.RemoveEntity(itemEntityID)
 
 	// 4. COPY-MODIFY-OVERWRITE: Insert item token into player's inventory table row
-	inv, hasInv := ecs.GlobalRegistry.GetInventory(playerID)
+	inv, hasInv := ecs.DefaultRegistry.GetInventory(playerID)
 	if !hasInv {
 		inv = ecs.InventoryComponent{Items: make(map[uint64]int)}
 	} else {
@@ -51,10 +51,10 @@ func HandleItemPickupSystem(playerID ecs.Entity, itemEntityID ecs.Entity) (strin
 	}
 
 	inv.Items[resolvedTemplateID]++
-	ecs.GlobalRegistry.SetInventory(playerID, inv)
+	ecs.DefaultRegistry.SetInventory(playerID, inv)
 
 	// 5. LOCAL COMMUNICATION PACKET (No emojis)
-	playerMeta, _ := ecs.GlobalRegistry.GetMetadata(playerID)
+	playerMeta, _ := ecs.DefaultRegistry.GetMetadata(playerID)
 	successBroadcast := fmt.Sprintf("[LOOT]: Player %s picked up a %s from the floor.\r\n",
 		playerMeta.Name, itemMeta.Name)
 

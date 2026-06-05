@@ -334,16 +334,16 @@ type EntityInfo struct {
 func buildEntityInfo(id ecs.Entity) EntityInfo {
 	info := EntityInfo{ID: uint64(id)}
 
-	if meta, ok := ecs.GlobalRegistry.GetMetadata(id); ok {
+	if meta, ok := ecs.DefaultRegistry.GetMetadata(id); ok {
 		info.Name = meta.Name
 		info.Type = meta.Type.String()
 	}
-	if pos, ok := ecs.GlobalRegistry.GetPosition(id); ok {
+	if pos, ok := ecs.DefaultRegistry.GetPosition(id); ok {
 		info.MapID = pos.MapID
 		info.X = pos.X
 		info.Z = pos.Z
 	}
-	if stats, ok := ecs.GlobalRegistry.GetStats(id); ok {
+	if stats, ok := ecs.DefaultRegistry.GetStats(id); ok {
 		info.HP = stats.HP
 		info.MaxHP = stats.MaxHP
 		info.MP = stats.MP
@@ -352,11 +352,11 @@ func buildEntityInfo(id ecs.Entity) EntityInfo {
 		info.Level = stats.Level
 		info.XP = stats.XP
 	}
-	if eq, ok := ecs.GlobalRegistry.GetEquipment(id); ok {
+	if eq, ok := ecs.DefaultRegistry.GetEquipment(id); ok {
 		info.Weapon = eq.WeaponID
 		info.Armor = eq.ArmorID
 	}
-	if ai, ok := ecs.GlobalRegistry.GetAI(id); ok {
+	if ai, ok := ecs.DefaultRegistry.GetAI(id); ok {
 		info.AIState = ai.State.String()
 	}
 

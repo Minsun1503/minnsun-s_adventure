@@ -452,7 +452,23 @@ type Registry struct {
 	effects       ComponentStore[EffectsComponent]
 }
 
-var GlobalRegistry = NewRegistry()
+// DefaultRegistry is the transitional global registry pointer set by the game loop.
+// Systems that have not yet been refactored to receive an explicit *Registry parameter
+// read from this pointer. The game loop (systems/gameloop.go) sets this to the
+// current MapWorker's registry before each per-map tick.
+//
+// During the full DI migration, this will be removed and all game systems will
+// accept *Registry as a function parameter.
+//
+// init() initializes DefaultRegistry with a fresh Registry at package load so
+// tests and standalone code that haven't gone through the game loop still work.
+// Production code (perMapTick in systems/gameloop.go) overrides this with the
+// appropriate MapWorker.Registry on each tick.
+var DefaultRegistry *Registry
+
+func init() {
+	DefaultRegistry = NewRegistry()
+}
 
 // NewRegistry creates a new empty Registry with fresh component stores.
 func NewRegistry() *Registry {
@@ -470,17 +486,62 @@ func (r *Registry) NewEntity() Entity {
 }
 
 // RemoveEntity cleans up all components for an entity and recycles its ID.
+// Before deleting each component, it explicitly nils out any slice/map fields
+// and closes pooled resources (ThreatTable, PathCache) to prevent memory leaks
+// when entities are despawned. This ensures GC can reclaim internal data even
+// if the dense array slot is later swapped.
+//
 // Callers MUST also remove the entity from the SpatialGrid separately
 // (via the CommandBuffer's Destroy path or a direct grid.RemoveEntity call).
 //
 // Cảnh báo Concurrency: Hàm này không mang tính Transaction nguyên tử liên vùng.
 // Hoạt động an toàn tuyệt đối dưới cấu trúc vòng lặp game loop đơn luồng (Single-threaded worker framework).
 func (r *Registry) RemoveEntity(id Entity) {
+	// ── AI Component Cleanup ─────────────────────────────────────────────────
+	// Close pooled ThreatTable and release PathCache references before deletion
+	// so GC can reclaim them even if the dense array slot is swapped.
+	if ai, ok := r.ai.Get(id); ok {
+		if ai.ThreatTable != nil {
+			ai.ThreatTable.Close()
+			ai.ThreatTable = nil
+		}
+		if ai.PathCache != nil {
+			ai.PathCache.Reset() // Release internal state
+			ai.PathCache = nil
+		}
+		ai.CurrentPath = astar.PathResult{}
+		ai.PathFollowIdx = -1
+		r.ai.Set(id, ai)
+	}
+
+	// ── Effects Component Cleanup ────────────────────────────────────────────
+	// Nil the ActiveList slice so the underlying backing array (potentially large)
+	// can be reclaimed by the GC.
+	if effects, ok := r.effects.Get(id); ok {
+		effects.ActiveList = nil
+		r.effects.Set(id, effects)
+	}
+
+	// ── Inventory Component Cleanup ──────────────────────────────────────────
+	// Nil the Items map so the bucket entries and hash table memory are freed.
+	if inv, ok := r.inventories.Get(id); ok {
+		inv.Items = nil
+		r.inventories.Set(id, inv)
+	}
+
+	// ── Party Component Cleanup ──────────────────────────────────────────────
+	// Nil the MemberIDs slice to release the backing array.
+	if party, ok := r.parties.Get(id); ok {
+		party.MemberIDs = nil
+		r.parties.Set(id, party)
+	}
+
+	// ── Delete All Components ─────────────────────────────────────────────────
 	r.positions.Delete(id)
 	r.conns.Delete(id)
 	r.metadata.Delete(id)
 	r.stats.Delete(id)
-	r.ai.Delete(id) // Giải phóng thành phần trí tuệ AI.
+	r.ai.Delete(id)
 	r.inventories.Delete(id)
 	r.lifetimes.Delete(id)
 	r.itemTemplates.Delete(id)

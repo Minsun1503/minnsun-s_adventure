@@ -1,0 +1,34 @@
+[2026-06-05 01:24:45.256] [INFO ] [MCP] HTTP server shut down.
+[2026-06-05 11:54:01.032] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-05 11:54:01.065] [INFO ] [DATABASE] Relational system matrices initialized and ready.
+[2026-06-05 11:54:01.066] [INFO ] [SAVE BUFFER] Emergency buffer initialized at data\save_buffer\save_buffer_0.buf
+[2026-06-05 11:54:01.066] [INFO ] [PERSISTENCE] Asynchronous DB Save Worker thread active.
+[2026-06-05 11:54:01.077] [INFO ] [RECOVERY] No world snapshot marker found — no recovery data available.
+[2026-06-05 11:54:01.077] [INFO ] [BOOT] No crash recovery data — spawning fresh monsters.
+[2026-06-05 11:54:01.078] [INFO ] [BOOT] Loaded 3 monster templates.
+[2026-06-05 11:54:01.078] [INFO ] [SPAWN] Sea King (entity 1) at (30, 40) | HP:120 ATK:18 aggro:8 leash:16 melee:2
+[2026-06-05 11:54:01.078] [INFO ] [SPAWN] Bandit (entity 2) at (70, 20) | HP:60 ATK:10 aggro:12 leash:24 melee:2
+[2026-06-05 11:54:01.078] [INFO ] [SPAWN] Marine Guard (entity 3) at (50, 80) | HP:200 ATK:25 aggro:6 leash:12 melee:2
+[2026-06-05 11:54:01.078] [INFO ] [BOOT] Spawned 3 live monster instances into ECS.
+[2026-06-05 11:54:01.079] [INFO ] [BOOT] Server listening on [::]:1503
+[2026-06-05 11:54:01.079] [INFO ] [WORLD] Initialized global World instance.
+[2026-06-05 11:54:01.079] [INFO ] [WORLD] Cross-map transfer orchestrator started
+[2026-06-05 11:54:01.079] [INFO ] [WORLD] Started map 1
+[2026-06-05 11:54:01.079] [INFO ] [ENGINE] Heartbeat game loop started at 4 ticks/sec.
+[2026-06-05 11:54:01.079] [INFO ] [BOOT] Connection login worker #0 active.
+[2026-06-05 11:54:01.079] [INFO ] [BOOT] Connection login worker #1 active.
+[2026-06-05 11:54:01.079] [INFO ] [BOOT] Connection login worker #2 active.
+[2026-06-05 11:54:01.079] [INFO ] [BOOT] Connection login worker #3 active.
+[2026-06-05 11:54:01.082] [INFO ] [BOOT] MCP admin interface available on http://localhost:8080/mcp
+[2026-06-05 11:54:01.082] [INFO ] [MCP] JSON-RPC server listening on :8080
+[2026-06-05 11:54:01.083] [INFO ] [BOOT] Admin dashboard available on http://localhost:9090/
+[2026-06-05 11:54:01.083] [INFO ] [BOOT] Performance alert monitor started (5s interval).
+[2026-06-05 11:54:01.083] [INFO ] [BOOT] WebSocket transport listening on ws://localhost:8081/ws
+[2026-06-05 11:54:01.083] [INFO ] [BOOT] Periodic world snapshot started (interval: 5m0s).
+[2026-06-05 11:54:01.083] [INFO ] [SNAPSHOT] Periodic world snapshot started (interval: 5m0s).
+[2026-06-05 11:54:01.083] [INFO ] [BOOT] WebSocket listener starting on :8081/ws
+[2026-06-05 11:59:01.094] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 12:04:01.085] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 12:09:01.084] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 12:14:01.087] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields
+[2026-06-05 12:19:01.092] [ERROR] [SNAPSHOT] Failed to write snapshot: encode snapshot: gob: type timer.TickTimer has no exported fields

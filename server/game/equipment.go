@@ -15,13 +15,13 @@ func HandleEquipmentSystem(playerID ecs.Entity, itemID uint64) (string, bool) {
 	}
 
 	// 2. Verify player actually owns the target piece inside their inventory component
-	inv, hasInv := ecs.GlobalRegistry.GetInventory(playerID)
+	inv, hasInv := ecs.DefaultRegistry.GetInventory(playerID)
 	if !hasInv || inv.Items[itemID] <= 0 {
 		return fmt.Sprintf("Error: You do not own any %s!\r\n", item.Name), false
 	}
 
 	// 3. COPY: Pull active equipment layout rows
-	eq, _ := ecs.GlobalRegistry.GetEquipment(playerID)
+	eq, _ := ecs.DefaultRegistry.GetEquipment(playerID)
 
 	// 4. MODIFY: Assign the template ID to the matching slot channel
 	switch item.SlotType {
@@ -32,12 +32,12 @@ func HandleEquipmentSystem(playerID ecs.Entity, itemID uint64) (string, bool) {
 	}
 
 	// 5. OVERWRITE: Push modified data structs back lock-free
-	ecs.GlobalRegistry.SetEquipment(playerID, eq)
+	ecs.DefaultRegistry.SetEquipment(playerID, eq)
 
 	// 6. AGGREGATION LOOP STEP: Trigger calculations to rebuild combat attributes
 	RecalculateActiveStats(playerID)
 
-	meta, _ := ecs.GlobalRegistry.GetMetadata(playerID)
+	meta, _ := ecs.DefaultRegistry.GetMetadata(playerID)
 	notice := fmt.Sprintf("[GEAR]: Player %s equipped %s! Stats successfully calculated.\r\n", meta.Name, item.Name)
 	return notice, true
 }

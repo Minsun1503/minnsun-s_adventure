@@ -40,7 +40,7 @@ func createMockConn() (net.Conn, chan string) {
 }
 
 func TestMovementSystem(t *testing.T) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 	playerID := registry.NewEntity()
 
 	// Initialize components

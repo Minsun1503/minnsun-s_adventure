@@ -92,7 +92,7 @@ type DebugStateResponse struct {
 func (as *AdminServer) handleDebugState(w http.ResponseWriter, r *http.Request) {
 	players, monsters, items := 0, 0, 0
 
-	ecs.GlobalRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
+	ecs.DefaultRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
 		switch snap.Meta.Type {
 		case ecs.EntityPlayer:
 			players++
@@ -116,8 +116,8 @@ func (as *AdminServer) handleDebugState(w http.ResponseWriter, r *http.Request) 
 
 	// For the JSON response, we approximate via ECS range counts
 	// The actual grid entity count = all entities with positions
-	ecs.GlobalRegistry.RangeMetadata(func(id ecs.Entity, _ ecs.MetadataComponent) bool {
-		if _, hasPos := ecs.GlobalRegistry.GetPosition(id); hasPos {
+	ecs.DefaultRegistry.RangeMetadata(func(id ecs.Entity, _ ecs.MetadataComponent) bool {
+		if _, hasPos := ecs.DefaultRegistry.GetPosition(id); hasPos {
 			gridEntities++
 		}
 		return true
@@ -127,7 +127,7 @@ func (as *AdminServer) handleDebugState(w http.ResponseWriter, r *http.Request) 
 		OnlinePlayers: players,
 		TotalMonsters: monsters,
 		GroundItems:   items,
-		EntityIDMax:   ecs.GlobalRegistry.TotalEntityIDs(),
+		EntityIDMax:   ecs.DefaultRegistry.TotalEntityIDs(),
 		RecycledIDs:   ecs.RecycledEntityCount(),
 		ActiveChunks:  gridChunks,
 		GridEntities:  gridEntities,

@@ -198,7 +198,7 @@ func (h *Harness) printReport() {
 	active := ActiveBotCount()
 
 	// Fetch server-wide diagnostics
-	entityCount := ecs.GlobalRegistry.TotalEntityIDs()
+	entityCount := ecs.DefaultRegistry.TotalEntityIDs()
 	tickAvg := perf.GlobalTickMonitor.Avg()
 	tickMax := perf.GlobalTickMonitor.Max()
 

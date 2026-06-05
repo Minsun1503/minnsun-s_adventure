@@ -10,7 +10,7 @@ import (
 // It inspects their inline inventory row and resolves names from the item registry.
 func RunInventoryQuerySystem(playerID ecs.Entity) string {
 	// 1. Fetch the inline value copy from your TypedSyncMap table
-	inv, hasInv := ecs.GlobalRegistry.GetInventory(playerID)
+	inv, hasInv := ecs.DefaultRegistry.GetInventory(playerID)
 
 	// Boundary check: If no inventory component is assigned or it's completely empty
 	if !hasInv || len(inv.Items) == 0 {

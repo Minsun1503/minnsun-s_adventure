@@ -13,7 +13,7 @@ func init() {
 
 	Register("ecs_diagnostics", func(req Request) Response {
 		// Refresh diagnostics data
-		ecs.GlobalECSStats.RefreshDiagnostics(ecs.GlobalRegistry)
+		ecs.GlobalECSStats.RefreshDiagnostics(ecs.DefaultRegistry)
 
 		diag := ecs.GlobalECSStats.GetDiagnostics()
 
@@ -27,7 +27,7 @@ func init() {
 
 	Register("ecs_diagnostics_snapshot", func(req Request) Response {
 		// Lightweight snapshot (no full refresh)
-		ecs.GlobalECSStats.RefreshDiagnostics(ecs.GlobalRegistry)
+		ecs.GlobalECSStats.RefreshDiagnostics(ecs.DefaultRegistry)
 		snap := ecs.GlobalECSStats.Snapshot()
 
 		return rpcResult(req.ID, map[string]any{
@@ -40,7 +40,7 @@ func init() {
 	// ─── Leak Detector Tools ────────────────────────────────────────────────
 
 	Register("ecs_leak_scan", func(req Request) Response {
-		report := ecs.GlobalLeakDetector.Scan(ecs.GlobalRegistry)
+		report := ecs.GlobalLeakDetector.Scan(ecs.DefaultRegistry)
 
 		return rpcResult(req.ID, map[string]any{
 			"scan_time":          report.ScanTime,

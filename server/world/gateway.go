@@ -21,11 +21,11 @@ func writeConn(c net.Conn, data []byte) {
 // broadcastToMap sends data to all players on targetMapID.
 // Uses GlobalRegistry for backward compatibility during migration.
 func broadcastToMap(targetMapID int, data []byte) {
-	ecs.GlobalRegistry.RangeConnections(func(playerID ecs.Entity, netComp ecs.ConnectionComponent) bool {
+	ecs.DefaultRegistry.RangeConnections(func(playerID ecs.Entity, netComp ecs.ConnectionComponent) bool {
 		if netComp.Conn == nil {
 			return true
 		}
-		playerPos, posExists := ecs.GlobalRegistry.GetPosition(playerID)
+		playerPos, posExists := ecs.DefaultRegistry.GetPosition(playerID)
 		if posExists && playerPos.MapID == targetMapID {
 			writeConn(netComp.Conn, data)
 		}
@@ -65,12 +65,12 @@ func ExecuteMapTransfer(playerID ecs.Entity, targetMapID int, targetX int, targe
 	}
 
 	// 2. COPY: Fetch the player's current spatial position record
-	oldPos, exists := ecs.GlobalRegistry.GetPosition(playerID)
+	oldPos, exists := ecs.DefaultRegistry.GetPosition(playerID)
 	if !exists {
 		return "Warp Error: Your spatial position record was not found.\r\n", false
 	}
 
-	meta, _ := ecs.GlobalRegistry.GetMetadata(playerID)
+	meta, _ := ecs.DefaultRegistry.GetMetadata(playerID)
 	oldMapID := oldPos.MapID
 
 	// Phase 1: THE MAP EXIT
@@ -86,7 +86,7 @@ func ExecuteMapTransfer(playerID ecs.Entity, targetMapID int, targetX int, targe
 		oldPos.MapID = targetMapID
 		oldPos.X = targetX
 		oldPos.Z = targetZ
-		ecs.GlobalRegistry.SetPosition(playerID, oldPos)
+		ecs.DefaultRegistry.SetPosition(playerID, oldPos)
 		GlobalSpatialGrid.UpdateEntityPosition(playerID, oldPos)
 
 		// Enqueue cross-map transfer via orchestrator
@@ -96,7 +96,7 @@ func ExecuteMapTransfer(playerID ecs.Entity, targetMapID int, targetX int, targe
 		oldPos.MapID = targetMapID
 		oldPos.X = targetX
 		oldPos.Z = targetZ
-		ecs.GlobalRegistry.SetPosition(playerID, oldPos)
+		ecs.DefaultRegistry.SetPosition(playerID, oldPos)
 		GlobalSpatialGrid.UpdateEntityPosition(playerID, oldPos)
 	}
 

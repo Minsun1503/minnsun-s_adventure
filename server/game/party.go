@@ -11,7 +11,7 @@ const maxPartySize = 4
 // CreatePartySystem creates a new party entity and sets the leader as the first member.
 // Returns a formatted confirmation message ready to send to the leader.
 func CreatePartySystem(leaderID ecs.Entity, teamName string) string {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 
 	if _, already := registry.GetPartyMember(leaderID); already {
 		return "Error: You are already in a party. Leave your current party first.\r\n"
@@ -35,7 +35,7 @@ func CreatePartySystem(leaderID ecs.Entity, teamName string) string {
 
 // BroadcastToParty sends a text packet to every member of a party.
 func BroadcastToParty(partyID ecs.Entity, textPacket string) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 
 	party, ok := registry.GetParty(partyID)
 	if !ok {
@@ -52,7 +52,7 @@ func BroadcastToParty(partyID ecs.Entity, textPacket string) {
 // GetPlayerPartyID returns the party entity ID if the player is in a party,
 // or 0 if not.
 func GetPlayerPartyID(playerID ecs.Entity) ecs.Entity {
-	pm, ok := ecs.GlobalRegistry.GetPartyMember(playerID)
+	pm, ok := ecs.DefaultRegistry.GetPartyMember(playerID)
 	if !ok {
 		return 0
 	}
@@ -69,7 +69,7 @@ func GetPlayerPartyID(playerID ecs.Entity) ecs.Entity {
 // under the ECS sync.Map model: no other goroutine can observe a partially-appended
 // slice because the new slice is only visible after SetParty's atomic Store returns.
 func TryAddMemberToParty(partyID, playerID ecs.Entity) bool {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 
 	party, ok := registry.GetParty(partyID)
 	if !ok {
@@ -98,7 +98,7 @@ func TryAddMemberToParty(partyID, playerID ecs.Entity) bool {
 // PartyMemberComponent. Assumes caller has already validated the invite
 // and the party size limit.
 func AddMemberToParty(partyID, playerID ecs.Entity) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 
 	party, ok := registry.GetParty(partyID)
 	if !ok {
@@ -123,7 +123,7 @@ func AddMemberToParty(partyID, playerID ecs.Entity) {
 //   - If the player was the leader → promotes the next member.
 //   - Broadcasts a roster update to remaining members.
 func RemovePlayerFromParty(playerID ecs.Entity) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 
 	pm, ok := registry.GetPartyMember(playerID)
 	if !ok {
@@ -186,7 +186,7 @@ func RemovePlayerFromParty(playerID ecs.Entity) {
 // GetPartyMemberIDs returns a copy of the current roster for a party.
 // Returns nil if the party does not exist.
 func GetPartyMemberIDs(partyID ecs.Entity) []ecs.Entity {
-	party, ok := ecs.GlobalRegistry.GetParty(partyID)
+	party, ok := ecs.DefaultRegistry.GetParty(partyID)
 	if !ok {
 		return nil
 	}

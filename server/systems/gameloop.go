@@ -73,19 +73,25 @@ func StartGameLoop() {
 	}()
 }
 
-// perMapTick is the tick function for each MapWorker. During the migration phase,
-// it operates on ecs.GlobalRegistry with MapID filtering. Once per-map registries
-// are fully populated at boot, the reg variable below will switch to mw.Registry
-// for true per-map isolation.
-//
-// FUTURE: Replace ecs.GlobalRegistry below with mw.Registry once server.go
-// spawns entities into per-map registries instead of GlobalRegistry.
+// perMapTick is the tick function for each MapWorker.
+// It sets ecs.DefaultRegistry to the current MapWorker's per-map registry so
+// that all game systems (AttackSystem, MovementSystem, etc.) read/write the
+// correct per-map ECS state.
 func perMapTick(mapID int, tick uint64, cmdBuf *ecs.CommandBuffer) {
+	// Get the current MapWorker and install its per-map registry as the default.
+	mw := world.GlobalWorld.GetWorker(mapID)
+	if mw == nil {
+		return
+	}
+
+	// Install per-map registry + command buffer so all game systems operate
+	// on this map's isolated ECS state.
+	ecs.DefaultRegistry = mw.Registry
+
 	// Compute the current AI bucket from the global tick.
 	currentBucket := int(tick % AI_UPDATE_BUCKETS)
 
-	// FUTURE: mw := world.GlobalWorld.GetWorker(mapID); reg := mw.Registry
-	reg := ecs.GlobalRegistry
+	reg := mw.Registry
 
 	// Query monsters on this map and process AI.
 	reg.QueryPositionAI(func(id ecs.Entity, ai ecs.AIComponent, pos ecs.PositionComponent, stats ecs.StatsComponent) bool {
@@ -101,13 +107,21 @@ func perMapTick(mapID int, tick uint64, cmdBuf *ecs.CommandBuffer) {
 	})
 }
 
-// tickWorld does a single metadata scan per tick.
+// tickWorld does a single metadata scan per tick using the primary map's registry.
 // hasPlayers and monster processing happen in the same pass — no double scan.
 // Then dispatches ticks to all running maps for parallel simulation.
 func tickWorld(tick uint64) {
 	hasPlayers := false
 
-	ecs.GlobalRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
+	// Use map 1's registry for the global snapshot scan.
+	// Multi-map support will iterate over all map registries in the future.
+	mw := world.GlobalWorld.GetWorker(1)
+	if mw == nil {
+		return
+	}
+	reg := mw.Registry
+
+	reg.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
 		switch snap.Meta.Type {
 		case ecs.EntityPlayer:
 			hasPlayers = true
@@ -155,7 +169,13 @@ func debugLogMonsterState(snap ecs.EntitySnapshot) {
 
 // UpdateWorldEntitiesSystem — kept for external callers, now zero double-lookup.
 func UpdateWorldEntitiesSystem() {
-	ecs.GlobalRegistry.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
+	mw := world.GlobalWorld.GetWorker(1)
+	if mw == nil {
+		return
+	}
+	reg := mw.Registry
+
+	reg.RangeSnapshots(func(snap ecs.EntitySnapshot) bool {
 		if snap.Meta.Type != ecs.EntityMonster || !snap.HasPos || !snap.HasStats {
 			return true
 		}

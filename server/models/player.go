@@ -183,7 +183,7 @@ func RegisterNewAccount(username, passwordHash string) error {
 	}
 
 	// Generate entity ID and insert.
-	entityID := ecs.GlobalRegistry.NewEntity()
+	entityID := ecs.DefaultRegistry.NewEntity()
 
 	tx, err := DBEngine.BeginTx(ctx, nil)
 	if err != nil {
@@ -237,7 +237,7 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 	if saved != nil {
 		entityID = ecs.Entity(saved.CharacterID)
 	} else {
-		entityID = ecs.GlobalRegistry.NewEntity()
+		entityID = ecs.DefaultRegistry.NewEntity()
 	}
 
 	// Phase 3: Persist to database (only if brand new player).
@@ -270,23 +270,23 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 
 	// Phase 4: Register ECS components.
 	if saved != nil {
-		ecs.GlobalRegistry.SetPosition(entityID, saved.Pos)
-		ecs.GlobalRegistry.SetStats(entityID, saved.Stats)
-		ecs.GlobalRegistry.SetEquipment(entityID, saved.Equipment)
+		ecs.DefaultRegistry.SetPosition(entityID, saved.Pos)
+		ecs.DefaultRegistry.SetStats(entityID, saved.Stats)
+		ecs.DefaultRegistry.SetEquipment(entityID, saved.Equipment)
 
 		if len(saved.Inventory) > 0 {
-			ecs.GlobalRegistry.SetInventory(entityID, ecs.InventoryComponent{
+			ecs.DefaultRegistry.SetInventory(entityID, ecs.InventoryComponent{
 				Items: saved.Inventory,
 			})
 		}
 	} else {
-		ecs.GlobalRegistry.SetPosition(entityID, ecs.PositionComponent{MapID: 1, X: 0, Z: 0})
-		ecs.GlobalRegistry.SetStats(entityID, ecs.StatsComponent{Level: 1, XP: 0, HP: 100, MaxHP: 100, MP: 100, MaxMP: 100, Dam: 15, Attack: 15, HitRate: 850, DodgeRate: 100, CritRate: 50, CritDamage: 1500})
-		ecs.GlobalRegistry.SetEquipment(entityID, ecs.EquipmentComponent{WeaponID: 0, ArmorID: 0})
+		ecs.DefaultRegistry.SetPosition(entityID, ecs.PositionComponent{MapID: 1, X: 0, Z: 0})
+		ecs.DefaultRegistry.SetStats(entityID, ecs.StatsComponent{Level: 1, XP: 0, HP: 100, MaxHP: 100, MP: 100, MaxMP: 100, Dam: 15, Attack: 15, HitRate: 850, DodgeRate: 100, CritRate: 50, CritDamage: 1500})
+		ecs.DefaultRegistry.SetEquipment(entityID, ecs.EquipmentComponent{WeaponID: 0, ArmorID: 0})
 	}
 
-	ecs.GlobalRegistry.SetConnection(entityID, ecs.ConnectionComponent{Conn: conn})
-	ecs.GlobalRegistry.SetMetadata(entityID, ecs.MetadataComponent{Name: username, Type: ecs.EntityPlayer})
+	ecs.DefaultRegistry.SetConnection(entityID, ecs.ConnectionComponent{Conn: conn})
+	ecs.DefaultRegistry.SetMetadata(entityID, ecs.MetadataComponent{Name: username, Type: ecs.EntityPlayer})
 
 	// Track active player mapping.
 	ActivePlayers.Set(playerAddress, entityID)

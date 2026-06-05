@@ -17,11 +17,11 @@ func init() {
 		if err != nil {
 			return rpcError(req.ID, ErrCodeInvalidParams, err.Error())
 		}
-		connComp, ok := ecs.GlobalRegistry.GetConnection(id)
+		connComp, ok := ecs.DefaultRegistry.GetConnection(id)
 		if !ok || connComp.Conn == nil {
 			return rpcError(req.ID, ErrCodeInternal, fmt.Sprintf("entity %d has no active connection", id))
 		}
-		meta, _ := ecs.GlobalRegistry.GetMetadata(id)
+		meta, _ := ecs.DefaultRegistry.GetMetadata(id)
 		name := meta.Name
 		if name == "" {
 			name = fmt.Sprintf("entity_%d", id)
@@ -100,14 +100,14 @@ func init() {
 			p.Quantity = 1
 		}
 
-		inv, ok := ecs.GlobalRegistry.GetInventory(ecs.Entity(p.PlayerID))
+		inv, ok := ecs.DefaultRegistry.GetInventory(ecs.Entity(p.PlayerID))
 		if !ok {
 			inv = ecs.InventoryComponent{Items: make(map[uint64]int)}
 		} else {
 			inv = inv.Clone()
 		}
 		inv.Items[p.ItemTemplateID] += p.Quantity
-		ecs.GlobalRegistry.SetInventory(ecs.Entity(p.PlayerID), inv)
+		ecs.DefaultRegistry.SetInventory(ecs.Entity(p.PlayerID), inv)
 
 		return rpcResult(req.ID, map[string]any{
 			"status":        fmt.Sprintf("gave item %d x%d to player %d", p.ItemTemplateID, p.Quantity, p.PlayerID),
@@ -125,7 +125,7 @@ func init() {
 			return rpcError(req.ID, ErrCodeInvalidParams, "player_id, field, value are required")
 		}
 
-		stats, ok := ecs.GlobalRegistry.GetStats(ecs.Entity(p.PlayerID))
+		stats, ok := ecs.DefaultRegistry.GetStats(ecs.Entity(p.PlayerID))
 		if !ok {
 			return rpcError(req.ID, ErrCodeInternal, "player stats not found")
 		}
@@ -148,7 +148,7 @@ func init() {
 		default:
 			return rpcError(req.ID, ErrCodeInvalidParams, fmt.Sprintf("unknown field '%s'. valid fields: hp, max_hp, mp, max_mp, damage, level, xp", p.Field))
 		}
-		ecs.GlobalRegistry.SetStats(ecs.Entity(p.PlayerID), stats)
+		ecs.DefaultRegistry.SetStats(ecs.Entity(p.PlayerID), stats)
 
 		return rpcResult(req.ID, map[string]any{
 			"status": fmt.Sprintf("set %s = %d for player %d", p.Field, p.Value, p.PlayerID),

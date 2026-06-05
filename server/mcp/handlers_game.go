@@ -15,10 +15,10 @@ func init() {
 
 	Register("game_online_players", func(req Request) Response {
 		var players []EntityInfo
-		ecs.GlobalRegistry.RangeMetadata(func(id ecs.Entity, meta ecs.MetadataComponent) bool {
+		ecs.DefaultRegistry.RangeMetadata(func(id ecs.Entity, meta ecs.MetadataComponent) bool {
 			if meta.Type == ecs.EntityPlayer {
 				info := buildEntityInfo(id)
-				if _, hasConn := ecs.GlobalRegistry.GetConnection(id); hasConn {
+				if _, hasConn := ecs.DefaultRegistry.GetConnection(id); hasConn {
 					info.Type = "online"
 				}
 				players = append(players, info)
@@ -43,7 +43,7 @@ func init() {
 
 		// Inventory
 		invMap := make(map[string]any)
-		if inv, ok := ecs.GlobalRegistry.GetInventory(id); ok && len(inv.Items) > 0 {
+		if inv, ok := ecs.DefaultRegistry.GetInventory(id); ok && len(inv.Items) > 0 {
 			items := make([]map[string]any, 0)
 			for tid, qty := range inv.Items {
 				items = append(items, map[string]any{
@@ -58,9 +58,9 @@ func init() {
 
 		// Party info
 		partyInfo := map[string]any{}
-		if pm, ok := ecs.GlobalRegistry.GetPartyMember(id); ok {
+		if pm, ok := ecs.DefaultRegistry.GetPartyMember(id); ok {
 			partyInfo["party_id"] = uint64(pm.PartyID)
-			if party, ok := ecs.GlobalRegistry.GetParty(pm.PartyID); ok {
+			if party, ok := ecs.DefaultRegistry.GetParty(pm.PartyID); ok {
 				partyInfo["team_name"] = party.TeamName
 				members := make([]uint64, len(party.MemberIDs))
 				for i, m := range party.MemberIDs {
@@ -79,7 +79,7 @@ func init() {
 
 	Register("game_monster_list", func(req Request) Response {
 		var monsters []map[string]any
-		ecs.GlobalRegistry.RangeAI(func(id ecs.Entity, ai ecs.AIComponent) bool {
+		ecs.DefaultRegistry.RangeAI(func(id ecs.Entity, ai ecs.AIComponent) bool {
 			info := buildEntityInfo(id)
 			monsters = append(monsters, map[string]any{
 				"id":       uint64(id),
@@ -186,7 +186,7 @@ func init() {
 		entityCount := 0
 		playerCount := 0
 		monsterCount := 0
-		ecs.GlobalRegistry.RangeMetadata(func(_ ecs.Entity, meta ecs.MetadataComponent) bool {
+		ecs.DefaultRegistry.RangeMetadata(func(_ ecs.Entity, meta ecs.MetadataComponent) bool {
 			entityCount++
 			switch meta.Type {
 			case ecs.EntityPlayer:

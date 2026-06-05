@@ -14,7 +14,7 @@ func RouteChatMessage(senderID ecs.Entity, rawMessage string) {
 		return
 	}
 
-	meta, hasMeta := ecs.GlobalRegistry.GetMetadata(senderID)
+	meta, hasMeta := ecs.DefaultRegistry.GetMetadata(senderID)
 	if !hasMeta {
 		return
 	}
@@ -29,7 +29,7 @@ func RouteChatMessage(senderID ecs.Entity, rawMessage string) {
 		}
 		frame := broadcast.BuildChatMessage(chatPayload)
 
-		if memberComp, isGrouped := ecs.GlobalRegistry.GetPartyMember(senderID); isGrouped {
+		if memberComp, isGrouped := ecs.DefaultRegistry.GetPartyMember(senderID); isGrouped {
 			BroadcastToPartyBinary(memberComp.PartyID, frame)
 		} else {
 			SendNoticeSystem(senderID, broadcast.BuildNotice(broadcast.NoticePayload{Message: "Error: You are not currently inside an active party group!"}))
@@ -48,7 +48,7 @@ func RouteChatMessage(senderID ecs.Entity, rawMessage string) {
 
 	} else {
 		// LOCAL MAP CHAT CHANNEL (DEFAULT FALLBACK)
-		pos, hasPos := ecs.GlobalRegistry.GetPosition(senderID)
+		pos, hasPos := ecs.DefaultRegistry.GetPosition(senderID)
 		if !hasPos {
 			return
 		}
@@ -73,7 +73,7 @@ func stripChatPrefix(msg string) string {
 // Deprecated: kept for backward compatibility with text-based systems
 func BroadcastToWorld(textPacket string) {
 	bytePayload := []byte(textPacket)
-	ecs.GlobalRegistry.RangeConnections(func(id ecs.Entity, connComp ecs.ConnectionComponent) bool {
+	ecs.DefaultRegistry.RangeConnections(func(id ecs.Entity, connComp ecs.ConnectionComponent) bool {
 		if connComp.Conn != nil {
 			SendNoticeSystem(id, bytePayload)
 		}
@@ -82,7 +82,7 @@ func BroadcastToWorld(textPacket string) {
 }
 
 func BroadcastToWorldBinary(frame []byte) {
-	ecs.GlobalRegistry.RangeConnections(func(id ecs.Entity, connComp ecs.ConnectionComponent) bool {
+	ecs.DefaultRegistry.RangeConnections(func(id ecs.Entity, connComp ecs.ConnectionComponent) bool {
 		if connComp.Conn != nil {
 			_, _ = connComp.Conn.Write(frame)
 		}
@@ -91,7 +91,7 @@ func BroadcastToWorldBinary(frame []byte) {
 }
 
 func BroadcastToPartyBinary(partyID ecs.Entity, frame []byte) {
-	registry := ecs.GlobalRegistry
+	registry := ecs.DefaultRegistry
 	party, ok := registry.GetParty(partyID)
 	if !ok {
 		return

@@ -12,7 +12,7 @@ func RunStatusEffectsSystem() {
 	now := time.Now()
 	tickInterval := 250 * time.Millisecond
 
-	ecs.GlobalRegistry.RangeEffects(func(id ecs.Entity, effComp ecs.EffectsComponent) bool {
+	ecs.DefaultRegistry.RangeEffects(func(id ecs.Entity, effComp ecs.EffectsComponent) bool {
 		if len(effComp.ActiveList) == 0 {
 			return true
 		}
@@ -23,8 +23,8 @@ func RunStatusEffectsSystem() {
 		forceStatRecalc := false
 
 		// Fetch metadata for logging purposes
-		meta, _ := ecs.GlobalRegistry.GetMetadata(id)
-		pos, posOk := ecs.GlobalRegistry.GetPosition(id)
+		meta, _ := ecs.DefaultRegistry.GetMetadata(id)
+		pos, posOk := ecs.DefaultRegistry.GetPosition(id)
 
 		for _, effect := range effComp.ActiveList {
 			// 1. Tick down total lifespan duration frames
@@ -45,7 +45,7 @@ func RunStatusEffectsSystem() {
 			if effect.Type == "poison" || effect.Type == "burn" {
 				if now.Sub(effect.LastTickTime) >= 1*time.Second {
 					// COPY STATS OUT
-					stats, hasStats := ecs.GlobalRegistry.GetStats(id)
+					stats, hasStats := ecs.DefaultRegistry.GetStats(id)
 					if hasStats && stats.HP > 0 {
 						// MODIFY
 						stats.HP -= effect.Value
@@ -54,7 +54,7 @@ func RunStatusEffectsSystem() {
 						}
 
 						// OVERWRITE
-						ecs.GlobalRegistry.SetStats(id, stats)
+						ecs.DefaultRegistry.SetStats(id, stats)
 						effect.LastTickTime = now
 
 						if posOk {
@@ -81,7 +81,7 @@ func RunStatusEffectsSystem() {
 
 		// 3. Commit remaining active statuses back to data grids
 		effComp.ActiveList = activeRemaining
-		ecs.GlobalRegistry.SetEffects(id, effComp)
+		ecs.DefaultRegistry.SetEffects(id, effComp)
 
 		// If a major buff expired, re-run aggregation logic immediately to strip bonus points
 		if forceStatRecalc && meta.Type == ecs.EntityPlayer {

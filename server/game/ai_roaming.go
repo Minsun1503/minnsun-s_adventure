@@ -12,7 +12,7 @@ import (
 // TickAI là điểm vào duy nhất của mỗi thực thể AI quái vật tại mỗi vòng lặp game loop.
 // Toàn bộ logic đếm thời gian được nén gọn qua các lệnh Advance() của TickTimer.
 func TickAI(id ecs.Entity) {
-	ai, ok := ecs.GlobalRegistry.GetAI(id)
+	ai, ok := ecs.DefaultRegistry.GetAI(id)
 	if !ok {
 		return
 	}
@@ -36,7 +36,7 @@ func TickAI(id ecs.Entity) {
 	}
 
 	// Ghi đè trạng thái đột biến ngược trở lại Registry (Copy-Modify-Overwrite)
-	ecs.GlobalRegistry.SetAI(id, ai)
+	ecs.DefaultRegistry.SetAI(id, ai)
 }
 
 // ─── PATH FOLLOWING HELPERS ──────────────────────────────────────────────────
@@ -117,8 +117,8 @@ func tickIdle(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 	// 1. Check threat-based aggro: if a player has accumulated threat, chase them
 	if ai.ThreatTable != nil && ai.ThreatTable.Len() > 0 {
 		if topPlayerID, topThreat := ai.ThreatTable.Top(); topThreat > 0 {
-			if targetPos, ok := ecs.GlobalRegistry.GetPosition(ecs.Entity(topPlayerID)); ok {
-				if myPos, ok := ecs.GlobalRegistry.GetPosition(id); ok {
+			if targetPos, ok := ecs.DefaultRegistry.GetPosition(ecs.Entity(topPlayerID)); ok {
+				if myPos, ok := ecs.DefaultRegistry.GetPosition(id); ok {
 					if gmath.InRangeInt(myPos.X, myPos.Z, targetPos.X, targetPos.Z, int(ai.AggroRadius)) {
 						ai.TargetID = ecs.Entity(topPlayerID)
 						MonsterFSMSend(id, &ai, MonsterEvAggro)
@@ -159,7 +159,7 @@ func tickRoaming(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 		return ai
 	}
 
-	pos, ok := ecs.GlobalRegistry.GetPosition(id)
+	pos, ok := ecs.DefaultRegistry.GetPosition(id)
 	if !ok {
 		MonsterFSMSend(id, &ai, MonsterEvPathDone)
 		return ai
@@ -214,20 +214,20 @@ func tickChasing(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 		ai.ThreatTable.Decay()
 		// Switch target if another player has higher threat
 		if topID, topThreat := ai.ThreatTable.Top(); topThreat > 0 && ecs.Entity(topID) != ai.TargetID {
-			if _, ok := ecs.GlobalRegistry.GetPosition(ecs.Entity(topID)); ok {
+			if _, ok := ecs.DefaultRegistry.GetPosition(ecs.Entity(topID)); ok {
 				ai.TargetID = ecs.Entity(topID)
 			}
 		}
 	}
 
-	targetPos, ok := ecs.GlobalRegistry.GetPosition(ai.TargetID)
+	targetPos, ok := ecs.DefaultRegistry.GetPosition(ai.TargetID)
 	if !ok {
 		ai.TargetID = 0
 		MonsterFSMSend(id, &ai, MonsterEvLostTarget)
 		return ai
 	}
 
-	myPos, ok := ecs.GlobalRegistry.GetPosition(id)
+	myPos, ok := ecs.DefaultRegistry.GetPosition(id)
 	if !ok {
 		return ai
 	}
@@ -267,8 +267,8 @@ func tickAttacking(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 		return ai
 	}
 
-	targetPos, targetOk := ecs.GlobalRegistry.GetPosition(ai.TargetID)
-	myPos, myOk := ecs.GlobalRegistry.GetPosition(id)
+	targetPos, targetOk := ecs.DefaultRegistry.GetPosition(ai.TargetID)
+	myPos, myOk := ecs.DefaultRegistry.GetPosition(id)
 	if !targetOk || !myOk {
 		ai.TargetID = 0
 		MonsterFSMSend(id, &ai, MonsterEvLostTarget)
@@ -315,7 +315,7 @@ func tickAttacking(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 }
 
 func tickReturning(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
-	pos, ok := ecs.GlobalRegistry.GetPosition(id)
+	pos, ok := ecs.DefaultRegistry.GetPosition(id)
 	if !ok {
 		return ai
 	}
@@ -323,7 +323,7 @@ func tickReturning(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 	// Check aggro while returning: player may follow monster back
 	if ai.ThreatTable != nil && ai.ThreatTable.Len() > 0 {
 		if topPlayerID, topThreat := ai.ThreatTable.Top(); topThreat > 0 {
-			if targetPos, ok := ecs.GlobalRegistry.GetPosition(ecs.Entity(topPlayerID)); ok {
+			if targetPos, ok := ecs.DefaultRegistry.GetPosition(ecs.Entity(topPlayerID)); ok {
 				if gmath.InRangeInt(pos.X, pos.Z, targetPos.X, targetPos.Z, int(ai.AggroRadius)) {
 					ai.TargetID = ecs.Entity(topPlayerID)
 					MonsterFSMSend(id, &ai, MonsterEvAggro)
@@ -364,7 +364,7 @@ func tickReturning(id ecs.Entity, ai ecs.AIComponent) ecs.AIComponent {
 
 // pickRoamTarget tính toán tọa độ di chuyển ngẫu nhiên tự nhiên quanh vùng spawn.
 func pickRoamTarget(id ecs.Entity, ai ecs.AIComponent) (int, int, bool) {
-	pos, ok := ecs.GlobalRegistry.GetPosition(id)
+	pos, ok := ecs.DefaultRegistry.GetPosition(id)
 	if !ok {
 		return 0, 0, false
 	}

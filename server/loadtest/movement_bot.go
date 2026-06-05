@@ -61,7 +61,7 @@ func TickMovementBots() int {
 // Used for bot respawning after death or repositioning.
 func TeleportBot(bot *PlayerBotState, x, z int) {
 	pos := ecs.PositionComponent{MapID: bot.MapID, X: x, Z: z}
-	ecs.GlobalRegistry.SetPosition(bot.ID, pos)
+	ecs.DefaultRegistry.SetPosition(bot.ID, pos)
 	world.GlobalSpatialGrid.UpdateEntityPosition(bot.ID, pos)
 	bot.X = x
 	bot.Z = z

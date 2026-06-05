@@ -74,11 +74,11 @@ func FlushSaveQueue() {
 // drains the queue. Position and stats are value-type fields (copied by value out of
 // sync.Map) so they are inherently snapshot-safe as well.
 func QueuePlayerSave(playerID ecs.Entity) {
-	meta, _ := ecs.GlobalRegistry.GetMetadata(playerID)
-	pos, _ := ecs.GlobalRegistry.GetPosition(playerID)
-	stats, _ := ecs.GlobalRegistry.GetStats(playerID)
+	meta, _ := ecs.DefaultRegistry.GetMetadata(playerID)
+	pos, _ := ecs.DefaultRegistry.GetPosition(playerID)
+	stats, _ := ecs.DefaultRegistry.GetStats(playerID)
 
-	inv, hasInv := ecs.GlobalRegistry.GetInventory(playerID)
+	inv, hasInv := ecs.DefaultRegistry.GetInventory(playerID)
 	var invCopy = make(map[uint64]int)
 	if hasInv {
 		// Snapshot deep copy of the map reference to prevent multi-thread data race conflicts
@@ -87,7 +87,7 @@ func QueuePlayerSave(playerID ecs.Entity) {
 		}
 	}
 
-	eq, hasEq := ecs.GlobalRegistry.GetEquipment(playerID)
+	eq, hasEq := ecs.DefaultRegistry.GetEquipment(playerID)
 	if !hasEq {
 		eq = ecs.EquipmentComponent{WeaponID: 0, ArmorID: 0}
 	}

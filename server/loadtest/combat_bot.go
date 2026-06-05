@@ -28,7 +28,7 @@ func TickCombatBots() int {
 
 		// If the bot already has a target, check if it's still alive.
 		if bot.TargetID != 0 {
-			if targetStats, ok := ecs.GlobalRegistry.GetStats(bot.TargetID); ok && targetStats.HP > 0 {
+			if targetStats, ok := ecs.DefaultRegistry.GetStats(bot.TargetID); ok && targetStats.HP > 0 {
 				// Target still alive — keep attacking.
 				_, errMsg := game.AttackSystem(bot.ID, bot.TargetID)
 				if errMsg == "" {

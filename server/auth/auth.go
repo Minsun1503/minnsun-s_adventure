@@ -149,7 +149,7 @@ func processLogin(conn net.Conn) {
 
 		_ = conn.SetReadDeadline(time.Time{})
 
-		snap, ok := ecs.GlobalRegistry.GetSnapshot(playerEntity)
+		snap, ok := ecs.DefaultRegistry.GetSnapshot(playerEntity)
 		if !ok {
 			conn.Close()
 			return

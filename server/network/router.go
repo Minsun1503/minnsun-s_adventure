@@ -49,7 +49,7 @@ func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 	// Deferred cleanup: broadcast logout, remove from ECS, close socket.
 	defer func() {
 		name := snap.Meta.Name
-		if live, ok := ecs.GlobalRegistry.GetMetadata(playerEntity); ok {
+		if live, ok := ecs.DefaultRegistry.GetMetadata(playerEntity); ok {
 			name = live.Name
 		}
 		game.GlobalTradeRegistry.CancelTradeSession(playerEntity)
@@ -57,7 +57,7 @@ func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		db.QueuePlayerSave(playerEntity)
 		world.UnregisterPlayerAOI(playerEntity)
 		world.GlobalSpatialGrid.RemoveEntity(playerEntity)
-		ecs.GlobalRegistry.RemoveEntity(playerEntity)
+		ecs.DefaultRegistry.RemoveEntity(playerEntity)
 		models.ActivePlayers.Delete(conn.RemoteAddr().String())
 		logger.Info("[DISCONNECT] %s (%s)", name, conn.RemoteAddr())
 		systems.BroadcastSystem(
