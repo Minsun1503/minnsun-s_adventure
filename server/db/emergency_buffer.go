@@ -120,7 +120,7 @@ func TryWriteToQueue(snap SaveSnapshot) bool {
 // successfully drained pending snapshots.
 //
 // The buffer files are deleted after successful replay.
-func (sb *SaveBuffer) DrainBuffer() {
+func (sb *SaveBuffer) DrainBuffer(outChan chan<- SaveSnapshot) {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 
@@ -165,13 +165,13 @@ func (sb *SaveBuffer) DrainBuffer() {
 			}
 			// Push back to queue (non-blocking, best-effort)
 			select {
-			case SaveQueue <- snap:
+			case outChan <- snap:
 				replayed++
 			default:
 				// Channel is full again — write back to a new buffer file
 				// (This is extremely unlikely during replay)
 				logger.Warn("[SAVE BUFFER] Queue still full during replay — re-buffering entity #%d", snap.EntityID)
-				GlobalSaveBuffer.Append(snap)
+				sb.Append(snap)
 			}
 		}
 		f.Close()

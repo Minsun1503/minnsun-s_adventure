@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"net"
 	"os"
 	"os/signal"
@@ -23,6 +24,9 @@ import (
 )
 
 func main() {
+	devMode := flag.Bool("dev", false, "Chạy server ở chế độ Development (không cần Database)")
+	flag.Parse()
+
 	logger.Init() // Must be first: reads data/config.json, starts async log worker
 
 	game.InitializeItemRegistry()
@@ -48,7 +52,13 @@ func main() {
 		}
 	}
 
-	models.InitializeDatabase("root:root@tcp(127.0.0.1:3306)/?parseTime=true")
+	if *devMode {
+		logger.Info("[BOOT] Khởi động bằng cờ -dev: Bỏ qua kết nối MySQL.")
+		models.InitializeDatabase("")
+	} else {
+		models.InitializeDatabase("root:root@tcp(127.0.0.1:3306)/?parseTime=true")
+	}
+	
 	db.StartSaveWorkerEngine()
 
 	// Initialize the ECS Entity ID counter to the maximum character ID in the DB to avoid session ID collisions.
@@ -111,7 +121,7 @@ func main() {
 	world.InitAOIManager()
 
 	systems.StartGameLoop()
-	auth.StartLoginWorkerPool(4) // Start 4 connection login workers to process db queue
+	auth.StartLoginWorkerPool(100) // Start 100 connection login workers for mass testing
 
 	// Start the MCP JSON-RPC HTTP server for AI agent inspection.
 	// Uses port 8080 by default; configure via MCP_PORT env var or data/config.json.

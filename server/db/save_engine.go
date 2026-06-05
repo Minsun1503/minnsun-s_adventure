@@ -65,7 +65,8 @@ func StartSaveWorkerEngine() {
 			logger.Info("[PERSISTENCE] Replaying %d buffered snapshots from emergency buffer...", pending)
 			// Re-open a temporary channel and replay into it synchronously.
 			tmpQueue := make(chan SaveSnapshot, cap(SaveQueue))
-			GlobalSaveBuffer.DrainBuffer()
+			GlobalSaveBuffer.DrainBuffer(tmpQueue)
+			close(tmpQueue) // Đóng channel để vòng lặp bên dưới có thể kết thúc sau khi drain xong
 
 			// Drain the replayed snapshots
 			for snap := range tmpQueue {
@@ -175,6 +176,12 @@ func QueuePlayerSave(playerID ecs.Entity) {
 }
 
 func executeWriteToSQL(snap SaveSnapshot) {
+	if models.DBEngine == nil {
+		// Ở dev_mode, ta không có kết nối DB để lưu. Chỉ log giả lập hoặc bỏ qua.
+		logger.Debug("[DB SAVE] Dev mode active. Skipped SQL write for entity #%d", snap.EntityID)
+		return
+	}
+
 	const maxRetries = 3
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {

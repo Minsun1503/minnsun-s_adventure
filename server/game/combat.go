@@ -72,6 +72,11 @@ func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
 		return CombatResult{}, fmt.Sprintf("%s is already dead.\r\n", targetMeta.Name)
 	}
 
+	// ← NEW: prevent attacking entities that are currently transferring between maps
+	if ai, hasAI := registry.GetAI(targetID); hasAI && ai.State == ecs.AIStateTransferring {
+		return CombatResult{}, fmt.Sprintf("%s is currently invulnerable (transferring).\r\n", targetMeta.Name)
+	}
+
 	// ← NEW: range check using spatial system
 	if !world.IsInRange(attackerID, targetID, meleeRange) {
 		targetMeta, _ := ecs.DefaultRegistry.GetMetadata(targetID)

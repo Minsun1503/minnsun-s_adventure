@@ -3,6 +3,7 @@ package aoi
 import (
 	"server/ecs"
 	"server/peakgo/pool"
+	"sync"
 )
 
 // EventType describes what happened to a neighbor within an entity's AOI.
@@ -53,6 +54,7 @@ type AOIEventCallback func(watcher ecs.Entity, event AOIEvent) bool
 
 // AOIManager manages AOI watchers and computes enter/leave deltas.
 type AOIManager struct {
+	mu       sync.RWMutex
 	watchers map[ecs.Entity]*Watcher
 }
 
@@ -65,6 +67,8 @@ func NewAOIManager() *AOIManager {
 
 // RegisterWatcher adds an entity to be tracked for AOI changes.
 func (m *AOIManager) RegisterWatcher(entity ecs.Entity, radius float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.watchers[entity] = &Watcher{
 		owner:    entity,
 		radius:   radius,
@@ -74,6 +78,8 @@ func (m *AOIManager) RegisterWatcher(entity ecs.Entity, radius float64) {
 
 // UnregisterWatcher removes an entity from AOI tracking.
 func (m *AOIManager) UnregisterWatcher(entity ecs.Entity) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.watchers, entity)
 }
 
@@ -86,7 +92,23 @@ func (m *AOIManager) UpdateAll(
 	query SpatialQueryFunc,
 	onEvent AOIEventCallback,
 ) {
-	for id, w := range m.watchers {
+	m.mu.RLock()
+	// Tạm thời clone ra danh sách keys để nhả lock sớm nhất có thể
+	// tránh block các goroutine network đang cố gắng Unregister khi player disconnect
+	watchersToUpdate := make([]ecs.Entity, 0, len(m.watchers))
+	for id := range m.watchers {
+		watchersToUpdate = append(watchersToUpdate, id)
+	}
+	m.mu.RUnlock()
+
+	for _, id := range watchersToUpdate {
+		m.mu.RLock()
+		w, exists := m.watchers[id]
+		m.mu.RUnlock()
+		if !exists {
+			continue
+		}
+
 		pos, ok := posGetter(id)
 		if !ok {
 			continue
@@ -152,7 +174,9 @@ func sliceContainsEntity(slice []ecs.Entity, target ecs.Entity) bool {
 //
 // Deprecated: Prefer UpdateAll with callback for zero-allocation hot-path.
 func (m *AOIManager) UpdateOne(entity ecs.Entity, pos ecs.PositionComponent, query SpatialQueryFunc) *[]AOIEvent {
+	m.mu.RLock()
 	w, ok := m.watchers[entity]
+	m.mu.RUnlock()
 	if !ok {
 		return nil
 	}
@@ -194,5 +218,7 @@ func (m *AOIManager) UpdateOne(entity ecs.Entity, pos ecs.PositionComponent, que
 
 // WatcherCount returns the number of registered watchers.
 func (m *AOIManager) WatcherCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return len(m.watchers)
 }
