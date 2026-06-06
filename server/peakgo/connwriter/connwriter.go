@@ -8,6 +8,9 @@
 // Zero-alloc on the hot-path: Send() does no heap allocations. The only allocations
 // happen when writing to the net.Conn (syscall boundary) which is unavoidable.
 //
+// Global observability counters (GlobalDrops, GlobalSent, SlowClients) allow the
+// monitoring goroutine to track queue pressure across all connections.
+//
 // Usage:
 //
 //	w := connwriter.New(tcpConn, 256)
@@ -24,6 +27,13 @@ import (
 	"sync/atomic"
 )
 
+// Global packet send counters aggregated across all Writers for observability.
+var (
+	GlobalDrops atomic.Uint64 // Total dropped packets across all Writers
+	GlobalSent  atomic.Uint64 // Total successfully sent packets across all Writers
+	SlowClients atomic.Uint64 // Number of connections at full queue capacity at drop time
+)
+
 // Writer manages a non-blocking outbound queue for a single TCP connection.
 // The game tick calls Send() which is a channel send — O(1), no syscall.
 // A dedicated goroutine drains the channel and calls netio.WritePacket().
@@ -32,6 +42,8 @@ type Writer struct {
 	queue  chan []byte
 	closed atomic.Bool
 	wg     sync.WaitGroup
+	drops  atomic.Uint64 // Frames dropped (queue full) for this Writer
+	sent   atomic.Uint64 // Frames successfully sent for this Writer
 }
 
 // sentinelNil is a nil byte slice sentinel used to signal clean shutdown on the queue.
@@ -110,6 +122,7 @@ func (w *Writer) drain() {
 // Returns true if the frame was queued successfully, false if the queue is full
 // (client is too slow or dead) or the writer is closed.
 //
+// Increments per-Writer and global counters atomically (zero-alloc).
 // The caller must NOT retain or reuse the frame slice after calling Send() —
 // the frame is passed directly to the channel and will be read by the drain goroutine.
 func (w *Writer) Send(frame []byte) bool {
@@ -118,9 +131,17 @@ func (w *Writer) Send(frame []byte) bool {
 	}
 	select {
 	case w.queue <- frame:
+		w.sent.Add(1)
+		GlobalSent.Add(1)
 		return true
 	default:
 		// Queue full — drop frame silently (slow client protection)
+		w.drops.Add(1)
+		GlobalDrops.Add(1)
+		// If queue is already at max capacity, count this as a slow client
+		if len(w.queue) == cap(w.queue) {
+			SlowClients.Add(1)
+		}
 		return false
 	}
 }
@@ -153,4 +174,19 @@ func (w *Writer) Release() {
 // Callers must call this after Close() and before Release().
 func (w *Writer) Wait() {
 	w.wg.Wait()
+}
+
+// QueueLen returns the current number of frames in the queue.
+func (w *Writer) QueueLen() int {
+	return len(w.queue)
+}
+
+// Drops returns the total number of dropped frames for this Writer.
+func (w *Writer) Drops() uint64 {
+	return w.drops.Load()
+}
+
+// Sent returns the total number of successfully sent frames for this Writer.
+func (w *Writer) Sent() uint64 {
+	return w.sent.Load()
 }

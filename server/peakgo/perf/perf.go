@@ -103,6 +103,38 @@ func (tm *TickMonitor) Count() uint64 { return atomic.LoadUint64(&tm.position) }
 // Overflow returns the number of ticks beyond the ring buffer capacity.
 func (tm *TickMonitor) Overflow() uint64 { return atomic.LoadUint64(&tm.overflow) }
 
+// P99 returns the 99th percentile tick duration by sorting the ring buffer.
+// This is NOT a hot-path function — call from monitoring goroutine only.
+// Allocates a slice for sorting.
+func (tm *TickMonitor) P99() time.Duration {
+	pos := atomic.LoadUint64(&tm.position)
+	n := pos
+	if n > RingBufferSize {
+		n = RingBufferSize
+	}
+	if n == 0 {
+		return 0
+	}
+	// Copy buffer entries into a slice for sorting
+	vals := make([]int64, n)
+	offset := pos % RingBufferSize
+	for i := uint64(0); i < n; i++ {
+		vals[i] = tm.buffer[(offset+i)%RingBufferSize]
+	}
+	// Partial sort: we only need to order until index 99% (quickselect-style)
+	// But for simplicity with small n, just sort entirely.
+	for i := uint64(1); i < n; i++ {
+		for j := i; j > 0 && vals[j] < vals[j-1]; j-- {
+			vals[j], vals[j-1] = vals[j-1], vals[j]
+		}
+	}
+	idx := uint64(float64(n) * 0.99)
+	if idx >= n {
+		idx = n - 1
+	}
+	return time.Duration(vals[idx])
+}
+
 // Reset clears all recorded data.
 func (tm *TickMonitor) Reset() {
 	tm.minDur = 0
@@ -172,6 +204,8 @@ type MemSnapshot struct {
 	Alloc       uint64        // Current heap allocation
 	TotalAlloc  uint64        // Cumulative heap allocation
 	Sys         uint64        // Total memory obtained from OS
+	HeapSys     uint64        // Memory obtained from OS for heap
+	StackSys    uint64        // Memory obtained from OS for stack (goroutine stacks)
 	NumGC       uint32        // Number of completed GC cycles
 	PauseTotal  time.Duration // Total GC pause time
 	LastPause   time.Duration // Most recent GC pause
@@ -211,6 +245,8 @@ func (mm *MemMonitor) Sample() *MemSnapshot {
 		Alloc:       m.Alloc,
 		TotalAlloc:  m.TotalAlloc,
 		Sys:         m.Sys,
+		HeapSys:     m.HeapSys,
+		StackSys:    m.StackSys,
 		NumGC:       m.NumGC,
 		PauseTotal:  time.Duration(m.PauseTotalNs),
 		LastPause:   time.Duration(m.PauseNs[(m.NumGC+255)%256]),
@@ -234,10 +270,10 @@ type PacketMonitor struct {
 	packetsOut uint64 // Total packets sent
 	bytesIn    uint64 // Total bytes received
 	bytesOut   uint64 // Total bytes sent
-	peakIn       uint64 // Peak inbound packets per second
-	peakOut      uint64 // Peak outbound packets per second
-	aoiQueries   uint64 // Total AOI queries executed
-	broadcasts   uint64 // Total Broadcast packets sent
+	peakIn     uint64 // Peak inbound packets per second
+	peakOut    uint64 // Peak outbound packets per second
+	aoiQueries uint64 // Total AOI queries executed
+	broadcasts uint64 // Total Broadcast packets sent
 }
 
 // RecordIn records an inbound packet.
@@ -291,6 +327,7 @@ type Report struct {
 	TickMin     time.Duration
 	TickMax     time.Duration
 	TickAvg     time.Duration
+	TickP99     time.Duration
 	TickCount   uint64
 	PacketsIn   uint64
 	PacketsOut  uint64
@@ -300,6 +337,9 @@ type Report struct {
 	Broadcasts  uint64
 	Alloc       uint64
 	HeapObjects uint64
+	Sys         uint64
+	HeapSys     uint64
+	StackSys    uint64
 	Goroutines  int
 	NumGC       uint32
 }
@@ -311,6 +351,7 @@ func Collect(tm *TickMonitor, pm *PacketMonitor, mm *MemMonitor) Report {
 		TickMin:    tm.Min(),
 		TickMax:    tm.Max(),
 		TickAvg:    tm.Avg(),
+		TickP99:    tm.P99(),
 		TickCount:  tm.Count(),
 		Goroutines: runtime.NumGoroutine(),
 	}
@@ -321,6 +362,9 @@ func Collect(tm *TickMonitor, pm *PacketMonitor, mm *MemMonitor) Report {
 		report.Alloc = snap.Alloc
 		report.HeapObjects = snap.HeapObjects
 		report.NumGC = snap.NumGC
+		report.Sys = snap.Sys
+		report.HeapSys = snap.HeapSys
+		report.StackSys = snap.StackSys
 	}
 
 	return report

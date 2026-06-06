@@ -20,6 +20,7 @@ import (
 	"server/models"
 	"server/network"
 	"server/peakgo/config"
+	"server/peakgo/connwriter"
 	"server/peakgo/perf"
 	"server/protocol"
 	"server/systems"
@@ -171,8 +172,11 @@ func main() {
 			bcastSec := (report.Broadcasts - lastReport.Broadcasts) / 5
 
 			// Print human-readable metrics report
-			logger.Info("[METRICS] TickAvg: %v | HeapAlloc: %d MB | GC: %d | Goroutines: %d | AOI/s: %d | Broadcast/s: %d",
-				report.TickAvg, report.Alloc/1024/1024, report.NumGC, report.Goroutines, aoiSec, bcastSec)
+			logger.Info("[METRICS] TickAvg: %v | TickMax: %v | TickP99: %v | HeapAlloc: %d MB | Sys: %d MB | HeapSys: %d MB | StackSys: %d MB | GC: %d | Goroutines: %d | AOI/s: %d | Broadcast/s: %d | SendQ drops: %d | SlowClients: %d | PacketsSent: %d",
+				report.TickAvg, report.TickMax, report.TickP99,
+				report.Alloc/1024/1024, report.Sys/1024/1024, report.HeapSys/1024/1024, report.StackSys/1024/1024,
+				report.NumGC, report.Goroutines, aoiSec, bcastSec,
+				connwriter.GlobalDrops.Load(), connwriter.SlowClients.Load(), connwriter.GlobalSent.Load())
 
 			lastReport = report
 
