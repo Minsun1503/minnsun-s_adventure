@@ -69,6 +69,13 @@ func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		db.QueuePlayerSave(playerEntity)
 		world.UnregisterPlayerAOI(playerEntity)
 		world.GlobalSpatialGrid.RemoveEntity(playerEntity)
+
+		// Close the Writer (which closes the underlying conn) before RemoveEntity
+		// so pending outbound frames are drained before entity cleanup.
+		if connComp, ok := ecs.DefaultRegistry.GetConnection(playerEntity); ok && connComp.Writer != nil {
+			connComp.Writer.Close()
+		}
+
 		ecs.DefaultRegistry.RemoveEntity(playerEntity)
 		models.ActivePlayers.Delete(conn.RemoteAddr().String())
 

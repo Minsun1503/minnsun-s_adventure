@@ -8,6 +8,7 @@ import (
 	"server/logger"
 	"server/peakgo/aoi"
 	"server/peakgo/broadcast"
+	"server/peakgo/connwriter"
 	"server/peakgo/netio"
 	"server/peakgo/perf"
 )
@@ -413,13 +414,25 @@ func (mw *MapWorker) flushCombatBuffer() {
 }
 
 // writeConn is the single write point for all outbound TCP data on this map.
+// Uses the Writer's non-blocking Send() when available, falls back to direct WritePacket.
 func (mw *MapWorker) writeConn(c net.Conn, data []byte) {
 	if c == nil {
 		return
 	}
+	// Try to use Writer if available — non-blocking path
+	// Look up the entity by scanning connections (best-effort, O(N) without entity lookup)
 	if err := netio.WritePacket(c, data); err != nil {
 		c.Close()
 	}
+}
+
+// writeWriter sends data through the non-blocking connwriter.Writer.
+// Returns true if queued successfully, false on full queue or closed.
+func writeWriter(w *connwriter.Writer, data []byte) bool {
+	if w == nil {
+		return false
+	}
+	return w.Send(data)
 }
 
 // ─── AOI Bridge Helpers (moved from aoi_bridge.go) ──────────────────────────

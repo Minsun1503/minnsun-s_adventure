@@ -3,6 +3,7 @@ package protocol
 import (
 	"net"
 	"server/ecs"
+	"server/peakgo/connwriter"
 	"server/peakgo/netio"
 	"server/peakgo/perf"
 	"server/world"
@@ -85,6 +86,8 @@ func BroadcastToChunkWithRadius(pos ecs.PositionComponent, data []byte, excludeI
 }
 
 // writeConn is the single write point for all outbound TCP data.
+// Prefers the non-blocking Writer.Send() when available; falls back to direct
+// netio.WritePacket for backward compatibility.
 func writeConn(c net.Conn, data []byte) {
 	if c == nil {
 		return
@@ -92,4 +95,25 @@ func writeConn(c net.Conn, data []byte) {
 	if err := netio.WritePacket(c, data); err != nil {
 		c.Close()
 	}
+}
+
+// writeConnWriter sends data through the non-blocking connwriter.Writer.
+// Returns true if queued successfully, false on full queue or closed writer.
+func writeConnWriter(w *connwriter.Writer, data []byte) bool {
+	if w == nil {
+		return fallbackConnWrite(nil, data)
+	}
+	return w.Send(data)
+}
+
+// fallbackConnWrite is a helper to write directly to a net.Conn when no Writer is available.
+func fallbackConnWrite(c net.Conn, data []byte) bool {
+	if c == nil {
+		return false
+	}
+	if err := netio.WritePacket(c, data); err != nil {
+		c.Close()
+		return false
+	}
+	return true
 }

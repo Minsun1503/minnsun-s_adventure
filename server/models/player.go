@@ -8,6 +8,7 @@ import (
 	"server/ecs"
 	"server/logger"
 	"server/peakgo/anticheat"
+	"server/peakgo/connwriter"
 	"server/state"
 	"strings"
 	"time"
@@ -294,6 +295,7 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 	ecs.DefaultRegistry.SetConnection(entityID, ecs.ConnectionComponent{
 		Conn:      conn,
 		Validator: new(anticheat.Validator),
+		Writer:    connwriter.New(conn, 256),
 	})
 	ecs.DefaultRegistry.SetMetadata(entityID, ecs.MetadataComponent{Name: username, Type: ecs.EntityPlayer})
 

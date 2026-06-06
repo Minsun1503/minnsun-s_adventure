@@ -3,6 +3,7 @@ package ecs
 import (
 	"net"
 	"server/peakgo/astar"
+	"server/peakgo/connwriter"
 	"server/peakgo/threat"
 	"server/peakgo/timer"
 	"sync"
@@ -75,8 +76,9 @@ type PositionComponent struct {
 }
 
 type ConnectionComponent struct {
-	Conn      net.Conn    // Interface bản chất là con trỏ, giữ nguyên.
-	Validator interface{} // *anticheat.Validator: stored as interface{} to avoid import cycle (anticheat imports ecs).
+	Conn      net.Conn           // Interface bản chất là con trỏ, giữ nguyên.
+	Validator interface{}        // *anticheat.Validator: stored as interface{} to avoid import cycle (anticheat imports ecs).
+	Writer    *connwriter.Writer // Non-blocking outbound writer; nil if not set.
 }
 
 type MetadataComponent struct {
