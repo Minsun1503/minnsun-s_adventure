@@ -74,7 +74,7 @@ func stripChatPrefix(msg string) string {
 func BroadcastToWorld(textPacket string) {
 	bytePayload := []byte(textPacket)
 	ecs.DefaultRegistry.RangeConnections(func(id ecs.Entity, connComp ecs.ConnectionComponent) bool {
-		if connComp.Conn != nil {
+		if connComp.Writer != nil {
 			SendNoticeSystem(id, bytePayload)
 		}
 		return true
@@ -83,8 +83,8 @@ func BroadcastToWorld(textPacket string) {
 
 func BroadcastToWorldBinary(frame []byte) {
 	ecs.DefaultRegistry.RangeConnections(func(id ecs.Entity, connComp ecs.ConnectionComponent) bool {
-		if connComp.Conn != nil {
-			_, _ = connComp.Conn.Write(frame)
+		if connComp.Writer != nil {
+			connComp.Writer.Send(frame)
 		}
 		return true
 	})
@@ -97,8 +97,8 @@ func BroadcastToPartyBinary(partyID ecs.Entity, frame []byte) {
 		return
 	}
 	for _, memberID := range party.MemberIDs {
-		if conn, ok := registry.GetConnection(memberID); ok && conn.Conn != nil {
-			_, _ = conn.Conn.Write(frame)
+		if conn, ok := registry.GetConnection(memberID); ok && conn.Writer != nil {
+			conn.Writer.Send(frame)
 		}
 	}
 }
