@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"server/ecs"
+	"server/peakgo/connwriter"
 	"server/peakgo/loggate"
 	"server/world"
 	"strings"
@@ -45,9 +46,13 @@ func TestMovementSystem(t *testing.T) {
 
 	// Initialize components
 	conn, msgChan := createMockConn()
-	defer conn.Close()
+	writer := connwriter.New(conn, 256)
+	defer writer.Close()
 
-	registry.SetConnection(playerID, ecs.ConnectionComponent{Conn: conn})
+	registry.SetConnection(playerID, ecs.ConnectionComponent{
+		Conn:   conn,
+		Writer: writer,
+	})
 	registry.SetMetadata(playerID, ecs.MetadataComponent{Name: "Hero", Type: ecs.EntityPlayer})
 	registry.SetPosition(playerID, ecs.PositionComponent{MapID: 1, X: 5, Z: 5})
 

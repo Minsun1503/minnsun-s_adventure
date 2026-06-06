@@ -1,7 +1,6 @@
 package game
 
 import (
-	"net"
 	"server/ecs"
 	"server/peakgo/anticheat"
 	"server/peakgo/broadcast"
@@ -49,27 +48,16 @@ func HandlePlayerMovementSystem(playerID ecs.Entity, payload []byte) (string, bo
 // SendNoticeSystem đẩy trực tiếp mảng byte thông báo xuống cổng kết nối socket của thực thể.
 func SendNoticeSystem(entity ecs.Entity, data []byte) {
 	conn, ok := ecs.DefaultRegistry.GetConnection(entity)
-	if ok && conn.Conn != nil {
+	if ok && conn.Writer != nil {
 		frame := broadcast.BuildNotice(broadcast.NoticePayload{Message: string(data)})
-		writeConn(conn.Conn, frame)
+		conn.Writer.Send(frame)
 	}
 }
 
 func SendNoticeBinary(entity ecs.Entity, frame []byte) {
 	conn, ok := ecs.DefaultRegistry.GetConnection(entity)
-	if ok && conn.Conn != nil {
-		writeConn(conn.Conn, frame)
-	}
-}
-
-// writeConn là điểm xả dữ liệu duy nhất cho toàn bộ luồng lưu lượng TCP outbound.
-func writeConn(c net.Conn, data []byte) {
-	if c == nil {
-		return
-	}
-	// Sử dụng triệt để Netio đã tối ưu vòng lặp Partial Write và cấu hình Write Deadline bảo vệ Thread
-	if err := netio.WritePacket(c, data); err != nil {
-		c.Close()
+	if ok && conn.Writer != nil {
+		conn.Writer.Send(frame)
 	}
 }
 

@@ -2,21 +2,9 @@ package world
 
 import (
 	"fmt"
-	"net"
 	"server/ecs"
 	"server/peakgo/codec"
-	"server/peakgo/netio"
 )
-
-// writeConn is the single write point for all outbound TCP data.
-func writeConn(c net.Conn, data []byte) {
-	if c == nil {
-		return
-	}
-	if err := netio.WritePacket(c, data); err != nil {
-		c.Close()
-	}
-}
 
 // broadcastToMap sends data to all players on targetMapID.
 // Uses the map worker's registry for the target map.
@@ -26,10 +14,10 @@ func broadcastToMap(targetMapID int, data []byte) {
 		return
 	}
 	mw.Registry.RangeConnections(func(playerID ecs.Entity, netComp ecs.ConnectionComponent) bool {
-		if netComp.Conn == nil {
+		if netComp.Writer == nil {
 			return true
 		}
-		writeConn(netComp.Conn, data)
+		netComp.Writer.Send(data)
 		return true
 	})
 }

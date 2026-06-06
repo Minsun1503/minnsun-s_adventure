@@ -1,7 +1,6 @@
 package world
 
 import (
-	"net"
 	"sort"
 
 	"server/ecs"
@@ -9,7 +8,6 @@ import (
 	"server/peakgo/aoi"
 	"server/peakgo/broadcast"
 	"server/peakgo/connwriter"
-	"server/peakgo/netio"
 	"server/peakgo/perf"
 )
 
@@ -119,16 +117,16 @@ func (mw *MapWorker) ProcessAOIEvents(entity ecs.Entity, pos ecs.PositionCompone
 
 	// Get the watcher's connection (only players have connections)
 	watcherConn, hasConn := mw.Registry.GetConnection(entity)
-	if !hasConn || watcherConn.Conn == nil {
+	if !hasConn || watcherConn.Writer == nil {
 		return
 	}
 
 	for _, ev := range *eventsPtr {
 		switch ev.Type {
 		case aoi.EventEnter:
-			sendSpawnToFrom(watcherConn.Conn, ev.Target, mw.Registry)
+			sendSpawnToFrom(watcherConn.Writer, ev.Target, mw.Registry)
 		case aoi.EventLeave:
-			sendDespawnTo(watcherConn.Conn, ev.Target)
+			sendDespawnTo(watcherConn.Writer, ev.Target)
 		}
 	}
 }
@@ -491,8 +489,8 @@ func aoiSpatialQueryFromGrid(grid *SpatialGrid, origin ecs.PositionComponent, wo
 }
 
 // sendSpawnToFrom builds a SpawnEntity frame for the target entity using a specific registry
-// (per-map or global) and writes it to conn.
-func sendSpawnToFrom(conn net.Conn, target ecs.Entity, reg *ecs.Registry) {
+// (per-map or global) and writes it via the writer.
+func sendSpawnToFrom(w *connwriter.Writer, target ecs.Entity, reg *ecs.Registry) {
 	meta, ok := reg.GetMetadata(target)
 	if !ok {
 		return
@@ -511,13 +509,11 @@ func sendSpawnToFrom(conn net.Conn, target ecs.Entity, reg *ecs.Registry) {
 		Name:     meta.Name,
 	}
 	frame := broadcast.BuildSpawnEntity(payload)
-	if err := netio.WritePacket(conn, frame); err != nil {
-		conn.Close()
-	}
+	w.Send(frame)
 }
 
-// sendSpawnTo builds a SpawnEntity frame for the target entity and writes it to conn.
-func sendSpawnTo(conn net.Conn, target ecs.Entity) {
+// sendSpawnTo builds a SpawnEntity frame for the target entity and writes it via the writer.
+func sendSpawnTo(w *connwriter.Writer, target ecs.Entity) {
 	meta, ok := ecs.DefaultRegistry.GetMetadata(target)
 	if !ok {
 		return
@@ -536,20 +532,16 @@ func sendSpawnTo(conn net.Conn, target ecs.Entity) {
 		Name:     meta.Name,
 	}
 	frame := broadcast.BuildSpawnEntity(payload)
-	if err := netio.WritePacket(conn, frame); err != nil {
-		conn.Close()
-	}
+	w.Send(frame)
 }
 
-// sendDespawnTo builds a DespawnEntity frame for the target entity and writes it to conn.
-func sendDespawnTo(conn net.Conn, target ecs.Entity) {
+// sendDespawnTo builds a DespawnEntity frame for the target entity and writes it via the writer.
+func sendDespawnTo(w *connwriter.Writer, target ecs.Entity) {
 	payload := broadcast.DespawnPayload{
 		EntityID: uint64(target),
 	}
 	frame := broadcast.BuildDespawnEntity(payload)
-	if err := netio.WritePacket(conn, frame); err != nil {
-		conn.Close()
-	}
+	w.Send(frame)
 }
 
 // BroadcastToNeighborsDelta sends binary data only to the AOI watchers
@@ -564,11 +556,9 @@ func BroadcastToNeighborsDelta(origin ecs.PositionComponent, data []byte, exclud
 	defer FreeQueryCandidates(candidates)
 	for _, entry := range *candidates {
 		connComp, hasConn := ecs.DefaultRegistry.GetConnection(entry.ID)
-		if !hasConn || connComp.Conn == nil {
+		if !hasConn || connComp.Writer == nil {
 			continue
 		}
-		if err := netio.WritePacket(connComp.Conn, data); err != nil {
-			connComp.Conn.Close()
-		}
+		writeWriter(connComp.Writer, data)
 	}
 }

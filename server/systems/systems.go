@@ -2,10 +2,8 @@ package systems
 
 import (
 	"fmt"
-	"net"
 	"server/ecs"
 	"server/game"
-	"server/peakgo/netio"
 	"server/peakgo/broadcast"
 )
 
@@ -13,7 +11,9 @@ import (
 func BroadcastSystem(data []byte) {
 	frame := broadcast.BuildNotice(broadcast.NoticePayload{Message: string(data)})
 	ecs.DefaultRegistry.RangeConnections(func(_ ecs.Entity, conn ecs.ConnectionComponent) bool {
-		writeConn(conn.Conn, frame)
+		if conn.Writer != nil {
+			conn.Writer.Send(frame)
+		}
 		return true
 	})
 }
@@ -21,8 +21,8 @@ func BroadcastSystem(data []byte) {
 // BroadcastExcept sends a payload to all connected entities except the excluded one.
 func BroadcastExcept(exclude ecs.Entity, data []byte) {
 	ecs.DefaultRegistry.RangeConnections(func(id ecs.Entity, conn ecs.ConnectionComponent) bool {
-		if id != exclude {
-			writeConn(conn.Conn, data)
+		if id != exclude && conn.Writer != nil {
+			conn.Writer.Send(data)
 		}
 		return true
 	})
@@ -31,17 +31,6 @@ func BroadcastExcept(exclude ecs.Entity, data []byte) {
 // SendNoticeSystem sends a direct payload to a single entity's connection.
 func SendNoticeSystem(entity ecs.Entity, data []byte) {
 	game.SendNoticeSystem(entity, data)
-}
-
-// writeConn is the single write point for all outbound TCP data.
-func writeConn(c net.Conn, data []byte) {
-	if c == nil {
-		return
-	}
-
-	if err := netio.WritePacket(c, data); err != nil {
-		c.Close()
-	}
 }
 
 // GetInfoSystem retrieves formatted combat stats for a target entity.
