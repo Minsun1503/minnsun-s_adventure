@@ -344,10 +344,6 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 			MapID:      targetPos.MapID,
 		})
 
-		conn, ok := registry.GetConnection(targetID)
-		if ok && conn.Conn != nil {
-			conn.Conn.Close()
-		}
 	} else {
 		// ── Threat Table Cleanup ─────────────────────────────────────────────
 		// Release threat table memory when a monster dies to prevent aggro

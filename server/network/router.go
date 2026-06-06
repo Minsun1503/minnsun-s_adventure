@@ -132,7 +132,6 @@ func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		HandleBinaryPacket(conn, playerEntity, opcode, payload)
 
 		packetPool.Put(pBuf)
-		_ = conn.SetReadDeadline(time.Now().Add(45 * time.Second))
 	}
 }
 
