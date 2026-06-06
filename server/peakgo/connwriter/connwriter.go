@@ -13,6 +13,8 @@
 //	w := connwriter.New(tcpConn, 256)
 //	ok := w.Send(frame) // non-blocking, returns false if queue full
 //	w.Close()           // close connection and stop goroutine
+//	w.Wait()            // wait for drain to exit
+//	w.Release()         // return Writer to pool for reuse (zero-alloc lifecycle)
 package connwriter
 
 import (
@@ -28,42 +30,80 @@ import (
 type Writer struct {
 	conn   net.Conn
 	queue  chan []byte
-	once   sync.Once
-	done   chan struct{}
 	closed atomic.Bool
+	wg     sync.WaitGroup
+}
+
+// sentinelNil is a nil byte slice sentinel used to signal clean shutdown on the queue.
+// Defined as a package-level var to avoid allocation when sending to the channel.
+var sentinelNil []byte
+
+// writerPool recycles Writer instances to avoid allocations on New/Close cycles.
+// The pool's New factory creates Writers with default 256-capacity channels.
+var writerPool = sync.Pool{
+	New: func() interface{} {
+		return &Writer{
+			queue: make(chan []byte, 256),
+		}
+	},
 }
 
 // New creates a Writer, spawns the drain goroutine, and returns the Writer.
 // queueSize is the max number of buffered packets (recommended: 256).
 // If queueSize < 1, a default of 256 is used.
+//
+// New attempts to recycle a Writer from the internal pool. When the caller
+// is done they MUST call Release() after Wait() to return the Writer
+// to the pool and achieve zero-alloc lifecycle.
 func New(conn net.Conn, queueSize int) *Writer {
 	if queueSize < 1 {
 		queueSize = 256
 	}
-	w := &Writer{
-		conn:  conn,
-		queue: make(chan []byte, queueSize),
-		done:  make(chan struct{}),
+	w := writerPool.Get().(*Writer)
+	w.conn = conn
+	w.closed.Store(false)
+	if cap(w.queue) != queueSize {
+		w.queue = make(chan []byte, queueSize)
 	}
-	go w.drain()
+	w.wg.Add(1)
+	go drainWriter(w)
 	return w
+}
+
+// drainWriter is a package-level function used instead of a method-value closure
+// to avoid heap allocation of a closure on go w.drain().
+func drainWriter(w *Writer) {
+	w.drain()
+	w.wg.Done()
 }
 
 // drain is the background goroutine that reads frames from the queue and
 // writes them to the TCP connection. If a write fails, the connection is
-// closed and the goroutine exits.
+// closed and the goroutine exits. A nil sentinel on the queue signals a
+// clean shutdown (from Close()).
 func (w *Writer) drain() {
 	for frame := range w.queue {
+		// nil sentinel signals clean shutdown
+		if frame == nil {
+			break
+		}
 		if err := netio.WritePacket(w.conn, frame); err != nil {
 			w.conn.Close()
 			break
 		}
 	}
-	// Drain remaining frames on close — skip them to avoid writing to a closed conn
-	for range w.queue {
-		// consume remaining channel values silently
+	// After nil sentinel (or write error), drain remaining frames non-blockingly.
+	// We cannot use for range here because w.queue is NOT closed — it is reused
+	// by the pool. Instead we consume until the channel is empty.
+	for {
+		select {
+		case <-w.queue:
+			// consume remaining channel values silently
+		default:
+			// queue is empty
+			return
+		}
 	}
-	close(w.done)
 }
 
 // Send enqueues a frame for outbound delivery. Non-blocking.
@@ -87,19 +127,30 @@ func (w *Writer) Send(frame []byte) bool {
 
 // Close idempotently closes the connection and stops the drain goroutine.
 // Safe to call multiple times. The underlying net.Conn is closed only once.
+// Uses atomic CompareAndSwap instead of sync.Once to avoid closure allocation.
 func (w *Writer) Close() {
-	w.once.Do(func() {
-		w.closed.Store(true)
-		w.conn.Close()
-		close(w.queue)
-	})
+	if !w.closed.CompareAndSwap(false, true) {
+		return
+	}
+	w.conn.Close()
+	// Send nil sentinel to stop the drain() goroutine cleanly.
+	// We do NOT close(w.queue) so the channel can be reused after Release().
+	w.queue <- sentinelNil
 }
 
-// Done returns a channel that is closed when the drain goroutine has exited.
-// Callers can use this to wait for clean shutdown:
+// Release returns the Writer to the internal pool for reuse.
+// The caller MUST call Close() and call Wait() before returning Release().
 //
 //	w.Close()
-//	<-w.Done()
-func (w *Writer) Done() <-chan struct{} {
-	return w.done
+//	w.Wait()
+//	w.Release()
+func (w *Writer) Release() {
+	w.conn = nil
+	writerPool.Put(w)
+}
+
+// Wait blocks until the drain goroutine has exited.
+// Callers must call this after Close() and before Release().
+func (w *Writer) Wait() {
+	w.wg.Wait()
 }

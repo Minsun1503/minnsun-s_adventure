@@ -61,7 +61,7 @@ func TestSendAndReceive(t *testing.T) {
 	}
 
 	w.Close()
-	<-w.Done()
+	w.Wait()
 }
 
 func TestSendQueueFull(t *testing.T) {
@@ -88,7 +88,7 @@ func TestSendQueueFull(t *testing.T) {
 	}
 
 	w.Close()
-	<-w.Done()
+	w.Wait()
 }
 
 func TestCloseIdempotent(t *testing.T) {
@@ -103,12 +103,7 @@ func TestCloseIdempotent(t *testing.T) {
 	w.Close()
 
 	// Wait for drain to exit
-	select {
-	case <-w.Done():
-		// success
-	case <-time.After(time.Second):
-		t.Fatal("drain goroutine did not exit within 1s")
-	}
+	w.Wait()
 }
 
 func TestSendAfterClose(t *testing.T) {
@@ -124,7 +119,7 @@ func TestSendAfterClose(t *testing.T) {
 		t.Log("Send after close returned true (channel may not be drained yet)")
 	}
 
-	<-w.Done()
+	w.Wait()
 }
 
 func TestConcurrentSend(t *testing.T) {
@@ -167,7 +162,7 @@ func TestConcurrentSend(t *testing.T) {
 
 	sendWg.Wait()
 	w.Close()
-	<-w.Done()
+	w.Wait()
 	wg.Wait()
 }
 
@@ -203,7 +198,7 @@ func BenchmarkSend(b *testing.B) {
 	}
 
 	w.Close()
-	<-w.Done()
+	w.Wait()
 }
 
 // BenchmarkSendFullQueue measures Send() behavior when the queue is full.
@@ -225,11 +220,12 @@ func BenchmarkSendFullQueue(b *testing.B) {
 	}
 
 	w.Close()
-	<-w.Done()
+	w.Wait()
 }
 
 // BenchmarkNewClose measures the cost of creating and closing a Writer.
-// This is the connection lifecycle overhead.
+// This is the connection lifecycle overhead. Calls Release() to recycle
+// the Writer from the internal pool, achieving zero allocation after warm-up.
 func BenchmarkNewClose(b *testing.B) {
 	c, s := pipeConn()
 	defer s.Close()
@@ -240,7 +236,8 @@ func BenchmarkNewClose(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		w := New(c, 256)
 		w.Close()
-		<-w.Done()
+		w.Wait()
+		w.Release()
 	}
 }
 
@@ -274,5 +271,5 @@ func BenchmarkSendParallel(b *testing.B) {
 	})
 
 	w.Close()
-	<-w.Done()
+	w.Wait()
 }

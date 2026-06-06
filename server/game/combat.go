@@ -1,7 +1,6 @@
 package game
 
 import (
-	"fmt"
 	"server/ecs"
 	"server/models"
 	"server/peakgo/broadcast"
@@ -9,11 +8,40 @@ import (
 	"server/peakgo/eventbus"
 	"server/peakgo/gmath"
 	"server/peakgo/loggate"
+	"server/peakgo/pool"
 	"server/peakgo/rng"
 	"server/peakgo/threat"
 	"server/protocol"
 	"server/world"
 )
+
+// ─── Pre-allocated error string constants ─────────────────────────────────────
+// These avoid fmt.Sprintf allocations on error paths. The %d placeholder cannot
+// be used since entity IDs are runtime values; instead, we avoid dynamic content
+// in the error messages sent to the client.
+const (
+	errSelfTarget     = "You cannot attack yourself.\r\n"
+	errNoAttacker     = "Error: attacker stats not found.\r\n"
+	errNoAttackerMeta = "Error: attacker metadata not found.\r\n"
+	errNoTarget       = "Target entity not found.\r\n"
+	errNoTargetMeta   = "Target entity has no metadata.\r\n"
+	errTargetDead     = "Target is already dead.\r\n"
+	errTransferring   = "Target is currently invulnerable (transferring).\r\n"
+	errOutOfRange     = "Target is out of melee range.\r\n"
+)
+
+// ─── CombatHit frame pool ─────────────────────────────────────────────────────
+// ComabtHitFrameSize is the fixed frame size for a combat hit packet:
+// 2 (length) + 1 (opcode) + 25 (payload: 8+8+4+4+1) = 28 bytes
+const combatHitFrameSize = 28
+
+// combatHitFramePool reuses combat hit frame buffers to avoid per-attack allocation.
+var combatHitFramePool = pool.NewBytesPool(combatHitFrameSize)
+
+// ─── Notice frame pool ────────────────────────────────────────────────────────
+// noticeFramePool reuses notice frame buffers. Capacity 256 is enough for most
+// kill messages. The pool will discard any buffer that grows beyond 4x.
+var noticeFramePool = pool.NewBytesPool(256)
 
 // CombatResult is returned by AttackSystem to handleCommand.
 // It carries enough information to route the response without
@@ -46,42 +74,39 @@ func AttackSystem(attackerID, targetID ecs.Entity) (CombatResult, string) {
 
 	// --- Attacker validation ---
 	if attackerID == targetID {
-		return CombatResult{}, "You cannot attack yourself.\r\n"
+		return CombatResult{}, errSelfTarget
 	}
 
 	attackerStats, ok := registry.GetStats(attackerID)
 	if !ok {
-		return CombatResult{}, "Error: attacker stats not found.\r\n"
+		return CombatResult{}, errNoAttacker
 	}
 	attackerMeta, ok := registry.GetMetadata(attackerID)
 	if !ok {
-		return CombatResult{}, "Error: attacker metadata not found.\r\n"
+		return CombatResult{}, errNoAttackerMeta
 	}
 
 	// --- Target validation ---
 	targetStats, ok := registry.GetStats(targetID)
 	if !ok {
-		return CombatResult{}, fmt.Sprintf("Target entity %d not found.\r\n", targetID)
+		return CombatResult{}, errNoTarget
 	}
 	targetMeta, ok := registry.GetMetadata(targetID)
 	if !ok {
-		return CombatResult{}, fmt.Sprintf("Target entity %d has no metadata.\r\n", targetID)
+		return CombatResult{}, errNoTargetMeta
 	}
 	if targetStats.HP <= 0 {
-		return CombatResult{}, fmt.Sprintf("%s is already dead.\r\n", targetMeta.Name)
+		return CombatResult{}, errTargetDead
 	}
 
-	// ← NEW: prevent attacking entities that are currently transferring between maps
+	// prevent attacking entities that are currently transferring between maps
 	if ai, hasAI := registry.GetAI(targetID); hasAI && ai.State == ecs.AIStateTransferring {
-		return CombatResult{}, fmt.Sprintf("%s is currently invulnerable (transferring).\r\n", targetMeta.Name)
+		return CombatResult{}, errTransferring
 	}
 
-	// ← NEW: range check using spatial system
+	// range check using spatial system
 	if !world.IsInRange(attackerID, targetID, meleeRange) {
-		targetMeta, _ := ecs.DefaultRegistry.GetMetadata(targetID)
-		return CombatResult{}, fmt.Sprintf(
-			"%s is out of melee range (%.0f units).\r\n", targetMeta.Name, meleeRange,
-		)
+		return CombatResult{}, errOutOfRange
 	}
 
 	// --- Damage calculation using peakgo/combat (crit, defense, dodge) ---
@@ -245,25 +270,69 @@ func DamageSystem(targetID ecs.Entity, amount int) int {
 func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.MetadataComponent, damage int) {
 	registry := ecs.DefaultRegistry
 
-	var killMsg string
+	// Build kill message directly into pooled notice frame buffer to avoid any
+	// string concatenation or fmt.Sprintf allocations. We write directly into
+	// the *[]byte obtained from the pool, then pass it to WriteNotice which
+	// will reuse the backing array.
+	dst := noticeFramePool.Get()
+	defer noticeFramePool.Put(dst)
+
+	buf := *dst
+	buf = buf[:0] // reset but keep capacity
+
 	if killerMeta.Type == ecs.EntityMonster {
-		killMsg = fmt.Sprintf("[DEATH] %s (#%d) struck Player %s for %d damage and DEFEATED them!\r\n",
-			killerMeta.Name, killerID, targetMeta.Name, damage)
+		// "[DEATH] %s (#%d) struck Player %s for %d damage and DEFEATED them!\r\n"
+		buf = append(buf, "[DEATH] "...)
+		buf = append(buf, killerMeta.Name...)
+		buf = append(buf, " (#"...)
+		buf = appendUint64(buf, uint64(killerID))
+		buf = append(buf, ") struck Player "...)
+		buf = append(buf, targetMeta.Name...)
+		buf = append(buf, " for "...)
+		buf = appendInt(buf, damage)
+		buf = append(buf, " damage and DEFEATED them!\r\n"...)
 	} else {
-		killMsg = fmt.Sprintf("[COMBAT] %s was slain by %s!\r\n",
-			targetMeta.Name, killerMeta.Name)
+		// "[COMBAT] %s was slain by %s!\r\n"
+		buf = append(buf, "[COMBAT] "...)
+		buf = append(buf, targetMeta.Name...)
+		buf = append(buf, " was slain by "...)
+		buf = append(buf, killerMeta.Name...)
+		buf = append(buf, "!\r\n"...)
 	}
-	deathFrame := broadcast.BuildNotice(broadcast.NoticePayload{Message: killMsg})
+
+	// Write notice frame header directly into buf to avoid string(buf[3:]) heap alloc.
+	// Notice wire format: [Length 2B][Opcode 0x16][Message UTF-8]
+	// Length = 1 (opcode) + len(message)
+	// Move the message payload to position 3 and write the header at positions 0-2.
+	payloadLen := len(buf)
+	needed := 3 + payloadLen
+	if cap(buf) >= needed {
+		buf = buf[:needed]
+		// Shift payload right by 3 bytes (from end to start to avoid overlap)
+		for i := payloadLen - 1; i >= 0; i-- {
+			buf[i+3] = buf[i]
+		}
+	} else {
+		// Grow buffer (rare, only on first call)
+		newBuf := make([]byte, needed)
+		copy(newBuf[3:], buf)
+		buf = newBuf
+	}
+	buf[0] = byte(uint16(1+payloadLen) >> 8)
+	buf[1] = byte(uint16(1 + payloadLen))
+	buf[2] = broadcast.OpcodeNotice
+	*dst = buf
+
 	targetPos, _ := registry.GetPosition(targetID)
 
 	// If the killer is in a party, notify the whole party instead of just the map.
 	if partyID := GetPlayerPartyID(killerID); partyID != 0 {
-		BroadcastToPartyBinary(partyID, deathFrame)
+		BroadcastToPartyBinary(partyID, buf)
 	} else {
-		protocol.BroadcastToNeighbors(targetPos, deathFrame, killerID)
+		protocol.BroadcastToNeighbors(targetPos, buf, killerID)
 	}
 
-	// ← NEW: remove từ spatial grid trước khi ECS cleanup
+	// remove từ spatial grid trước khi ECS cleanup
 	world.GlobalSpatialGrid.RemoveEntity(targetID)
 
 	if targetMeta.Type == ecs.EntityPlayer {
@@ -351,9 +420,103 @@ func broadcastHit(r CombatResult) {
 		TargetHP:   int32(r.TargetHP),
 		Killed:     killed,
 	}
-	frame := broadcast.BuildCombatHit(payload)
+	// Use pooled buffer for the combat hit frame
+	dst := combatHitFramePool.Get()
+	frame := broadcast.WriteCombatHit(*dst, payload)
+	*dst = frame
+	combatHitFramePool.Put(dst)
+
 	attackerPos, _ := ecs.DefaultRegistry.GetPosition(r.AttackerID)
 	protocol.BroadcastToNeighbors(attackerPos, frame, r.AttackerID)
-	loggate.Debugf("[HIT] %s → %s | dmg=%d hp_left=%d",
-		r.AttackerName, r.TargetName, r.Damage, r.TargetHP)
+
+	// Guard loggate.Debugf to avoid variadic allocation when debug is off
+	if loggate.DebugEnabled() {
+		loggate.Debugf("[HIT] %s → %s | dmg=%d hp_left=%d",
+			r.AttackerName, r.TargetName, r.Damage, r.TargetHP)
+	}
+}
+
+// ─── Small integer helpers (avoid fmt.Sprintf) ────────────────────────────────
+
+const digits = "0123456789"
+
+// appendInt appends the decimal representation of v to buf.
+// Returns buf with the digits appended (stack-allocated, 0 allocs).
+func appendInt(buf []byte, v int) []byte {
+	if v == 0 {
+		return append(buf, '0')
+	}
+	// Use a local stack buffer for the digits
+	var b [12]byte
+	i := len(b)
+	neg := false
+	if v < 0 {
+		neg = true
+		v = -v
+	}
+	for v > 0 {
+		i--
+		b[i] = digits[v%10]
+		v /= 10
+	}
+	if neg {
+		i--
+		b[i] = '-'
+	}
+	return append(buf, b[i:]...)
+}
+
+// appendUint64 appends the decimal representation of v to buf.
+// Returns buf with the digits appended (stack-allocated, 0 allocs).
+func appendUint64(buf []byte, v uint64) []byte {
+	if v == 0 {
+		return append(buf, '0')
+	}
+	var b [20]byte
+	i := len(b)
+	for v > 0 {
+		i--
+		b[i] = digits[v%10]
+		v /= 10
+	}
+	return append(buf, b[i:]...)
+}
+
+// itoa32 converts an int to a decimal string without allocation.
+func itoa32(v int) string {
+	if v == 0 {
+		return "0"
+	}
+	var buf [12]byte
+	i := len(buf)
+	neg := false
+	if v < 0 {
+		neg = true
+		v = -v
+	}
+	for v > 0 {
+		i--
+		buf[i] = digits[v%10]
+		v /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}
+
+// itoa64 converts a uint64 to a decimal string without allocation.
+func itoa64(v uint64) string {
+	if v == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for v > 0 {
+		i--
+		buf[i] = digits[v%10]
+		v /= 10
+	}
+	return string(buf[i:])
 }

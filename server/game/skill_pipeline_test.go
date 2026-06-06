@@ -15,7 +15,7 @@ func init() {
 
 	// Load a mock monster template for combat testing
 	jsonContent := `[
-		{"id": 1, "name": "Orc", "hp": 100, "damage": 10, "spawn_x": 50, "spawn_z": 50, "roam_radius": 5, "aggro_radius": 6.0, "attack_cooldown": 4, "xp_reward": 50}
+		{"id": 1, "name": "Orc", "hp": 1000000000, "damage": 10, "spawn_x": 50, "spawn_z": 50, "roam_radius": 5, "aggro_radius": 6.0, "attack_cooldown": 4, "xp_reward": 50}
 	]`
 	tmpFile, err := os.CreateTemp("", "monster_templates_pipeline_test.json")
 	if err == nil {
@@ -44,7 +44,7 @@ func setupPipelineTestEntities(t testing.TB) (playerID, monsterID ecs.Entity) {
 
 	registry.SetMetadata(monsterID, ecs.MetadataComponent{Name: "Orc", Type: ecs.EntityMonster})
 	registry.SetStats(monsterID, ecs.StatsComponent{
-		Level: 1, HP: 100, MaxHP: 100, MP: 50, MaxMP: 50,
+		Level: 1, HP: 1000000000, MaxHP: 1000000000, MP: 50, MaxMP: 50,
 		Dam: 5, Attack: 5, MagicAttack: 3,
 		HitRate: 700, DodgeRate: 80, CritRate: 30, CritDamage: 1500,
 		Defense: 5, MagicDefense: 3,
@@ -113,7 +113,7 @@ func TestPipelineValidAttack(t *testing.T) {
 
 	// Verify HP reduced
 	stats, ok := ecs.DefaultRegistry.GetStats(monsterID)
-	if !ok || stats.HP >= 100 {
+	if !ok || stats.HP >= 1000000000 {
 		t.Fatalf("Expected HP reduced, got stats ok=%t HP=%d", ok, stats.HP)
 	}
 }

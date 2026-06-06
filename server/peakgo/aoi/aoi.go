@@ -96,11 +96,22 @@ func (m *AOIManager) UpdateAll(
 	m.mu.RLock()
 	// Tạm thời clone ra danh sách keys để nhả lock sớm nhất có thể
 	// tránh block các goroutine network đang cố gắng Unregister khi player disconnect
-	watchersToUpdate := make([]ecs.Entity, 0, len(m.watchers))
+	// Dùng pool.SlicePool để tái sử dụng slice thay vì make mới mỗi tick
+	pooled := EntityListPool.Get()
+	watchersToUpdate := *pooled
+	if cap(watchersToUpdate) < len(m.watchers) {
+		watchersToUpdate = make([]ecs.Entity, 0, len(m.watchers))
+	}
+	watchersToUpdate = watchersToUpdate[:0]
 	for id := range m.watchers {
 		watchersToUpdate = append(watchersToUpdate, id)
 	}
 	m.mu.RUnlock()
+
+	// Release the pooled slice back after processing all watchers.
+	// This must happen AFTER the for loop to avoid aliasing with query results
+	// that also use EntityListPool inside updateOne.
+	defer EntityListPool.Put(pooled)
 
 	for _, id := range watchersToUpdate {
 		m.mu.RLock()
