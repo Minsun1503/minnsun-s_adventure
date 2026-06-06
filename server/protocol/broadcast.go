@@ -1,10 +1,8 @@
 package protocol
 
 import (
-	"net"
 	"server/ecs"
 	"server/peakgo/connwriter"
-	"server/peakgo/netio"
 	"server/peakgo/perf"
 	"server/world"
 )
@@ -24,7 +22,7 @@ func BroadcastToMap(targetMapID int, data string) {
 		}
 		playerPos, posExists := ecs.DefaultRegistry.GetPosition(playerID)
 		if posExists && playerPos.MapID == targetMapID {
-			writeConn(netComp.Conn, b)
+			writeConnWriter(netComp.Writer, b)
 		}
 		return true
 	})
@@ -41,7 +39,7 @@ func BroadcastToNeighbors(origin ecs.PositionComponent, data []byte, excludeID e
 			continue
 		}
 		// Monster/ground-item entities without net connections are skipped automatically.
-		writeConn(connComp.Conn, data)
+		writeConnWriter(connComp.Writer, data)
 		perf.GlobalPacketMonitor.RecordBroadcast()
 	}
 	world.FreeQueryCandidates(candidates)
@@ -64,7 +62,7 @@ func BroadcastToChunk(pos ecs.PositionComponent, data []byte, excludeID ecs.Enti
 		if !hasConn || connComp.Conn == nil {
 			continue
 		}
-		writeConn(connComp.Conn, data)
+		writeConnWriter(connComp.Writer, data)
 		perf.GlobalPacketMonitor.RecordBroadcast()
 	}
 }
@@ -79,41 +77,17 @@ func BroadcastToChunkWithRadius(pos ecs.PositionComponent, data []byte, excludeI
 		if !hasConn || connComp.Conn == nil {
 			continue
 		}
-		writeConn(connComp.Conn, data)
+		writeConnWriter(connComp.Writer, data)
 		perf.GlobalPacketMonitor.RecordBroadcast()
 	}
 	world.FreeQueryCandidates(candidates)
-}
-
-// writeConn is the single write point for all outbound TCP data.
-// Prefers the non-blocking Writer.Send() when available; falls back to direct
-// netio.WritePacket for backward compatibility.
-func writeConn(c net.Conn, data []byte) {
-	if c == nil {
-		return
-	}
-	if err := netio.WritePacket(c, data); err != nil {
-		c.Close()
-	}
 }
 
 // writeConnWriter sends data through the non-blocking connwriter.Writer.
 // Returns true if queued successfully, false on full queue or closed writer.
 func writeConnWriter(w *connwriter.Writer, data []byte) bool {
 	if w == nil {
-		return fallbackConnWrite(nil, data)
+		return false
 	}
 	return w.Send(data)
-}
-
-// fallbackConnWrite is a helper to write directly to a net.Conn when no Writer is available.
-func fallbackConnWrite(c net.Conn, data []byte) bool {
-	if c == nil {
-		return false
-	}
-	if err := netio.WritePacket(c, data); err != nil {
-		c.Close()
-		return false
-	}
-	return true
 }
