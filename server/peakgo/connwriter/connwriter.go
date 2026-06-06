@@ -27,6 +27,16 @@ import (
 	"sync/atomic"
 )
 
+// framePool recycles byte slice buffers used internally by Send() to copy incoming
+// frames. Each buffer starts with capacity 128 and grows as needed. On the steady-state
+// hot path, buffers are reused with zero allocations once the pool is warm.
+var framePool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 0, 128)
+		return &b
+	},
+}
+
 // Global packet send counters aggregated across all Writers for observability.
 var (
 	GlobalDrops atomic.Uint64 // Total dropped packets across all Writers
@@ -93,26 +103,33 @@ func drainWriter(w *Writer) {
 // writes them to the TCP connection. If a write fails, the connection is
 // closed and the goroutine exits. A nil sentinel on the queue signals a
 // clean shutdown (from Close()).
+//
+// After writing each frame the buffer is returned to framePool for reuse.
 func (w *Writer) drain() {
 	for frame := range w.queue {
 		// nil sentinel signals clean shutdown
 		if frame == nil {
 			break
 		}
-		if err := netio.WritePacket(w.conn, frame); err != nil {
+		err := netio.WritePacket(w.conn, frame)
+		// Return buffer to pool AFTER write to avoid race with pool reuse.
+		framePool.Put(&frame)
+		if err != nil {
 			w.conn.Close()
 			break
 		}
 	}
 	// After nil sentinel (or write error), drain remaining frames non-blockingly.
+	// Return any pooled frames back to framePool.
 	// We cannot use for range here because w.queue is NOT closed — it is reused
 	// by the pool. Instead we consume until the channel is empty.
 	for {
 		select {
-		case <-w.queue:
-			// consume remaining channel values silently
+		case frame := <-w.queue:
+			if frame != nil {
+				framePool.Put(&frame)
+			}
 		default:
-			// queue is empty
 			return
 		}
 	}
@@ -122,23 +139,29 @@ func (w *Writer) drain() {
 // Returns true if the frame was queued successfully, false if the queue is full
 // (client is too slow or dead) or the writer is closed.
 //
-// Increments per-Writer and global counters atomically (zero-alloc).
-// The caller must NOT retain or reuse the frame slice after calling Send() —
-// the frame is passed directly to the channel and will be read by the drain goroutine.
+// Send() copies the frame into an internal pooled buffer, making it safe for the
+// caller to immediately reuse or discard the source slice. On the steady-state
+// hot path, the pool reuses buffers with zero allocations.
+//
+// Increments per-Writer and global counters atomically.
 func (w *Writer) Send(frame []byte) bool {
 	if w.closed.Load() {
 		return false
 	}
+	// Acquire buffer from pool, copy frame data into it
+	dst := framePool.Get().(*[]byte)
+	*dst = append((*dst)[:0], frame...)
+
 	select {
-	case w.queue <- frame:
+	case w.queue <- *dst:
 		w.sent.Add(1)
 		GlobalSent.Add(1)
 		return true
 	default:
-		// Queue full — drop frame silently (slow client protection)
+		// Queue full — return buffer to pool immediately and drop
+		framePool.Put(dst)
 		w.drops.Add(1)
 		GlobalDrops.Add(1)
-		// If queue is already at max capacity, count this as a slow client
 		if len(w.queue) == cap(w.queue) {
 			SlowClients.Add(1)
 		}

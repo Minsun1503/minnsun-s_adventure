@@ -321,16 +321,19 @@ func (b *Bot) readLoop() {
 	for {
 		// ── Read 2-byte length header ──
 		if _, err := io.ReadFull(b.conn, header[:]); err != nil {
+			fmt.Printf("  [BOT %d] disconnect reason: %v\n", b.id, err)
 			return
 		}
 		length := binary.BigEndian.Uint16(header[:])
 		if length == 0 || length > 4096 {
+			fmt.Printf("  [BOT %d] protocol violation: length=%d\n", b.id, length)
 			return // protocol violation
 		}
 
 		// ── Read opcode + payload ──
 		buf := make([]byte, length)
 		if _, err := io.ReadFull(b.conn, buf); err != nil {
+			fmt.Printf("  [BOT %d] payload read error: %v\n", b.id, err)
 			return
 		}
 

@@ -99,15 +99,11 @@ func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 	}
 
 	for {
-		// Zero-alloc header read: stack [2]byte + BigEndian.Uint16, no reflection.
-		// Rate limit check before reading any data.
-		// peakgo/ratelimit uses tick-based refill — zero time.Now() calls.
-		if !globalRateLimiter.Allow(conn, systems.CurrentTick()) {
-			loggate.Debugf("[RATE LIMIT] %s exceeded packet budget, dropping", conn.RemoteAddr())
-			_ = conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
-			continue
-		}
+		// Set read deadline before every header read.
+		// 45 seconds is generous enough for idle clients (heartbeat should arrive).
+		_ = conn.SetReadDeadline(time.Now().Add(45 * time.Second))
 
+		// Zero-alloc header read: stack [2]byte + BigEndian.Uint16, no reflection.
 		length, err := netio.ReadHeader(conn)
 		if err != nil {
 			break // Disconnected or read error
@@ -116,13 +112,19 @@ func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 			continue
 		}
 
-		// Reset read deadline after each successful header read
-		_ = conn.SetReadDeadline(time.Now().Add(45 * time.Second))
-
 		// Pooled payload read: no heap allocation on steady-state path.
 		pBuf, err := netio.ReadPayload(conn, packetPool, length)
 		if err != nil {
 			break // Disconnected or read error
+		}
+
+		// Rate limit check AFTER reading the packet.
+		// We must always drain bytes from the socket to prevent TCP buffer
+		// backup and busy-spin loops. If over budget, drop the packet silently.
+		if !globalRateLimiter.Allow(conn, systems.CurrentTick()) {
+			loggate.Debugf("[RATE LIMIT] %s exceeded packet budget, dropping", conn.RemoteAddr())
+			packetPool.Put(pBuf)
+			continue
 		}
 
 		buf := (*pBuf)[:length]

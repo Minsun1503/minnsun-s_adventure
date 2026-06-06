@@ -161,12 +161,21 @@ func processLogin(conn net.Conn) {
 			logger.Info("[CONNECT] %s (entity %d) from %s", snap.Meta.Name, playerEntity, conn.RemoteAddr())
 		}
 
+		// All outbound writes MUST go through the connwriter to prevent
+		// concurrent conn.Write() races with the drain goroutine.
+		connComp, hasConn := ecs.DefaultRegistry.GetConnection(playerEntity)
+		if !hasConn || connComp.Writer == nil {
+			conn.Close()
+			return
+		}
+		w := connComp.Writer
+
 		// Send S2CSuccess with EntityID so client can set LocalPlayerID from a trusted source.
 		successWithID := broadcast.BuildSuccessWithEntityID(
 			uint64(playerEntity),
 			"Login successful.",
 		)
-		_ = netio.WritePacket(conn, successWithID)
+		w.Send(successWithID)
 
 		// Send the player's own SpawnEntity so the client can create their character.
 		selfSpawn := broadcast.BuildSpawnEntity(broadcast.SpawnPayload{
@@ -177,7 +186,7 @@ func processLogin(conn net.Conn) {
 			Z:        int32(snap.Pos.Z),
 			Name:     snap.Meta.Name,
 		})
-		_ = netio.WritePacket(conn, selfSpawn)
+		w.Send(selfSpawn)
 
 		// Send the player's own StatsSync so the client can initialize the HUD.
 		selfStats := broadcast.BuildStatsSync(broadcast.StatsSyncPayload{
@@ -195,7 +204,7 @@ func processLogin(conn net.Conn) {
 			DodgeRate:    int32(snap.Stats.DodgeRate),
 			CritRate:     int32(snap.Stats.CritRate),
 		})
-		_ = netio.WritePacket(conn, selfStats)
+		w.Send(selfStats)
  
 		// Restore the login broadcast using peakgo/netio.DefaultPool to build the string zero-alloc
 		// Skip for bots to prevent N^2 broadcast storm when 5000 bots connect concurrently.
@@ -210,6 +219,8 @@ func processLogin(conn net.Conn) {
 		}
  
 		// Register the player as an AOI watcher for delta enter/leave broadcasts.
+		// This MUST happen after initial packets are queued to avoid broadcast
+		// races on the underlying TCP connection.
 		world.RegisterPlayerAOI(playerEntity)
 		go network.HandleClient(conn, playerEntity, snap)
 	case protocol.OpcodeC2SRegister: // REGISTER
