@@ -100,7 +100,10 @@ func (m *AOIManager) UpdateAll(
 	pooled := EntityListPool.Get()
 	watchersToUpdate := *pooled
 	if cap(watchersToUpdate) < len(m.watchers) {
-		watchersToUpdate = make([]ecs.Entity, 0, len(m.watchers))
+		EntityListPool.Put(pooled) // return old slice before growing
+		grown := make([]ecs.Entity, 0, len(m.watchers))
+		pooled = &grown // track new slice for deferred Put
+		watchersToUpdate = grown
 	}
 	watchersToUpdate = watchersToUpdate[:0]
 	for id := range m.watchers {

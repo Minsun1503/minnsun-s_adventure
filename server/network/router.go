@@ -98,8 +98,6 @@ func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		systems.SendNoticeSystem(playerEntity, []byte(spawnMsg))
 	}
 
-	_ = conn.SetReadDeadline(time.Now().Add(45 * time.Second))
-
 	for {
 		// Zero-alloc header read: stack [2]byte + BigEndian.Uint16, no reflection.
 		// Rate limit check before reading any data.
@@ -117,6 +115,9 @@ func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		if length == 0 {
 			continue
 		}
+
+		// Reset read deadline after each successful header read
+		_ = conn.SetReadDeadline(time.Now().Add(45 * time.Second))
 
 		// Pooled payload read: no heap allocation on steady-state path.
 		pBuf, err := netio.ReadPayload(conn, packetPool, length)

@@ -115,24 +115,25 @@ func (tm *TickMonitor) P99() time.Duration {
 	if n == 0 {
 		return 0
 	}
-	// Copy buffer entries into a slice for sorting
-	vals := make([]int64, n)
-	offset := pos % RingBufferSize
-	for i := uint64(0); i < n; i++ {
-		vals[i] = tm.buffer[(offset+i)%RingBufferSize]
+	start := uint64(0)
+	if pos > RingBufferSize {
+		start = pos % RingBufferSize
 	}
-	// Partial sort: we only need to order until index 99% (quickselect-style)
-	// But for simplicity with small n, just sort entirely.
-	for i := uint64(1); i < n; i++ {
+	vals := make([]int64, 0, n)
+	for i := uint64(0); i < n; i++ {
+		if v := tm.buffer[(start+i)%RingBufferSize]; v > 0 {
+			vals = append(vals, v)
+		}
+	}
+	if len(vals) == 0 {
+		return 0
+	}
+	for i := 1; i < len(vals); i++ {
 		for j := i; j > 0 && vals[j] < vals[j-1]; j-- {
 			vals[j], vals[j-1] = vals[j-1], vals[j]
 		}
 	}
-	idx := uint64(float64(n) * 0.99)
-	if idx >= n {
-		idx = n - 1
-	}
-	return time.Duration(vals[idx])
+	return time.Duration(vals[len(vals)*99/100])
 }
 
 // Reset clears all recorded data.

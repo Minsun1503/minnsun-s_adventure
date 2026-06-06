@@ -1,5 +1,5 @@
 @echo off
-title Minnsun Stress Test (3000 bots)
+title Minnsun Stress Test (100 bots)
 cd /d "%~dp0\..\server\cmd\netstress"
-go run main.go -bots 3000 -clump -move -attack
+go run main.go -bots 100 -clump -move -attack
 pause
