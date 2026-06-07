@@ -19,14 +19,14 @@ REUSE UTILITIES & PEAKGO-FIRST WORKFLOW:
 4. Cuối cùng mới được phép dùng nó để xây dựng logic mới ở tầng ứng dụng (server/game/ v.v.).
 ZERO-ALLOC TARGET & BENCHMARK (0 ns/op, 0 B/op, 0 allocs/op): Mỗi khi chỉnh sửa bất kỳ file nào trong server/peakgo/, BẮT BUỘC chạy benchmark riêng cho gói đó bằng cú pháp CMD (cmd /c) an toàn:
 
-cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && go test -bench=. -benchmem ./peakgo/tên_gói/..."
+cmd /c "cd C:\Minnsun-s_Adventure\server && go test -bench=. -benchmem ./peakgo/tên_gói/..."
 Lặp lại việc tối ưu cho đến khi đạt chỉ số Zero-Allocation mới được coi là hoàn thành tác vụ.
 
 II. CMD/POWERSHELL & BUILD/TEST LIFECYCLE CONTROLS
 File Locking & Redundant Builds: Tuyệt đối KHÔNG chạy go build hoặc go test nếu code đã được xác nhận đúng cú pháp bởi static phân tích/MCP compiler, hoặc khi server.exe đang chạy/MCP Bridge port đang xanh (Tránh File Locking gây crash hệ thống trên Windows - tỉ lệ 70%). Ưu tiên dùng code_get_outline hoặc go vet để check cú pháp nhẹ. Chỉ chạy go test khi người dùng yêu cầu hoặc cần chạy benchmark tối ưu hóa.
 
 BẮT BUỘC dùng CMD /C cho các lệnh phức tạp: Sử dụng CMD để di chuyển thư mục (cd) và chạy chuỗi lệnh thông qua toán tử && mà không sợ bị nuốt ký tự hay lỗi mở rộng biến trong PowerShell:
-cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && <lệnh_cần_chạy>"
+cmd /c "cd C:\Minnsun-s_Adventure\server && <lệnh_cần_chạy>"
 
 CẢNH BÁO TREO LỆNH DO THOÁT DẤU NHÁY: Khi chạy lệnh cmd /c hoặc PowerShell, tuyệt đối KHÔNG viết dấu gạch chéo ngược `\` ngay trước dấu ngoặc kép `"` ở cuối đường dẫn (ví dụ: "...\Scripts\"" sẽ bị lỗi thoát dấu nháy `\"` khiến lệnh bị treo/đơ). Hãy sửa thành "...\Scripts"" (xóa dấu `\`) hoặc dùng dấu nháy đơn `'` bọc bên ngoài.
 
@@ -41,15 +41,15 @@ V. COMMAND TIMEOUT & RUNNING EXAMPLES (USING CMD)
 Mọi lệnh chạy test, vet, build phải dùng cú pháp CMD để đảm bảo tính tương thích và đơn giản:
 
 * **Khi chạy go vet:**
-  cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && go vet ./..."
+  cmd /c "cd C:\Minnsun-s_Adventure\server && go vet ./..."
 
 * **Khi chạy go test/benchmark:**
-  cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && go test -bench=BenchmarkUpdateAll -benchmem ./peakgo/aoi"
+  cmd /c "cd C:\Minnsun-s_Adventure\server && go test -bench=BenchmarkUpdateAll -benchmem ./peakgo/aoi"
 
 * **Khi build Game Server (`server.exe`):**
-  cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && go build -o server.exe ."
+  cmd /c "cd C:\Minnsun-s_Adventure\server && go build -o server.exe ."
 
 * **Khi build MCP Bridge (mcp-bridge.exe):**
-  cmd /c "cd c:\Users\ADMIN\Desktop\minnsun-s_adventure\server && go build -o mcp-bridge.exe ./cmd/mcp-bridge"
+  cmd /c "cd C:\Minnsun-s_Adventure\server && go build -o mcp-bridge.exe ./cmd/mcp-bridge"
 
 Mọi hành vi vi phạm các quy tắc trên sẽ dẫn đến việc tiến trình bị đóng (DENY) ngay lập tức.

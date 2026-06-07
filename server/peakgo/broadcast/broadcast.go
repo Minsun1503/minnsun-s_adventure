@@ -26,6 +26,7 @@ const (
 	OpcodeCombatHit     byte = 0x14
 	OpcodeChat          byte = 0x15
 	OpcodeNotice        byte = 0x16
+	OpcodeHeartbeat     byte = 0x17
 	OpcodeError         byte = 0xFF
 )
 

@@ -19,8 +19,10 @@ import (
 	"server/mcp"
 	"server/models"
 	"server/network"
+	"server/peakgo/broadcast"
 	"server/peakgo/config"
 	"server/peakgo/connwriter"
+	"server/peakgo/netio"
 	"server/peakgo/perf"
 	"server/protocol"
 	"server/systems"
@@ -282,7 +284,7 @@ func main() {
 		default:
 			// Queue full! Tell the client and drop connection cleanly.
 			logger.Warn("[ACCEPT] Login queue full — dropping connection from %s", conn.RemoteAddr())
-			protocol.SendErrorPacket(conn, protocol.ErrCodeServerFull, "Server login queue is full. Please try again later.")
+			netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeServerFull, "Server login queue is full. Please try again later."))
 			conn.Close()
 		}
 	}

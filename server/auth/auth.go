@@ -72,12 +72,12 @@ func processLogin(conn net.Conn) {
 	// ReadHeader: zero-alloc, no reflection — see peakgo/netio.
 	length, err := netio.ReadHeader(conn)
 	if err != nil {
-		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Failed to read auth packet length.")
+		netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Failed to read auth packet length."))
 		conn.Close()
 		return
 	}
 	if length == 0 || length > 256 {
-		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid auth packet length.")
+		netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Invalid auth packet length."))
 		conn.Close()
 		return
 	}
@@ -85,7 +85,7 @@ func processLogin(conn net.Conn) {
 	// ReadPayload: pooled buffer — zero heap allocation on steady-state path.
 	pBuf, err := netio.ReadPayload(conn, netio.DefaultPool, length)
 	if err != nil {
-		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Failed to read auth packet payload.")
+		netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Failed to read auth packet payload."))
 		conn.Close()
 		return
 	}
@@ -100,17 +100,17 @@ func processLogin(conn net.Conn) {
 	case protocol.OpcodeC2SLogin: // LOGIN
 		auth, ok := parseAuthPayload(payload)
 		if !ok {
-			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid LOGIN packet payload.")
+			netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Invalid LOGIN packet payload."))
 			conn.Close()
 			return
 		}
 		if !models.ValidateUsername(auth.username) {
-			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Username must be 3-16 alphanumeric characters.")
+			netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Username must be 3-16 alphanumeric characters."))
 			conn.Close()
 			return
 		}
 		if !models.ValidatePassword(auth.password) {
-			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Password must be at least 6 characters.")
+			netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Password must be at least 6 characters."))
 			conn.Close()
 			return
 		}
@@ -121,12 +121,12 @@ func processLogin(conn net.Conn) {
 			// Look up stored credentials.
 			_, storedHash, found := models.LookupCredentials(auth.username)
 			if !found {
-				protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Account does not exist. Please register first.")
+				netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Account does not exist. Please register first."))
 				conn.Close()
 				return
 			}
 			if !models.CheckPasswordHash(auth.password, storedHash) {
-				protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid username or password.")
+				netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Invalid username or password."))
 				conn.Close()
 				return
 			}
@@ -143,7 +143,7 @@ func processLogin(conn net.Conn) {
 		}
 		if err != nil {
 			logger.Error("[CONNECT] Error loading character from DB: %v", err)
-			protocol.SendErrorPacket(conn, protocol.ErrCodeDatabaseError, "Failed to load character data. Please try again.")
+			netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeDatabaseError, "Failed to load character data. Please try again."))
 			conn.Close()
 			return
 		}
@@ -205,7 +205,7 @@ func processLogin(conn net.Conn) {
 			CritRate:     int32(snap.Stats.CritRate),
 		})
 		w.Send(selfStats)
- 
+
 		// Restore the login broadcast using peakgo/netio.DefaultPool to build the string zero-alloc
 		// Skip for bots to prevent N^2 broadcast storm when 5000 bots connect concurrently.
 		if !(len(auth.username) >= 3 && auth.username[:3] == "bot") {
@@ -217,7 +217,7 @@ func processLogin(conn net.Conn) {
 			systems.BroadcastSystem(buf[:n])
 			netio.DefaultPool.Put(pBuf)
 		}
- 
+
 		// Register the player as an AOI watcher for delta enter/leave broadcasts.
 		// This MUST happen after initial packets are queued to avoid broadcast
 		// races on the underlying TCP connection.
@@ -226,17 +226,17 @@ func processLogin(conn net.Conn) {
 	case protocol.OpcodeC2SRegister: // REGISTER
 		auth, ok := parseAuthPayload(payload)
 		if !ok {
-			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Invalid REGISTER packet payload.")
+			netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Invalid REGISTER packet payload."))
 			conn.Close()
 			return
 		}
 		if !models.ValidateUsername(auth.username) {
-			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Username must be 3-16 alphanumeric characters.")
+			netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Username must be 3-16 alphanumeric characters."))
 			conn.Close()
 			return
 		}
 		if !models.ValidatePassword(auth.password) {
-			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Password must be at least 6 characters.")
+			netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Password must be at least 6 characters."))
 			conn.Close()
 			return
 		}
@@ -244,25 +244,25 @@ func processLogin(conn net.Conn) {
 		hashed, err := models.HashPassword(auth.password)
 		if err != nil {
 			logger.Error("[REGISTER] bcrypt hash error: %v", err)
-			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Server error. Please try again.")
+			netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Server error. Please try again."))
 			conn.Close()
 			return
 		}
 
 		err = models.RegisterNewAccount(auth.username, hashed)
 		if err != nil {
-			protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Username already exists.")
+			netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Username already exists."))
 			conn.Close()
 			return
 		}
 
 		// Registration successful — notify client and close.
 		// Client must now send a LOGIN packet to enter the game.
-		protocol.SendSuccessPacket(conn, "Account registered successfully! Please log in.")
+		netio.WritePacket(conn, broadcast.BuildSuccess("Account registered successfully! Please log in."))
 		conn.Close()
 
 	default:
-		protocol.SendErrorPacket(conn, protocol.ErrCodeInternalError, "Expected LOGIN or REGISTER packet as first message.")
+		netio.WritePacket(conn, broadcast.BuildError(protocol.ErrCodeInternalError, "Expected LOGIN or REGISTER packet as first message."))
 		conn.Close()
 	}
 }

@@ -60,6 +60,12 @@ public static class Decoders
         public int   MaxMP;
         public int   Dam;
         public int   Level;
+        public int   Defense;
+        public int   MagicDefense;
+        public int   MagicAttack;
+        public int   HitRate;
+        public int   DodgeRate;
+        public int   CritRate;
     }
 
     public struct CombatHitPacket
@@ -159,30 +165,40 @@ public static class Decoders
 
     /// <summary>
     /// Decode StatsSync payload (opcode 0x13).
-    /// Layout: EntityID(8) + HP:MaxHP packed(8) + MP:MaxMP packed(8) + Dam:Level packed(8) = 32 bytes
+    /// Layout: EntityID(8) + 6 packed uint64 pairs (6×8=48) = 56 bytes total.
     /// Each packed uint64: high 32 bits = first value, low 32 bits = second value.
+    /// Pairs: HP:MaxHP | MP:MaxMP | Dam:Level | Defense:MagicDefense | MagicAttack:HitRate | DodgeRate:CritRate
     /// </summary>
     public static StatsPacket? DecodeStats(byte[] data)
     {
-        if (data == null || data.Length < 32)
+        if (data == null || data.Length < 56)
         {
-            Debug.LogWarning("[Decode] Stats payload too short");
+            Debug.LogWarning("[Decode] Stats payload too short (need 56 bytes)");
             return null;
         }
 
         StatsPacket p;
         p.EntityID = ReadUint64BE(data, 0);
 
-        ulong hpMp   = ReadUint64BE(data, 8);
-        ulong mpMp   = ReadUint64BE(data, 16);
-        ulong damLvl = ReadUint64BE(data, 24);
+        ulong hpMp     = ReadUint64BE(data, 8);   // offset 8
+        ulong mpMp     = ReadUint64BE(data, 16);  // offset 16
+        ulong damLvl   = ReadUint64BE(data, 24);  // offset 24
+        ulong defMdef  = ReadUint64BE(data, 32);  // offset 32 — Defense:MagicDefense
+        ulong matkHit  = ReadUint64BE(data, 40);  // offset 40 — MagicAttack:HitRate
+        ulong dodgeCrit= ReadUint64BE(data, 48);  // offset 48 — DodgeRate:CritRate
 
-        p.HP    = (int)(hpMp >> 32);
-        p.MaxHP = (int)(hpMp & 0xFFFFFFFF);
-        p.MP    = (int)(mpMp >> 32);
-        p.MaxMP = (int)(mpMp & 0xFFFFFFFF);
-        p.Dam   = (int)(damLvl >> 32);
-        p.Level = (int)(damLvl & 0xFFFFFFFF);
+        p.HP           = (int)(hpMp >> 32);
+        p.MaxHP        = (int)(hpMp & 0xFFFFFFFF);
+        p.MP           = (int)(mpMp >> 32);
+        p.MaxMP        = (int)(mpMp & 0xFFFFFFFF);
+        p.Dam          = (int)(damLvl >> 32);
+        p.Level        = (int)(damLvl & 0xFFFFFFFF);
+        p.Defense      = (int)(defMdef >> 32);
+        p.MagicDefense = (int)(defMdef & 0xFFFFFFFF);
+        p.MagicAttack  = (int)(matkHit >> 32);
+        p.HitRate      = (int)(matkHit & 0xFFFFFFFF);
+        p.DodgeRate    = (int)(dodgeCrit >> 32);
+        p.CritRate     = (int)(dodgeCrit & 0xFFFFFFFF);
 
         return p;
     }

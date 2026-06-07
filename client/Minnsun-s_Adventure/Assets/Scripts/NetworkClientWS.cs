@@ -22,9 +22,32 @@ public class NetworkClientWS : MonoBehaviour
     /// <summary>Fired once when the WebSocket connection is established (on Unity main thread).</summary>
     public event System.Action OnConnected;
 
+    /// <summary>Fired when the connection is lost (on Unity main thread).</summary>
+    public event System.Action OnDisconnected;
+
+    /// <summary>
+    /// Override the WebSocket URL from config. Must be called before Start().
+    /// </summary>
+    public void SetUrl(string url)
+    {
+        serverUrl = url;
+    }
+
     private WebSocket ws;
     private bool connected;
     private readonly ConcurrentQueue<Action> dispatchQueue = new ConcurrentQueue<Action>();
+
+    // ─── Reconnect State ────────────────────────────────────────────────
+    private const int MaxReconnectAttempts = 3;
+    private int reconnectAttempt;
+    private bool reconnecting;
+
+    // ─── Ping Measurement ──────────────────────────────────────────────
+    /// <summary>Latest measured round-trip time in milliseconds.</summary>
+    public float LastPingMs { get; private set; }
+
+    /// <summary>Timestamp (ms) when the last heartbeat was sent.</summary>
+    private long pingSendTimestamp;
 
     // Opcodes — must match server/protocol/opcodes.go
     private const byte OpcodeC2SHeartbeat = 21;
@@ -42,6 +65,8 @@ public class NetworkClientWS : MonoBehaviour
         ws.OnOpen += () =>
         {
             connected = true;
+            reconnectAttempt = 0;
+            reconnecting = false;
             dispatchQueue.Enqueue(() => OnConnected?.Invoke());
             Debug.Log($"[WS] Connected to {serverUrl}");
         };
@@ -55,6 +80,11 @@ public class NetworkClientWS : MonoBehaviour
         {
             connected = false;
             Debug.Log($"[WS] Closed (code: {closeCode})");
+            if (!isQuitting)
+            {
+                dispatchQueue.Enqueue(() => OnDisconnected?.Invoke());
+                TryReconnect();
+            }
         };
 
         ws.OnMessage += (bytes) =>
@@ -70,12 +100,78 @@ public class NetworkClientWS : MonoBehaviour
         if (connectTask.IsFaulted)
         {
             Debug.LogError($"[WS] Connect failed: {connectTask.Exception?.InnerException?.Message}");
+            TryReconnect();
             yield break;
         }
 
         Debug.Log($"[WS] Connected to {serverUrl}");
-
         // StartHeartbeat() should be called manually after login success.
+    }
+
+    /// <summary>
+    /// Begin reconnect with exponential backoff (1s → 2s → 4s).
+    /// </summary>
+    private void TryReconnect()
+    {
+        if (reconnecting) return;
+        if (reconnectAttempt >= MaxReconnectAttempts)
+        {
+            Debug.LogError($"[WS] Max reconnect attempts ({MaxReconnectAttempts}) reached. Giving up.");
+            return;
+        }
+
+        reconnecting = true;
+        StartCoroutine(ReconnectRoutine());
+    }
+
+    private IEnumerator ReconnectRoutine()
+    {
+        reconnectAttempt++;
+        float delay = Mathf.Pow(2, reconnectAttempt - 1); // 1, 2, 4
+        Debug.Log($"[WS] Reconnect attempt {reconnectAttempt}/{MaxReconnectAttempts} in {delay}s...");
+        yield return new WaitForSeconds(delay);
+
+        var newWs = new WebSocket(serverUrl);
+
+        newWs.OnOpen += () =>
+        {
+            connected = true;
+            reconnectAttempt = 0;
+            reconnecting = false;
+            // Replace old ws reference
+            ws = newWs;
+            dispatchQueue.Enqueue(() => OnConnected?.Invoke());
+            Debug.Log($"[WS] Reconnected to {serverUrl}");
+        };
+
+        newWs.OnError += (errorMsg) =>
+        {
+            Debug.LogError($"[WS] Reconnect error: {errorMsg}");
+        };
+
+        newWs.OnClose += (closeCode) =>
+        {
+            connected = false;
+            Debug.Log($"[WS] Reconnect closed (code: {closeCode})");
+            if (!reconnecting)
+                TryReconnect();
+        };
+
+        newWs.OnMessage += (bytes) =>
+        {
+            HandleRawMessage(bytes);
+        };
+
+        var connectTask = newWs.Connect();
+        while (!connectTask.IsCompleted)
+            yield return null;
+
+        if (connectTask.IsFaulted)
+        {
+            Debug.LogWarning($"[WS] Reconnect attempt {reconnectAttempt} failed.");
+            reconnecting = false;
+            TryReconnect();
+        }
     }
 
     private void Update()
@@ -106,8 +202,19 @@ public class NetworkClientWS : MonoBehaviour
         while (connected)
         {
             yield return new WaitForSeconds(30f);
+            // Record send timestamp for ping calculation
+            pingSendTimestamp = StopwatchGetTimestampMs();
             SendPacket(OpcodeC2SHeartbeat, new byte[0]);
         }
+    }
+
+    /// <summary>
+    /// High-resolution timestamp for ping measurement.
+    /// </summary>
+    private static long StopwatchGetTimestampMs()
+    {
+        return System.Diagnostics.Stopwatch.GetTimestamp() /
+               (System.Diagnostics.Stopwatch.Frequency / 1000L);
     }
 
     /// <summary>
@@ -168,9 +275,19 @@ public class NetworkClientWS : MonoBehaviour
         byte opcode = bytes[payloadStart];
         int dataLen = declaredLen - 1;
 
-        // Heartbeat pong — handle silently, no dispatch
+        // Heartbeat pong — measure ping
         if (opcode == OpcodeS2CHeartbeat)
+        {
+            if (pingSendTimestamp != 0)
+            {
+                long now = StopwatchGetTimestampMs();
+                long rtt = now - pingSendTimestamp;
+                if (rtt >= 0)
+                    LastPingMs = rtt;
+                pingSendTimestamp = 0;
+            }
             return;
+        }
 
         byte[] data = null;
         if (dataLen > 0)
@@ -211,6 +328,14 @@ public class NetworkClientWS : MonoBehaviour
         }
         StopAllCoroutines();
         Debug.Log("[WS] Disconnected from server.");
+    }
+
+    private bool isQuitting;
+
+    private void OnApplicationQuit()
+    {
+        isQuitting = true;
+        Disconnect();
     }
 
     private void OnDestroy()

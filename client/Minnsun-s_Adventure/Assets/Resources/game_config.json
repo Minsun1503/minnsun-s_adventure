@@ -1,0 +1,22 @@
+{
+    "serverHost": "127.0.0.1",
+    "serverPort": 1503,
+    "wsUrl": "ws://127.0.0.1:8081/ws",
+    "devMode": true,
+    "devUsername": "test",
+    "devPassword": "test",
+    "logLevel": 0,
+    "moveSpeed": 8,
+    "moveSendInterval": 0.25,
+    "heartbeatInterval": 30,
+    "cameraY": 15,
+    "cameraZ": -10,
+    "cameraRotX": 45,
+    "orthoSize": 20,
+    "cameraFollowSpeed": 5,
+    "cameraMinZoom": 5,
+    "cameraMaxZoom": 30,
+    "cameraZoomSpeed": 3,
+    "cameraRotateSpeed": 180,
+    "usePrimitives": true
+}

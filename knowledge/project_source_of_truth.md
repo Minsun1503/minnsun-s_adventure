@@ -166,12 +166,20 @@
     - Áp dụng gọi `.Clone()` trước mọi thay đổi trạng thái tham chiếu trong các systems: `trade.go` (giao dịch), `pickup.go` (nhặt đồ), `item_usage.go` (sử dụng vật phẩm, tự động delete item khi qty = 0), `party.go` (tổ đội), và `effects_system.go` (tác động hiệu ứng status).
     - Thêm tệp kiểm thử tích hợp [registry_race_test.go](file:///c:/Minnsun's Adventure/server/ecs/registry_race_test.go) giả lập 100 goroutines đọc ghi đồng thời trên cùng thực thể và xác minh thành công không lỗi Data Race qua cờ `-race` của Go.
 
+- **Phát triển Client Unity hoàn chỉnh (Giai đoạn 3 - 7)**:
+    - **Giai đoạn 3 - World & Entity**: Tạo `EntityRegistry` thuần C# và `EntityService` MonoBehaviour quản lý vòng đời thực thể, giải mã các gói tin `SpawnEntity`, `DespawnEntity`, `PositionSync`, `StatsSync`, tích hợp chuyển động nội suy Lerp mượt mà.
+    - **Giai đoạn 4 - Rendering**: Tạo mặt đất lưới tọa độ `1000x1000` (`MapRenderer`) hoàn toàn bằng code, tự sinh Grid Texture động và chiếu sáng 3D bằng Directional Light.
+    - **Giai đoạn 5 - Camera**: Thiết lập `CameraService` và `FollowCamera` hỗ trợ bám sát mượt mà, thu phóng (Zoom) bằng cuộn chuột và xoay góc nhìn ngang (Rotate - Yaw) bằng giữ chuột phải.
+    - **Giai đoạn 6 - Input**: Nâng cấp di chuyển WASD phụ thuộc vào góc xoay camera (Camera-Relative), tích hợp raycast click chuột chọn mục tiêu (Mouse Targeting), vẽ vòng tròn chỉ báo `TargetIndicator` bằng `LineRenderer` và gửi gói tin Move/Attack.
+    - **Giai đoạn 7 - HUD**: Thiết lập thanh máu HP (đổi màu xanh → đỏ khi thấp) và năng lượng MP dạng hình ảnh co giãn Filled mượt mà. Bổ sung Panel đo FPS rolling, đo độ trễ Ping thực tế (RTT của Heartbeat) và tọa độ thời gian thực của người chơi.
+    - **Dọn dẹp cấu trúc thư mục**: Hợp nhất và dọn dẹp thư mục IDE cache `Minnsun's Adventure` trùng lặp vào thư mục dự án chuẩn `Minnsun-s_Adventure` duy nhất.
+
 ## 2. Những "đặc sản" logic vừa tìm thấy (Discovered Logic Specialties)
 - Cơ chế Thread-Safety của ECS dựa trên tính bất biến (Immutability) của Map/Slice trong Registry: Các luồng chỉ đọc trực tiếp, còn luồng ghi bắt buộc phải tạo bản sao mới qua `.Clone()`, thay đổi trên bản sao và ghi đè vào Registry. Điều này giúp loại bỏ hoàn toàn khóa locking thô trên Registry.
 - Server sử dụng giao thức TCP thô ở cổng `:1503`.
 - Dự án sử dụng Go 1.26.3, hỗ trợ đầy đủ Go Generics.
 - Sử dụng mô hình ECS tách biệt tuyệt đối giữa Dữ liệu (Components) và Logic (Systems). Các thực thể chỉ tương tác qua ID kiểu `ecs.Entity` (chuỗi địa chỉ cho người chơi, hoặc ID quái vật).
-- Cấu trúc thư mục Client Unity nằm dưới thư mục `client/Minnsun's Adventure` và chứa các file mã nguồn/asset cần thiết phải được theo dõi bởi Git, trong khi thư mục `Library/` chứa hàng ngàn file cache sinh ra bởi Unity.
+- Thư mục dự án Client chuẩn là `client/Minnsun-s_Adventure`, tích hợp đầy đủ assets được tạo programmatic bằng code.
 - Các thực thể AI quái vật sẽ tự động chuyển đổi trạng thái (Idle -> Roaming -> Chasing -> Attacking -> Returning) phụ thuộc vào khoảng cách người chơi thông qua `ProximitySystem` và `SpatialGrid`.
 - Database lưu trữ sử dụng MySQL (DSN local mặc định là `root:root@tcp(127.0.0.1:3306)/?parseTime=true`).
 - Ràng buộc import chéo Go: Go Package không cho phép import chéo giữa hai thư mục package độc lập. Do đó, các package phụ trợ như `models` chỉ nên cung cấp dữ liệu cấu trúc thô và thao tác DB thô, không được import ngược lại package `systems`. Các logic đăng ký và tương tác hệ thống chéo phải được chuyển lên `server.go` điều phối chính.
@@ -180,6 +188,7 @@
 ## 3. Những việc còn dang dở (Pending tasks)
 - Tự chạy và kiểm thử kiểm soát đa kết nối Client trong môi trường ECS mới.
 - Kết nối logic Client Unity với ECS Server thông qua TCP client.
+- Triển khai tiếp các tính năng gameplay mở rộng của client (Balo/Inventory, Chat Box tương tác, Nhặt đồ vật trên mặt đất).
 
 ## 4. Những bug đã khắc phục (Fixed bugs)
 - **[FIXED] save_engine.go — Comment sai về torn read**: Xóa comment sai "torn read is acceptable" và thay bằng giải thích rõ ràng rằng inventory được deep-copy tức thời trước khi enqueue nên safe. Thêm `buildBatchInventoryDelete` để xóa các item có qty≤0 khỏi DB khi save (tránh DB rác sau khi player dùng hết item hoặc trade đi).

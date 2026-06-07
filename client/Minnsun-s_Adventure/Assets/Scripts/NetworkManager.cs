@@ -15,6 +15,9 @@ public class NetworkManager : MonoBehaviour
     /// <summary>Fired once when the currently active transport connects (on Unity main thread).</summary>
     public event Action OnConnected;
 
+    /// <summary>Fired when the currently active transport disconnects (on Unity main thread).</summary>
+    public event Action OnDisconnected;
+
     private void Awake()
     {
         // Ensure we don't get destroyed on scene load — must persist across all scenes.
@@ -35,9 +38,35 @@ public class NetworkManager : MonoBehaviour
         Debug.Log($"[NET] Platform: {(Application.isEditor ? "Editor" : Application.platform.ToString())} — using TCP transport");
 #endif
 
-        // Forward the active transport's OnConnected to our own event.
-        if (tcpClient != null) tcpClient.OnConnected += () => OnConnected?.Invoke();
-        if (wsClient != null) wsClient.OnConnected += () => OnConnected?.Invoke();
+        // Forward the active transport's events to our own events.
+        if (tcpClient != null)
+        {
+            tcpClient.OnConnected += () => OnConnected?.Invoke();
+            tcpClient.OnDisconnected += () => OnDisconnected?.Invoke();
+        }
+        if (wsClient != null)
+        {
+            wsClient.OnConnected += () => OnConnected?.Invoke();
+            wsClient.OnDisconnected += () => OnDisconnected?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Get the latest ping from the currently active transport.
+    /// </summary>
+    public float LastPingMs
+    {
+        get
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            var ws = GetComponent<NetworkClientWS>();
+            if (ws != null && ws.enabled) return ws.LastPingMs;
+#else
+            var tcp = GetComponent<NetworkClient>();
+            if (tcp != null && tcp.enabled) return tcp.LastPingMs;
+#endif
+            return 0f;
+        }
     }
 
     /// <summary>

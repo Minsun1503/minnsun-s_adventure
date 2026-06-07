@@ -1,108 +1,29 @@
-using System.Text;
 using UnityEngine;
 
 /// <summary>
-/// Entry point — creates the entire scene hierarchy in code.
-/// Attach this single MonoBehaviour to an empty GameObject in an empty scene.
-/// No prefabs, no inspector setup required.
+/// Legacy Bootstrap — now redirects to GameBootstrap.
+/// This file exists only so existing scenes with a Bootstrap component
+/// continue to work. Remove once all scenes reference GameBootstrap directly.
 /// </summary>
 public class Bootstrap : MonoBehaviour
 {
-    // Dev login credentials — hardcoded constants since this is dev-only.
-    // There is no inspector; all configuration lives in code per project philosophy.
-    private const string DevUsername = "test";
-    private const string DevPassword = "test";
-
-    private NetworkManager networkManager;
-    private bool loginSent;
+    private GameBootstrap gameBootstrap;
 
     private void Awake()
     {
-        // Persist this root GameObject across scene loads
-        DontDestroyOnLoad(gameObject);
-
-        // ── Network Layer ──
-        gameObject.AddComponent<NetworkClient>();
-        gameObject.AddComponent<NetworkClientWS>();
-        gameObject.AddComponent<NetworkManager>();   // enables the correct transport
-        gameObject.AddComponent<PacketRouter>();
-
-        // ── Entity Root (parent for all spawned entities) ──
-        GameObject entityRoot = new GameObject("EntityRoot");
-        DontDestroyOnLoad(entityRoot);
-
-        var entityManager = gameObject.AddComponent<EntityManager>();
-        entityManager.EntityRoot = entityRoot.transform;
-
-        // ── UI ──
-        GameObject uiRoot = new GameObject("UIRoot");
-        DontDestroyOnLoad(uiRoot);
-        UIManager uiManager = uiRoot.AddComponent<UIManager>();
-
-        // ── PacketRouter — wire up references manually (UIManager is on separate GO, not a child)
-        var router = gameObject.GetComponent<PacketRouter>();
-        if (router != null)
-            router.Init(entityManager, uiManager);
-
-        // ── Camera ──
-        GameObject cam = new GameObject("MainCamera");
-        cam.tag = "MainCamera";
-        DontDestroyOnLoad(cam);
-        cam.transform.position = new Vector3(0, 15, -10);
-        cam.transform.rotation = Quaternion.Euler(45, 0, 0);
-
-        Camera cameraComp = cam.AddComponent<Camera>();
-        cameraComp.clearFlags = CameraClearFlags.SolidColor;
-        cameraComp.backgroundColor = new Color(0.3f, 0.6f, 0.9f); // sky blue
-        cameraComp.orthographic = true;
-        cameraComp.orthographicSize = 20f;
-
-        cam.AddComponent<AudioListener>();
-    }
-
-    private void Start()
-    {
-        // Get the NetworkManager that was just created in Awake
-        networkManager = GetComponent<NetworkManager>();
-        if (networkManager != null)
+        // Destroy self and let GameBootstrap handle initialization
+        // If GameBootstrap already exists, just destroy this
+        var existing = FindObjectOfType<GameBootstrap>();
+        if (existing != null)
         {
-            networkManager.OnConnected += OnTransportConnected;
-            Debug.Log("[Bootstrap] Subscribed to NetworkManager.OnConnected");
+            Debug.Log("[Bootstrap] GameBootstrap already exists — destroying legacy Bootstrap");
+            Destroy(gameObject);
+            return;
         }
-    }
 
-    private void OnTransportConnected()
-    {
-        if (loginSent) return;
-        loginSent = true;
-
-        Debug.Log($"[Bootstrap] Connected! Sending login as '{DevUsername}'...");
-        byte[] payload = BuildLoginPayload(DevUsername, DevPassword);
-        networkManager.SendPacket(Opcodes.C2SLogin, payload);
-    }
-
-    /// <summary>
-    /// Build a binary login payload matching the server's parseAuthPayload format:
-    /// [UsernameLen byte][Username UTF-8][PasswordLen byte][Password UTF-8]
-    /// </summary>
-    private static byte[] BuildLoginPayload(string username, string password)
-    {
-        byte[] u = Encoding.UTF8.GetBytes(username);
-        byte[] p = Encoding.UTF8.GetBytes(password);
-        byte[] result = new byte[2 + u.Length + p.Length];
-        result[0] = (byte)u.Length;
-        Buffer.BlockCopy(u, 0, result, 1, u.Length);
-        result[1 + u.Length] = (byte)p.Length;
-        Buffer.BlockCopy(p, 0, result, 2 + u.Length, p.Length);
-        return result;
-    }
-
-    /// <summary>
-    /// Clean up event subscription.
-    /// </summary>
-    private void OnDestroy()
-    {
-        if (networkManager != null)
-            networkManager.OnConnected -= OnTransportConnected;
+        // GameBootstrap not found — add it and destroy self
+        Debug.Log("[Bootstrap] Adding GameBootstrap and destroying legacy Bootstrap");
+        gameObject.AddComponent<GameBootstrap>();
+        Destroy(this);
     }
 }
