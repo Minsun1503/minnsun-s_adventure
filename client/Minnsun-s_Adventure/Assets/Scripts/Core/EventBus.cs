@@ -146,7 +146,7 @@ public class EventBusDispatcher : MonoBehaviour
     // Built-in game events — add more as the project grows
     public struct PlayerLoginEvent      { public ulong EntityID; public string Username; }
     public struct PlayerMoveEvent       { public ulong EntityID; public int X; public int Z; }
-    public struct EntitySpawnedEvent    { public ulong EntityID; public byte Type; }
+    public struct EntitySpawnedEvent    { public ulong EntityID; public byte Type; public int MapID; public int X; public int Z; public string Name; }
     public struct EntityDespawnedEvent  { public ulong EntityID; }
     public struct CombatHitEvent        { public ulong AttackerID; public ulong TargetID; public int Damage; public byte Killed; }
     public struct StatsUpdatedEvent     { public ulong EntityID; }

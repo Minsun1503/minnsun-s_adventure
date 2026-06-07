@@ -94,10 +94,12 @@ public class EntityService : MonoBehaviour
         }
 
         // Create primitive with name
-        string entityName = $"Entity_{evt.EntityID}";
+        string entityName = string.IsNullOrEmpty(evt.Name) ? $"Entity_{evt.EntityID}" : evt.Name;
         GameObject go = GameObject.CreatePrimitive(primitiveType);
         go.name = entityName;
         go.transform.SetParent(entityRoot);
+        // Set initial position
+        go.transform.position = new Vector3(evt.X, 0f, evt.Z);
 
         // Set color
         Renderer renderer = go.GetComponent<Renderer>();
@@ -109,11 +111,12 @@ public class EntityService : MonoBehaviour
         view.EntityID = evt.EntityID;
         view.EntityName = entityName;
         view.EntityType = evt.Type;
+        view.SetTargetPosition(evt.X, evt.Z); // also set for lerping
 
         // Register in registry
         registry.Add(evt.EntityID, view);
 
-        Logger.D("EntityService", "Spawned {0} Type={1} ID={2}", entityName, evt.Type, evt.EntityID);
+        Logger.D("EntityService", "Spawned {0} Type={1} ID={2} at ({3}, {4})", entityName, evt.Type, evt.EntityID, evt.X, evt.Z);
 
         // If this is a PlayerView, check if it's the local player
         if (view is PlayerView playerView)

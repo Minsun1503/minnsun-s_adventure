@@ -58,7 +58,11 @@ public class PacketRouter : MonoBehaviour
                         new EventBusDispatcher.EntitySpawnedEvent
                         {
                             EntityID = packet.Value.EntityID,
-                            Type = packet.Value.Type
+                            Type = packet.Value.Type,
+                            MapID = packet.Value.MapID,
+                            X = packet.Value.X,
+                            Z = packet.Value.Z,
+                            Name = packet.Value.Name
                         });
                 }
                 break;
