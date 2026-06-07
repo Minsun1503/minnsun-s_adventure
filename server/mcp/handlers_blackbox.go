@@ -488,6 +488,76 @@ func init() {
 			"output":       string(output),
 		})
 	})
+
+	// ─── blackbox_read_delta ──────────────────────────────────────────────────
+	// Reads the last N lines from the newest delta-*.txt file.
+	// Params: {"tail": 50}
+
+	Register("blackbox_read_delta", func(req Request) Response {
+		var p struct {
+			Tail int `json:"tail"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			p.Tail = 50
+		}
+		if p.Tail <= 0 {
+			p.Tail = 10
+		}
+		if p.Tail > 10000 {
+			p.Tail = 10000
+		}
+
+		newestFile, err := findNewestDeltaFile()
+		if err != nil {
+			return rpcResult(req.ID, map[string]any{
+				"file":  "",
+				"lines": []string{},
+			})
+		}
+
+		lines := readLastLines(newestFile, p.Tail)
+		if lines == nil {
+			lines = []string{}
+		}
+
+		return rpcResult(req.ID, map[string]any{
+			"file":  filepath.Base(newestFile),
+			"lines": lines,
+		})
+	})
+}
+
+// findNewestDeltaFile finds the newest delta-*.txt file in the log directory
+// by modification time. Returns the full path.
+func findNewestDeltaFile() (string, error) {
+	logDir := config.C().LogDir
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		return "", err
+	}
+
+	var newest string
+	var newestMod time.Time
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "delta-") || !strings.HasSuffix(e.Name(), ".txt") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(newestMod) {
+			newestMod = info.ModTime()
+			newest = filepath.Join(logDir, e.Name())
+		}
+	}
+
+	if newest == "" {
+		return "", fmt.Errorf("no delta-*.txt files found in %s", logDir)
+	}
+
+	return newest, nil
 }
 
 // readLastLines reads the last n lines from a file using a circular buffer,

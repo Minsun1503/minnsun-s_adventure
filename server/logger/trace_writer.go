@@ -53,6 +53,10 @@ var (
 	traceFile    *os.File
 	traceFileDay string // "2006-01-02"
 	traceLogDir  string
+
+	// delta file state (guarded by traceFileMu — same mutex)
+	deltaFile    *os.File
+	deltaFileDay string
 )
 
 const traceChannelCapacity = 4096
@@ -128,6 +132,10 @@ func runTraceWorker() {
 				traceFile.Close()
 				traceFile = nil
 			}
+			if deltaFile != nil {
+				deltaFile.Close()
+				deltaFile = nil
+			}
 			traceFileMu.Unlock()
 			return
 		}
@@ -135,7 +143,8 @@ func runTraceWorker() {
 }
 
 // writeTraceEntry marshals one TraceLog to JSON and appends it to the
-// daily-rotated trace file.
+// daily-rotated trace file. Additionally, if the entry's source=="client",
+// it computes a delta/anomaly line and appends it to a separate delta-*.txt file.
 func writeTraceEntry(entry TraceLog) {
 	line, err := json.Marshal(entry)
 	if err != nil {
@@ -147,6 +156,19 @@ func writeTraceEntry(entry TraceLog) {
 	if f != nil {
 		_, _ = fmt.Fprintln(f, string(line))
 	}
+
+	// ── Delta / Anomaly for client entries ────────────────────────────────
+	if source, ok := entry.Fields["source"].(string); ok && source == "client" {
+		trigger, _ := entry.Fields["trigger"].(string)
+		deltaLine := GetDeltaEncoder("client").Encode(entry.Fields, trigger)
+		if deltaLine != "" {
+			df := getOrOpenDeltaFile()
+			if df != nil {
+				_, _ = fmt.Fprintln(df, deltaLine)
+			}
+		}
+	}
+
 	traceFileMu.Unlock()
 }
 
@@ -176,5 +198,34 @@ func getOrOpenTraceFile() *os.File {
 
 	traceFile = f
 	traceFileDay = day
+	return f
+}
+
+// getOrOpenDeltaFile returns the current delta file, rotating by day as needed.
+// Must be called with traceFileMu held.
+func getOrOpenDeltaFile() *os.File {
+	now := time.Now()
+	day := now.Format("2006-01-02")
+
+	if deltaFile != nil && day == deltaFileDay {
+		return deltaFile
+	}
+
+	// Close the old file.
+	if deltaFile != nil {
+		deltaFile.Close()
+		deltaFile = nil
+	}
+
+	name := filepath.Join(traceLogDir, fmt.Sprintf("delta-%s.txt", day))
+
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[DELTA] Cannot open delta file %q: %v\n", name, err)
+		return nil
+	}
+
+	deltaFile = f
+	deltaFileDay = day
 	return f
 }
