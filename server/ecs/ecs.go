@@ -4,6 +4,7 @@ import (
 	"net"
 	"server/peakgo/astar"
 	"server/peakgo/connwriter"
+	"server/peakgo/pool"
 	"server/peakgo/threat"
 	"server/peakgo/timer"
 	"sync"
@@ -256,12 +257,9 @@ type PartyMemberComponent struct {
 
 const chunkSize = 1024
 
-var entitySlicePool = sync.Pool{
-	New: func() any {
-		s := make([]Entity, 0, 1024)
-		return &s
-	},
-}
+// entitySlicePool recycles []Entity slices for RangeMutate operations.
+// Uses peakgo/pool.SlicePool for type safety and zero-allocation reclamation.
+var entitySlicePool = pool.NewSlicePool[Entity](1024)
 
 type ComponentStore[T any] struct {
 	mu     sync.RWMutex
@@ -401,7 +399,7 @@ func (s *ComponentStore[T]) RangeMutate(f func(key Entity) bool) {
 		return
 	}
 
-	pBuf := entitySlicePool.Get().(*[]Entity)
+	pBuf := entitySlicePool.Get()
 	buf := *pBuf
 	if cap(buf) < count {
 		buf = make([]Entity, count)

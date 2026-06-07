@@ -1,8 +1,8 @@
 package ecs
 
 import (
-	"math/rand/v2"
 	"runtime"
+	"server/peakgo/rng"
 	"testing"
 )
 
@@ -46,7 +46,7 @@ func BenchmarkWorldScale(b *testing.B) {
 			for i := 0; i < s.players; i++ {
 				eid := reg.NewEntity()
 				reg.SetMetadata(eid, MetadataComponent{Name: "bench_player", Type: EntityPlayer})
-				reg.SetPosition(eid, PositionComponent{X: rand.IntN(500), Z: rand.IntN(500), MapID: 1})
+				reg.SetPosition(eid, PositionComponent{X: rng.Intn(500), Z: rng.Intn(500), MapID: 1})
 				reg.SetStats(eid, StatsComponent{HP: 100, MaxHP: 100, MP: 50, MaxMP: 50})
 			}
 
@@ -54,7 +54,7 @@ func BenchmarkWorldScale(b *testing.B) {
 			for i := 0; i < s.monsters; i++ {
 				eid := reg.NewEntity()
 				reg.SetMetadata(eid, MetadataComponent{Name: "bench_monster", Type: EntityMonster})
-				reg.SetPosition(eid, PositionComponent{X: rand.IntN(500), Z: rand.IntN(500), MapID: 1})
+				reg.SetPosition(eid, PositionComponent{X: rng.Intn(500), Z: rng.Intn(500), MapID: 1})
 				reg.SetStats(eid, StatsComponent{HP: 50, MaxHP: 50})
 				reg.SetAI(eid, AIComponent{
 					State:       AIStateIdle,

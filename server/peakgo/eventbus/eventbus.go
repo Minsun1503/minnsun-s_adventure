@@ -72,7 +72,6 @@ type Bus struct {
 	subscribersMap atomic.Value
 	writeMu        sync.Mutex     // Protects the COW clone operation during Subscribe
 	closed         atomic.Bool    // Toggled to true during graceful shutdown
-	liveMu         sync.RWMutex   // Protects send-to-channel vs channel-close race (Drain)
 	wg             sync.WaitGroup // Tracks active subscriber goroutines for graceful termination
 }
 
@@ -181,13 +180,21 @@ func (b *Bus) Publish(
 	topic string,
 	event Event,
 ) {
-	b.liveMu.RLock()
 	if b.closed.Load() {
-		b.liveMu.RUnlock()
 		return
 	}
 
 	subs := b.loadSubscribers()[topic]
+	if len(subs) == 0 {
+		return
+	}
+
+	// Hot-path optimization: eliminate RWMutex using panic recovery.
+	// If Drain() closes the channel concurrently, selectnbsend panics.
+	// We catch it gracefully without allocating or locking.
+	defer func() {
+		_ = recover()
+	}()
 
 	// Broadcast the event to all subscribers registered under the topic
 	for _, sub := range subs {
@@ -198,8 +205,6 @@ func (b *Bus) Publish(
 			// This enforces the strict at-most-once delivery strategy.
 		}
 	}
-
-	b.liveMu.RUnlock()
 }
 
 // ─── Generic TypedBus[T] for Zero-Allocation Hot-Path ──────────────────────
@@ -220,7 +225,6 @@ type TypedBus[T any] struct {
 	subscribersMap atomic.Value
 	writeMu        sync.Mutex
 	closed         atomic.Bool
-	liveMu         sync.RWMutex
 	wg             sync.WaitGroup
 }
 
@@ -287,13 +291,19 @@ func (b *TypedBus[T]) PublishSync(topic string, event T) {
 
 // Publish delivers a typed event asynchronously (0 B/op, 0 allocs/op).
 func (b *TypedBus[T]) Publish(topic string, event T) {
-	b.liveMu.RLock()
 	if b.closed.Load() {
-		b.liveMu.RUnlock()
 		return
 	}
 
 	subs := b.loadSubscribers()[topic]
+	if len(subs) == 0 {
+		return
+	}
+
+	defer func() {
+		_ = recover()
+	}()
+
 	for _, sub := range subs {
 		select {
 		case sub.ch <- event:
@@ -301,7 +311,6 @@ func (b *TypedBus[T]) Publish(topic string, event T) {
 			// Drop on overflow
 		}
 	}
-	b.liveMu.RUnlock()
 }
 
 // Drain gracefully shuts down the TypedBus.
@@ -313,14 +322,12 @@ func (b *TypedBus[T]) Drain() {
 	}
 	b.closed.Store(true)
 
-	b.liveMu.Lock()
 	subsMap := b.loadSubscribers()
 	for _, subs := range subsMap {
 		for _, sub := range subs {
 			close(sub.ch)
 		}
 	}
-	b.liveMu.Unlock()
 
 	b.subscribersMap.Store(make(map[string][]*typedSubscriber[T]))
 	b.writeMu.Unlock()
@@ -342,9 +349,6 @@ func (b *Bus) Drain() {
 
 	b.closed.Store(true)
 
-	// Acquire write lock on liveMu to prevent concurrent Publish from sending to closing channels
-	b.liveMu.Lock()
-
 	// Close all channels to break the 'for ... range' loops in the workers
 	subsMap := b.loadSubscribers()
 	for _, subs := range subsMap {
@@ -352,8 +356,6 @@ func (b *Bus) Drain() {
 			close(sub.ch)
 		}
 	}
-
-	b.liveMu.Unlock()
 
 	// Purge references to allow fast garbage collection
 	b.subscribersMap.Store(make(map[string][]*subscriber))

@@ -105,8 +105,17 @@ func (mw *MapWorker) UnregisterPlayerAOI(entity ecs.Entity) {
 // producing enter/leave events and sending corresponding packets.
 func (mw *MapWorker) ProcessAOIEvents(entity ecs.Entity, pos ecs.PositionComponent) {
 	eventsPtr := mw.AOIManager.UpdateOne(entity, pos, func(origin ecs.PositionComponent, worldRadius float64, excludeID ecs.Entity) *[]ecs.Entity {
-		return aoiSpatialQueryFromGrid(mw.SpatialGrid, origin, worldRadius, excludeID)
+		return aoiSpatialQueryFromGrid(GlobalSpatialGrid, origin, worldRadius, excludeID)
 	})
+
+	// Always record visible entity count by querying the spatial grid for this position.
+	// This gives us the total number of entities in the watcher's viewport, even if no enters/leaves occurred.
+	candidates := GlobalSpatialGrid.QueryRadius(pos, WatcherRadius, entity)
+	if candidates != nil {
+		perf.GlobalPacketMonitor.RecordAoiVisible(len(*candidates))
+		FreeQueryCandidates(candidates)
+	}
+
 	if eventsPtr == nil || len(*eventsPtr) == 0 {
 		if eventsPtr != nil {
 			aoi.AOIEventPool.Put(eventsPtr)
@@ -121,12 +130,15 @@ func (mw *MapWorker) ProcessAOIEvents(entity ecs.Entity, pos ecs.PositionCompone
 		return
 	}
 
+	// Record AOI metrics for benchmarking
 	for _, ev := range *eventsPtr {
 		switch ev.Type {
 		case aoi.EventEnter:
 			sendSpawnToFrom(watcherConn.Writer, ev.Target, mw.Registry)
+			perf.GlobalPacketMonitor.RecordAoiEnter()
 		case aoi.EventLeave:
 			sendDespawnTo(watcherConn.Writer, ev.Target)
+			perf.GlobalPacketMonitor.RecordAoiLeave()
 		}
 	}
 }

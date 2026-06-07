@@ -32,7 +32,13 @@ func handleInventory(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 	}
 	inventoryTextPacket := game.RunInventoryQuerySystem(playerEntity)
 	frame := broadcast.BuildNotice(broadcast.NoticePayload{Message: inventoryTextPacket})
-	conn.Write(frame)
+	// Use connwriter.Writer for non-blocking outbound write instead of direct conn.Write.
+	if connComp, ok := ecs.DefaultRegistry.GetConnection(playerEntity); ok && connComp.Writer != nil {
+		connComp.Writer.Send(frame)
+	} else {
+		// Fallback: connwriter not set (e.g. websocket connections), use netio.WritePacket with deadline.
+		_ = netio.WritePacket(conn, frame)
+	}
 }
 
 func handleUseItem(conn net.Conn, playerEntity ecs.Entity, payload []byte) {

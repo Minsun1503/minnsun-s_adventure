@@ -60,29 +60,29 @@ func IsInRange(originID, targetID ecs.Entity, worldRadius float64) bool {
 	return spatial.IsInRange(originID, targetID, worldRadius)
 }
 
-// ProcessAOIEvents provides a backward-compatible bridge for movement.go.
-// In the per-MapWorker architecture, use mw.ProcessAOIEvents instead.
-// This stub is maintained only for legacy game code compatibility.
 func ProcessAOIEvents(entity ecs.Entity, pos ecs.PositionComponent) {
-	// Legacy stub: AOI events are now handled per-map in MapWorker.ProcessAOIEvents.
-	_ = entity
-	_ = pos
+	mw := GlobalWorld.GetWorker(pos.MapID)
+	if mw != nil {
+		mw.ProcessAOIEvents(entity, pos)
+	}
 }
 
 // RegisterPlayerAOI registers a player entity as an AOI watcher on the global AOI manager.
-// NOTE: This is a legacy convenience bridge. In the per-MapWorker architecture,
-// use mw.RegisterPlayerAOI() instead.
 func RegisterPlayerAOI(entity ecs.Entity) {
-	// Legacy stub: AOI registration is now handled per-map.
-	_ = entity
+	if pos, ok := ecs.DefaultRegistry.GetPosition(entity); ok {
+		if mw := GlobalWorld.GetWorker(pos.MapID); mw != nil {
+			mw.RegisterPlayerAOI(entity)
+		}
+	}
 }
 
 // UnregisterPlayerAOI removes a player from the global AOI watcher set.
-// NOTE: This is a legacy convenience bridge. In the per-MapWorker architecture,
-// use mw.UnregisterPlayerAOI() instead.
 func UnregisterPlayerAOI(entity ecs.Entity) {
-	// Legacy stub: AOI unregistration is now handled per-map.
-	_ = entity
+	if pos, ok := ecs.DefaultRegistry.GetPosition(entity); ok {
+		if mw := GlobalWorld.GetWorker(pos.MapID); mw != nil {
+			mw.UnregisterPlayerAOI(entity)
+		}
+	}
 }
 
 // InitAOIManager is a no-op stub that replaces the deleted GlobalAOIManager setup.

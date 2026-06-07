@@ -3,6 +3,8 @@ package protocol
 import (
 	"encoding/binary"
 	"net"
+
+	"server/peakgo/netio"
 )
 
 // Server-to-Client Error Opcode
@@ -15,8 +17,10 @@ import (
 // This file only contains the packet builder functions.
 
 // SendErrorPacket constructs and transmits a binary error packet to the given TCP connection.
-// It writes directly to net.Conn because at the point of error, the player entity
-// may not yet exist in the ECS registry (e.g., login failure before CreatePlayerEntity).
+// Uses netio.WritePacket with a write deadline to avoid blocking the Accept/Receive goroutine
+// if the client has a slow or half-open connection. At the point of error, the player entity
+// may not yet exist in the ECS registry (e.g., login failure before CreatePlayerEntity),
+// so we cannot use connwriter.Writer. netio.WritePacket provides the necessary deadline protection.
 //
 // Parameters:
 //   - conn:      The raw TCP socket to write to.
@@ -50,8 +54,8 @@ func SendErrorPacket(conn net.Conn, errorCode uint16, message string) {
 	// Message body
 	copy(packet[7:], msgBytes)
 
-	// Direct write — no deadline needed since we close immediately after
-	conn.Write(packet)
+	// Use netio.WritePacket with 30s write deadline to prevent blocking Accept goroutine.
+	_ = netio.WritePacket(conn, packet)
 }
 
 // SendSuccessPacket constructs and transmits a binary success packet to the given TCP connection.
@@ -88,5 +92,5 @@ func SendSuccessPacket(conn net.Conn, message string) {
 	// Message body
 	copy(packet[5:], msgBytes)
 
-	conn.Write(packet)
+	_ = netio.WritePacket(conn, packet)
 }

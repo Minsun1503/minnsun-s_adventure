@@ -66,8 +66,8 @@ func SendNoticeBinary(entity ecs.Entity, frame []byte) {
 // MovementSystem chịu trách nhiệm thẩm định điều kiện, đồng bộ hóa tọa độ
 // và phát sóng nhị phân trạng thái dịch chuyển của thực thể.
 func MovementSystem(entity ecs.Entity, x, z int) bool {
-	// Hàng rào bảo vệ 1: Kiểm thử biên bản đồ game [0, 100] siêu tốc qua gmath
-	if !gmath.InBounds(x, z, 0, 100) {
+	// Hàng rào bảo vệ 1: Kiểm thử biên bản đồ game [0, 1000] siêu tốc qua gmath
+	if !gmath.InBounds(x, z, 0, 1000) {
 		SendNoticeSystem(entity, staticOutOfBoundsNotice)
 		return false
 	}

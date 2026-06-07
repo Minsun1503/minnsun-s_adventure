@@ -1,6 +1,6 @@
 package ecs
 
-import "sync"
+import "server/peakgo/pool"
 
 // ─── Command Types ───────────────────────────────────────────────────────────
 //
@@ -13,8 +13,8 @@ import "sync"
 // goroutine — no cross-map locking needed.
 //
 // Zero-alloc design: slices are pre-allocated on first use and reset (not
-// re-allocated) each flush via Truncate(0). The sync.Pool provides size-class
-// isolation for burst scenarios.
+// re-allocated) each flush via Truncate(0). The pool.TypedPool provides
+// size-class isolation for burst scenarios with type safety.
 
 // MoveCommand records a deferred position update for an entity.
 type MoveCommand struct {
@@ -53,37 +53,17 @@ type SpatialGrid interface {
 
 // ─── CommandBuffer ───────────────────────────────────────────────────────────
 
-// moveSlicePool recycles move command slices to avoid allocation churn.
-var moveSlicePool = sync.Pool{
-	New: func() any {
-		s := make([]MoveCommand, 0, 16)
-		return &s
-	},
-}
+// moveSlicePool recycles MoveCommand slices using typed pool.
+var moveSlicePool = pool.NewSlicePool[MoveCommand](16)
 
-// damageSlicePool recycles damage command slices.
-var damageSlicePool = sync.Pool{
-	New: func() any {
-		s := make([]DamageCommand, 0, 16)
-		return &s
-	},
-}
+// damageSlicePool recycles DamageCommand slices using typed pool.
+var damageSlicePool = pool.NewSlicePool[DamageCommand](16)
 
-// spawnSlicePool recycles spawn command slices.
-var spawnSlicePool = sync.Pool{
-	New: func() any {
-		s := make([]SpawnCommand, 0, 8)
-		return &s
-	},
-}
+// spawnSlicePool recycles SpawnCommand slices using typed pool.
+var spawnSlicePool = pool.NewSlicePool[SpawnCommand](8)
 
-// destroySlicePool recycles destroy command slices.
-var destroySlicePool = sync.Pool{
-	New: func() any {
-		s := make([]DestroyCommand, 0, 8)
-		return &s
-	},
-}
+// destroySlicePool recycles DestroyCommand slices using typed pool.
+var destroySlicePool = pool.NewSlicePool[DestroyCommand](8)
 
 // CommandBuffer records deferred ECS mutations during a game tick.
 // Not safe for concurrent access — each Map owns its own CommandBuffer.
@@ -97,10 +77,10 @@ type CommandBuffer struct {
 // NewCommandBuffer creates a CommandBuffer with pooled backing slices.
 func NewCommandBuffer() *CommandBuffer {
 	return &CommandBuffer{
-		moves:    *moveSlicePool.Get().(*[]MoveCommand),
-		damages:  *damageSlicePool.Get().(*[]DamageCommand),
-		spawns:   *spawnSlicePool.Get().(*[]SpawnCommand),
-		destroys: *destroySlicePool.Get().(*[]DestroyCommand),
+		moves:    *moveSlicePool.Get(),
+		damages:  *damageSlicePool.Get(),
+		spawns:   *spawnSlicePool.Get(),
+		destroys: *destroySlicePool.Get(),
 	}
 }
 

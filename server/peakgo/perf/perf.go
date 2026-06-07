@@ -16,6 +16,7 @@ package perf
 
 import (
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -107,6 +108,26 @@ func (tm *TickMonitor) Overflow() uint64 { return atomic.LoadUint64(&tm.overflow
 // This is NOT a hot-path function — call from monitoring goroutine only.
 // Allocates a slice for sorting.
 func (tm *TickMonitor) P99() time.Duration {
+	return tm.percentile(99)
+}
+
+// P999 returns the 99.9th percentile tick duration by sorting the ring buffer.
+// This is NOT a hot-path function — call from monitoring goroutine only.
+// Allocates a slice for sorting.
+func (tm *TickMonitor) P999() time.Duration {
+	return tm.percentile(999)
+}
+
+var sortBufPool = sync.Pool{
+	New: func() any {
+		s := make([]int64, 0, RingBufferSize)
+		return &s
+	},
+}
+
+// percentile returns the p-th percentile tick duration from the ring buffer.
+// p=99 → P99, p=999 → P999.
+func (tm *TickMonitor) percentile(p int) time.Duration {
 	pos := atomic.LoadUint64(&tm.position)
 	n := pos
 	if n > RingBufferSize {
@@ -119,13 +140,17 @@ func (tm *TickMonitor) P99() time.Duration {
 	if pos > RingBufferSize {
 		start = pos % RingBufferSize
 	}
-	vals := make([]int64, 0, n)
+	
+	pBuf := sortBufPool.Get().(*[]int64)
+	vals := (*pBuf)[:0]
+	
 	for i := uint64(0); i < n; i++ {
 		if v := tm.buffer[(start+i)%RingBufferSize]; v > 0 {
 			vals = append(vals, v)
 		}
 	}
 	if len(vals) == 0 {
+		sortBufPool.Put(pBuf)
 		return 0
 	}
 	for i := 1; i < len(vals); i++ {
@@ -133,7 +158,40 @@ func (tm *TickMonitor) P99() time.Duration {
 			vals[j], vals[j-1] = vals[j-1], vals[j]
 		}
 	}
-	return time.Duration(vals[len(vals)*99/100])
+	idx := len(vals) * p / 1000
+	if idx >= len(vals) {
+		idx = len(vals) - 1
+	}
+	res := time.Duration(vals[idx])
+	sortBufPool.Put(pBuf)
+	return res
+}
+
+// MaxInRing scans the ring buffer for the maximum value within the current
+// window. Unlike Max() which records the all-time maximum, MaxInRing() returns
+// the worst tick in approximately the last 51.2 seconds (1024 ticks at 50ms
+// per tick). This is NOT a hot-path function — call from monitoring goroutine
+// only. Allocates a slice for iteration safety.
+func (tm *TickMonitor) MaxInRing() time.Duration {
+	pos := atomic.LoadUint64(&tm.position)
+	n := pos
+	if n > RingBufferSize {
+		n = RingBufferSize
+	}
+	if n == 0 {
+		return 0
+	}
+	start := uint64(0)
+	if pos > RingBufferSize {
+		start = pos % RingBufferSize
+	}
+	var maxVal int64
+	for i := uint64(0); i < n; i++ {
+		if v := tm.buffer[(start+i)%RingBufferSize]; v > maxVal {
+			maxVal = v
+		}
+	}
+	return time.Duration(maxVal)
 }
 
 // Reset clears all recorded data.
@@ -275,6 +333,13 @@ type PacketMonitor struct {
 	peakOut    uint64 // Peak outbound packets per second
 	aoiQueries uint64 // Total AOI queries executed
 	broadcasts uint64 // Total Broadcast packets sent
+
+	// AOI metrics for benchmarking
+	aoiEnters          uint64 // Total AOI Enter events
+	aoiLeaves          uint64 // Total AOI Leave events
+	visibleEntitiesSum uint64 // Sum of visible entity counts (for avg)
+	visibleEntitiesCnt uint64 // Count of visible entity samples
+	visibleEntitiesMax uint64 // Max visible entities in one viewport
 }
 
 // RecordIn records an inbound packet.
@@ -299,6 +364,53 @@ func (pm *PacketMonitor) RecordBroadcast() {
 	atomic.AddUint64(&pm.broadcasts, 1)
 }
 
+// RecordAoiEnter records an AOI Enter event.
+func (pm *PacketMonitor) RecordAoiEnter() {
+	atomic.AddUint64(&pm.aoiEnters, 1)
+}
+
+// RecordAoiLeave records an AOI Leave event.
+func (pm *PacketMonitor) RecordAoiLeave() {
+	atomic.AddUint64(&pm.aoiLeaves, 1)
+}
+
+// RecordAoiVisible records the number of entities visible in a viewport.
+func (pm *PacketMonitor) RecordAoiVisible(count int) {
+	atomic.AddUint64(&pm.visibleEntitiesSum, uint64(count))
+	atomic.AddUint64(&pm.visibleEntitiesCnt, 1)
+	// Update max using CAS loop for atomic max
+	for {
+		cur := atomic.LoadUint64(&pm.visibleEntitiesMax)
+		if uint64(count) <= cur {
+			break
+		}
+		if atomic.CompareAndSwapUint64(&pm.visibleEntitiesMax, cur, uint64(count)) {
+			break
+		}
+	}
+}
+
+// AoiEnters returns the total AOI Enter events.
+func (pm *PacketMonitor) AoiEnters() uint64 { return atomic.LoadUint64(&pm.aoiEnters) }
+
+// AoiLeaves returns the total AOI Leave events.
+func (pm *PacketMonitor) AoiLeaves() uint64 { return atomic.LoadUint64(&pm.aoiLeaves) }
+
+// VisibleEntitiesAvg returns the average visible entities per viewport.
+func (pm *PacketMonitor) VisibleEntitiesAvg() float64 {
+	cnt := atomic.LoadUint64(&pm.visibleEntitiesCnt)
+	if cnt == 0 {
+		return 0
+	}
+	sum := atomic.LoadUint64(&pm.visibleEntitiesSum)
+	return float64(sum) / float64(cnt)
+}
+
+// VisibleEntitiesMax returns the maximum visible entities in one viewport.
+func (pm *PacketMonitor) VisibleEntitiesMax() uint64 {
+	return atomic.LoadUint64(&pm.visibleEntitiesMax)
+}
+
 // Snapshot returns the current packet statistics.
 func (pm *PacketMonitor) Snapshot() (packetsIn, packetsOut, bytesIn, bytesOut, aoi, bcast uint64) {
 	return atomic.LoadUint64(&pm.packetsIn),
@@ -307,6 +419,15 @@ func (pm *PacketMonitor) Snapshot() (packetsIn, packetsOut, bytesIn, bytesOut, a
 		atomic.LoadUint64(&pm.bytesOut),
 		atomic.LoadUint64(&pm.aoiQueries),
 		atomic.LoadUint64(&pm.broadcasts)
+}
+
+// SnapshotAOI returns AOI-specific metrics.
+func (pm *PacketMonitor) SnapshotAOI() (enters, leaves, visibleSum, visibleCnt, visibleMax uint64) {
+	return atomic.LoadUint64(&pm.aoiEnters),
+		atomic.LoadUint64(&pm.aoiLeaves),
+		atomic.LoadUint64(&pm.visibleEntitiesSum),
+		atomic.LoadUint64(&pm.visibleEntitiesCnt),
+		atomic.LoadUint64(&pm.visibleEntitiesMax)
 }
 
 // Reset resets all counters.
@@ -319,6 +440,11 @@ func (pm *PacketMonitor) Reset() {
 	atomic.StoreUint64(&pm.peakOut, 0)
 	atomic.StoreUint64(&pm.aoiQueries, 0)
 	atomic.StoreUint64(&pm.broadcasts, 0)
+	atomic.StoreUint64(&pm.aoiEnters, 0)
+	atomic.StoreUint64(&pm.aoiLeaves, 0)
+	atomic.StoreUint64(&pm.visibleEntitiesSum, 0)
+	atomic.StoreUint64(&pm.visibleEntitiesCnt, 0)
+	atomic.StoreUint64(&pm.visibleEntitiesMax, 0)
 }
 
 // ─── Report ───────────────────────────────────────────────────────────────────
@@ -329,6 +455,8 @@ type Report struct {
 	TickMax     time.Duration
 	TickAvg     time.Duration
 	TickP99     time.Duration
+	TickP999    time.Duration
+	TickWorst1m time.Duration
 	TickCount   uint64
 	PacketsIn   uint64
 	PacketsOut  uint64
@@ -349,12 +477,14 @@ type Report struct {
 // This function allocates (called from monitoring goroutine, not hot-path).
 func Collect(tm *TickMonitor, pm *PacketMonitor, mm *MemMonitor) Report {
 	report := Report{
-		TickMin:    tm.Min(),
-		TickMax:    tm.Max(),
-		TickAvg:    tm.Avg(),
-		TickP99:    tm.P99(),
-		TickCount:  tm.Count(),
-		Goroutines: runtime.NumGoroutine(),
+		TickMin:     tm.Min(),
+		TickMax:     tm.Max(),
+		TickAvg:     tm.Avg(),
+		TickP99:     tm.P99(),
+		TickP999:    tm.P999(),
+		TickWorst1m: tm.MaxInRing(),
+		TickCount:   tm.Count(),
+		Goroutines:  runtime.NumGoroutine(),
 	}
 
 	report.PacketsIn, report.PacketsOut, report.BytesIn, report.BytesOut, report.AoiQueries, report.Broadcasts = pm.Snapshot()

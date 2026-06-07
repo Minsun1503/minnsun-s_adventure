@@ -46,6 +46,14 @@ var (
 	flagSpread   = flag.Bool("spread", false, "Spread bots across maps 1-5")
 	flagPrefix   = flag.String("prefix", "bot", "Bot username prefix")
 	flagMapCount = flag.Int("maps", 5, "Number of maps to spread across")
+
+	// New AOI test flags
+	flagTeleport = flag.Bool("teleport", false, "Bots teleport randomly every tick (Phase 6)")
+	flagBorder   = flag.Bool("border", false, "Bots cross cell borders repeatedly (Phase 5)")
+	flagBoss     = flag.Bool("boss", false, "Bots converge on single point + spam attack (Phase 8)")
+
+	// Border test state
+	borderStep atomic.Int32
 )
 
 // ─── Bot ──────────────────────────────────────────────────────────────────────
@@ -162,6 +170,9 @@ func printBanner() {
 	fmt.Printf("  Bots:       %d\n", *flagBots)
 	fmt.Printf("  Clump:      %v\n", *flagClump)
 	fmt.Printf("  Spread:     %v\n", *flagSpread)
+	fmt.Printf("  Border:     %v\n", *flagBorder)
+	fmt.Printf("  Teleport:   %v\n", *flagTeleport)
+	fmt.Printf("  Boss:       %v\n", *flagBoss)
 	fmt.Printf("  Move:       %v\n", *flagMove)
 	fmt.Printf("  Attack:     %v\n", *flagAttack)
 	fmt.Printf("  Tick:       %v\n", *flagTick)
@@ -361,6 +372,19 @@ func (b *Bot) readLoop() {
 			if len(payload) >= 22 {
 				eid := binary.BigEndian.Uint64(payload[0:8])
 				entityType := payload[8]
+				// X at offset 13, Z at offset 17 (after: EntityID 8 + Type 1 + MapID 4)
+				spawnX := int32(binary.BigEndian.Uint32(payload[13:17]))
+				spawnZ := int32(binary.BigEndian.Uint32(payload[17:21]))
+
+				// If this is our own entity, update our position from the server's trusted state.
+				b.entityIDMu.RLock()
+				myID := b.entityID
+				b.entityIDMu.RUnlock()
+				if eid == myID {
+					b.x = spawnX
+					b.z = spawnZ
+				}
+
 				if entityType == 1 { // Monster (0=player, 1=monster, 2=ground_item)
 					b.targetIDMu.Lock()
 					if b.targetID == 0 {
@@ -397,22 +421,73 @@ func (b *Bot) sendActions() {
 	// ── Compute next movement ──
 	var targetX, targetZ int32
 
-	// Clump mode: all bots try to move near (0,0)
-	if *flagClump {
+	// Priority: boss > teleport > border > clump > spread > default
+	if *flagBoss {
+		// Phase 8 — Boss Event: all bots converge on a single point (0,0)
+		// and move randomly within a 2-unit radius. This simulates worst-case
+		// stacking where all 1000+ players are visible to each other.
+		targetX = int32(rng.Intn(3) - 1)
+		targetZ = int32(rng.Intn(3) - 1)
+	} else if *flagTeleport {
+		// Phase 6 — Teleport: bots teleport randomly across the entire map
+		// from (10,10) to (900,900) every tick. This stresses AOI enter/leave
+		// as watchers rapidly appear/disappear from each other's viewport.
+		targetX = int32(10 + rng.Intn(891))
+		targetZ = int32(10 + rng.Intn(891))
+	} else if *flagBorder {
+		// Phase 5 — Cell Border Crossing: bots oscillate across cell borders.
+		// The grid cell size is 32 units, so crossing from (31,31) to (32,31)
+		// causes AOI recalculation. Each bot alternates its X coordinate between
+		// 31 and 32 to trigger repeated enter/leave cycles every tick.
+		step := borderStep.Add(1)
+		if step%2 == 0 {
+			targetX = 31
+		} else {
+			targetX = 32
+		}
+		targetZ = int32(b.id%62 + 1) // spread across Z to avoid all bots on same cell edge
+	} else if *flagClump {
+		// Phase 2 — Clump: all bots try to move near (0,0)
 		// Clump near origin (0,0) — worst-case AOI density
 		targetX = int32(rng.Intn(5) - 2)
 		targetZ = int32(rng.Intn(5) - 2)
 	} else if *flagSpread {
-		// Spread mode: bots keep their initial position (no movement)
-		targetX = b.x
-		targetZ = b.z
-	} else {
-		// Default: random walk within map bounds [1, 99]
+		// Spread mode: bots move randomly within [10, 990] to create natural
+		// movement that crosses AOI cell borders (cell size = 32), generating
+		// Enter/Leave chunk events as neighbors change.
 		dx := int32(rng.Intn(3) - 1) // -1, 0, or 1
 		dz := int32(rng.Intn(3) - 1)
-		tx, tz := gmath.ClampPos(int(b.x+dx), int(b.z+dz), 1, 99)
+		tx, tz := gmath.ClampPos(int(b.x+dx), int(b.z+dz), 10, 990)
 		targetX = int32(tx)
 		targetZ = int32(tz)
+	} else {
+		// Default: random walk within map bounds [1, 999]
+		dx := int32(rng.Intn(3) - 1) // -1, 0, or 1
+		dz := int32(rng.Intn(3) - 1)
+		tx, tz := gmath.ClampPos(int(b.x+dx), int(b.z+dz), 1, 999)
+		targetX = int32(tx)
+		targetZ = int32(tz)
+	}
+
+	// For boss mode, also send a second attack packet to increase combat stress
+	if *flagBoss && *flagAttack {
+		// Send an extra attack packet to amplify combat stress on the boss target
+		b.targetIDMu.RLock()
+		target := b.targetID
+		b.targetIDMu.RUnlock()
+		if target == 0 {
+			target = 99999
+		}
+		packet2 := make([]byte, 11)
+		binary.BigEndian.PutUint16(packet2[0:2], 9)
+		packet2[2] = opcodeC2SAttack
+		binary.BigEndian.PutUint64(packet2[3:11], target)
+		if n, err := b.conn.Write(packet2); err == nil {
+			b.attackSent.Add(1)
+			totalAttackWritten.Add(1)
+			totalBytesWritten.Add(int64(n))
+			b.bytesSent.Add(int64(n))
+		}
 	}
 
 	// ── Send MOVE packet ──

@@ -9,6 +9,7 @@ import (
 	"server/logger"
 	"server/peakgo/anticheat"
 	"server/peakgo/connwriter"
+	"server/peakgo/rng"
 	"server/state"
 	"strings"
 	"time"
@@ -287,7 +288,15 @@ func CreatePlayerEntity(conn net.Conn, username string) (ecs.Entity, error) {
 			})
 		}
 	} else {
-		ecs.DefaultRegistry.SetPosition(entityID, ecs.PositionComponent{MapID: 1, X: 0, Z: 0})
+		// Bots get a random spawn position within [10, 900] to prevent all bots
+		// from clumping at (0,0), which would make AOI culling ineffective.
+		spawnX := 10
+		spawnZ := 10
+		if isBot {
+			spawnX = 10 + rng.Intn(891) // 10..900 inclusive
+			spawnZ = 10 + rng.Intn(891)
+		}
+		ecs.DefaultRegistry.SetPosition(entityID, ecs.PositionComponent{MapID: 1, X: spawnX, Z: spawnZ})
 		ecs.DefaultRegistry.SetStats(entityID, ecs.StatsComponent{Level: 1, XP: 0, HP: 100, MaxHP: 100, MP: 100, MaxMP: 100, Dam: 15, Attack: 15, HitRate: 850, DodgeRate: 100, CritRate: 50, CritDamage: 1500})
 		ecs.DefaultRegistry.SetEquipment(entityID, ecs.EquipmentComponent{WeaponID: 0, ArmorID: 0})
 	}
