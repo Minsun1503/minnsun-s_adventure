@@ -251,6 +251,26 @@ public class NetworkClientWS : MonoBehaviour
     }
 
     /// <summary>
+    /// Send a text frame (not a binary game packet) over the WebSocket.
+    /// Used by ClientSnapshotDumper to relay debug snapshots to the server.
+    /// Text frames bypass the binary packet pipeline on the server and are
+    /// intercepted by the WSConn.Read() wrapper for trace logging.
+    /// </summary>
+    public void SendTextFrame(string text)
+    {
+        if (ws == null || !connected) return;
+
+        _ = ws.SendText(text).ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+            {
+                Debug.LogError($"[WS] SendText failed: {t.Exception?.InnerException?.Message}");
+                dispatchQueue.Enqueue(() => Disconnect());
+            }
+        });
+    }
+
+    /// <summary>
     /// Handle a raw binary WebSocket message.
     /// Each message is one complete framed packet: [length][opcode][payload].
     /// Parsed on receive thread, dispatched to main thread via queue.

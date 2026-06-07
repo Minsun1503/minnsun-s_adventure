@@ -1,5 +1,8 @@
 {
   "debug": false,
+  "unity_exe": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.3.4f1\\Editor\\Unity.exe",
+  "unity_project_path": "C:\\Minnsun-s_Adventure\\client\\Minnsun-s_Adventure",
+  "unity_build_output": "C:\\Minnsun-s_Adventure\\client\\Minnsun-s_Adventure\\Builds\\Windows",
   "log_dir": "logs",
   "log_max_mb": 10,
   "map_bounds_min_x": 0,

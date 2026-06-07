@@ -2,15 +2,23 @@ using UnityEngine;
 
 /// <summary>
 /// Static debug snapshot dumper — collects client state into a JSON log line
-/// so the MCP console bridge can read it and correlate with server logs.
+/// and sends it as a WebSocket text frame to the server trace log.
+///
+/// The server's WSConn.Read() intercepts [SNAPSHOT]-prefixed text frames and
+/// writes them to the JSONL trace file (trace-YYYY-MM-DD.jsonl) via
+/// logger.PushTraceLog() with "source": "client".
+///
+/// Falls back to Debug.Log if no NetworkClientWS instance is available.
 ///
 /// Usage:
 ///   ClientSnapshotDumper.Dump(traceId, reason);
-///
-/// WebGL: outputs via Debug.Log("[SNAPSHOT] " + json)
 /// </summary>
 public static class ClientSnapshotDumper
 {
+    // Cached reference to avoid repeated FindObjectOfType calls
+    private static NetworkClientWS _ws;
+    private static bool _wsSearched;
+
     /// <summary>
     /// Collect and log a diagnostic snapshot of the current client state.
     /// Safe to call from any MonoBehaviour Update() or event handler (main thread only).
@@ -102,7 +110,31 @@ public static class ClientSnapshotDumper
             targetID
         );
 
-        // ── Output ────────────────────────────────────────────────────
-        Debug.Log("[SNAPSHOT] " + json);
+        // ── Output: WebSocket text frame (preferred) or Debug.Log ────
+        SendSnapshot(json);
+    }
+
+    /// <summary>
+    /// Send the snapshot JSON as a WebSocket text frame to the server's
+    /// trace log. Falls back to Debug.Log if no NetworkClientWS found.
+    /// </summary>
+    private static void SendSnapshot(string json)
+    {
+        // Locate NetworkClientWS (lazy cached)
+        if (!_wsSearched)
+        {
+            _ws = Object.FindFirstObjectByType<NetworkClientWS>();
+            _wsSearched = true;
+        }
+
+        if (_ws != null && _ws.IsConnected)
+        {
+            _ws.SendTextFrame("[SNAPSHOT] " + json);
+        }
+        else
+        {
+            // Fallback: just log to Unity console
+            Debug.Log("[SNAPSHOT] " + json);
+        }
     }
 }

@@ -252,6 +252,60 @@ func main() {
 								"required": []string{"table_name"},
 							},
 						},
+						// ─── Blackbox Trace Tools ────────────────────────────────────────
+						{
+							"name":        "blackbox_list_snapshots",
+							"description": "Lấy danh sách tất cả file JSONL trace trong thư mục log (mới nhất trước).",
+							"inputSchema": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{},
+							},
+						},
+						{
+							"name":        "blackbox_read_snapshot",
+							"description": "Đọc N dòng cuối từ file JSONL trace (circular buffer).",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"file": map[string]any{"type": "string", "description": "Tên file jsonl (vd: trace-2026-06-07.jsonl)"},
+									"tail": map[string]any{"type": "number", "description": "Số dòng cuối cần đọc (mặc định: 10, tối đa: 10000)"},
+								},
+								"required": []string{"file"},
+							},
+						},
+						{
+							"name":        "blackbox_filter_trace",
+							"description": "Quét file JSONL mới nhất, lọc các entry theo trace_id.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"trace_id": map[string]any{"type": "string", "description": "trace_id cần tìm"},
+									"limit":    map[string]any{"type": "number", "description": "Giới hạn số kết quả (mặc định: 100, tối đa: 10000)"},
+								},
+								"required": []string{"trace_id"},
+							},
+						},
+						{
+							"name":        "blackbox_apply_patch",
+							"description": "Áp dụng string replacement vào file, chạy go build verify, auto-rollback nếu build lỗi.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"file": map[string]any{"type": "string", "description": "Đường dẫn file cần patch (tương đối từ thư mục server/)"},
+									"old":  map[string]any{"type": "string", "description": "Chuỗi cũ cần thay thế"},
+									"new":  map[string]any{"type": "string", "description": "Chuỗi mới"},
+								},
+								"required": []string{"file", "old", "new"},
+							},
+						},
+						{
+							"name":        "blackbox_trigger_build",
+							"description": "Build Unity WebGL project via CLI. Reads Unity path and project path from config.json or env vars UNITY_PATH, UNITY_PROJECT_PATH.",
+							"inputSchema": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{},
+							},
+						},
 					},
 				},
 			}

@@ -53,6 +53,11 @@ type GameConfig struct {
 	// Respawn
 	RespawnDelayMS  int `json:"respawn_delay_ms"`
 	GroundItemTTLMS int `json:"ground_item_ttl_ms"`
+
+	// Unity Build Bridge
+	UnityExe         string `json:"unity_exe"`
+	UnityProjectPath string `json:"unity_project_path"`
+	UnityBuildOutput string `json:"unity_build_output"`
 }
 
 // DefaultConfig returns a sensible default config matching the current hardcoded values.

@@ -7,6 +7,7 @@ package mcp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -282,6 +283,147 @@ func init() {
 			"rollback": false,
 		})
 	})
+
+	// ─── blackbox_trigger_build ───────────────────────────────────────────────
+	// Triggers a Unity WebGL build via CLI. Reads Unity path and project path
+	// from config.json or falls back to env vars UNITY_PATH / UNITY_PROJECT_PATH.
+	// Unity logs go to a file (not stdout) to avoid capturing KB of text in memory.
+	// On success returns minimal response; on failure reads last 50 log lines.
+
+	Register("blackbox_trigger_build", func(req Request) Response {
+		cfg := config.C()
+
+		// Resolve Unity executable path.
+		unityExe := cfg.UnityExe
+		if unityExe == "" {
+			unityExe = os.Getenv("UNITY_PATH")
+		}
+		if unityExe == "" {
+			return rpcError(req.ID, ErrCodeInvalidParams,
+				"unity_exe not set in config.json and UNITY_PATH env var not found")
+		}
+
+		// Validate executable exists.
+		if _, err := os.Stat(unityExe); err != nil {
+			return rpcError(req.ID, ErrCodeInternal,
+				fmt.Sprintf("Unity executable not found at %s: %v", unityExe, err))
+		}
+
+		// Resolve Unity project path.
+		projectPath := cfg.UnityProjectPath
+		if projectPath == "" {
+			projectPath = os.Getenv("UNITY_PROJECT_PATH")
+		}
+		if projectPath == "" {
+			return rpcError(req.ID, ErrCodeInvalidParams,
+				"unity_project_path not set in config.json and UNITY_PROJECT_PATH env var not found")
+		}
+
+		// Validate project path exists.
+		if _, err := os.Stat(projectPath); err != nil {
+			return rpcError(req.ID, ErrCodeInternal,
+				fmt.Sprintf("Unity project path not found at %s: %v", projectPath, err))
+		}
+
+		// Resolve output path.
+		outputPath := cfg.UnityBuildOutput
+		if outputPath == "" {
+			outputPath = filepath.Join(projectPath, "Builds", "WebGL")
+		}
+
+		// Ensure output directory exists.
+		if err := os.MkdirAll(outputPath, 0755); err != nil {
+			return rpcError(req.ID, ErrCodeInternal,
+				fmt.Sprintf("failed to create output directory %s: %v", outputPath, err))
+		}
+
+		// Ensure log directory exists.
+		logFilePath := `C:\Minnsun-s_Adventure\server\logs\unity_build.log`
+		if err := os.MkdirAll(filepath.Dir(logFilePath), 0755); err != nil {
+			return rpcError(req.ID, ErrCodeInternal,
+				fmt.Sprintf("failed to create log directory: %v", err))
+		}
+
+		// Build the command with 10-minute timeout.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, unityExe,
+			"-batchmode",
+			"-quit",
+			"-projectPath", projectPath,
+			"-executeMethod", "BuildScript.Build",
+			"-buildOutput", outputPath,
+			"-logFile", logFilePath,
+		)
+		cmd.Dir = projectPath
+		// Do NOT capture stdout/stderr — Unity writes directly to -logFile.
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+
+		err := cmd.Run()
+		exitCode := 0
+		if err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return rpcError(req.ID, ErrCodeInternal,
+					"Unity build timed out after 10 minutes")
+			}
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = 1
+			}
+		}
+
+		if exitCode == 0 {
+			return rpcResult(req.ID, map[string]any{
+				"status":      "success",
+				"exit_code":   0,
+				"output_path": outputPath,
+			})
+		}
+
+		// Build failed — read last 50 lines via circular buffer (no memory spike).
+		buildLog := readLastLines(logFilePath, 50)
+		return rpcResult(req.ID, map[string]any{
+			"status":      "failed",
+			"exit_code":   exitCode,
+			"output_path": outputPath,
+			"build_log":   buildLog,
+		})
+	})
+}
+
+// readLastLines reads the last n lines from a file using a circular buffer,
+// matching the pattern used in blackbox_read_snapshot. Returns an empty slice
+// on any error (caller handles gracefully).
+func readLastLines(path string, n int) []string {
+	f, err := os.Open(path)
+	if err != nil {
+		return []string{}
+	}
+	defer f.Close()
+
+	ring := make([]string, n)
+	idx := 0
+	total := 0
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		ring[idx] = scanner.Text()
+		idx = (idx + 1) % n
+		total++
+	}
+
+	if total < n {
+		return ring[:total]
+	}
+	result := make([]string, n)
+	for i := 0; i < n; i++ {
+		result[i] = ring[(idx+i)%n]
+	}
+	return result
 }
 
 // ─── Internal Helpers ────────────────────────────────────────────────────────

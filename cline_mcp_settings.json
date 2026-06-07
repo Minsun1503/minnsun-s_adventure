@@ -1,7 +1,7 @@
 {
     "mcpServers": {
         "minnsun-adventure": {
-            "command": "c:\\Minnsun's Adventure\\server\\mcp-bridge.exe",
+            "command": "c:\\Minnsun-s_Adventure\\server\\mcp-bridge.exe",
             "args": [],
             "autoApprove": [
                 "ecs_list_entities",

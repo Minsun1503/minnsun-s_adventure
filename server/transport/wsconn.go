@@ -11,15 +11,25 @@
 // Each binary message carries exactly one framed game packet.  WSConn.Read()
 // transparently fetches the next message from the WebSocket stream when the
 // current message's bytes are exhausted.
+//
+// # Text Message Interception
+//
+// Text messages with the prefix "[SNAPSHOT]" are intercepted by Read() and
+// forwarded to logger.PushTraceLog() as client-side trace entries.  They are
+// NOT passed to the binary packet pipeline.  All other text messages are
+// silently discarded.
 package transport
 
 import (
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"server/logger"
 )
 
 // ─── Compile-time interface check ─────────────────────────────────────────────
@@ -35,8 +45,10 @@ var _ net.Conn = (*WSConn)(nil)
 //  2. When the current reader is exhausted, ReadMessage is called to fetch the
 //     next binary message — so the protocol framing [length][opcode][payload]
 //     is split across multiple Read() calls as it would be over TCP.
-//  3. Text messages are silently discarded (they should never arrive in
-//     normal operation).
+//  3. Text messages with the prefix "[SNAPSHOT]" are intercepted and logged
+//     as client-side trace entries via logger.PushTraceLog().  They are not
+//     forwarded to the binary packet pipeline.  Other text messages are
+//     silently discarded.
 //
 // Write behaviour:
 //   - Write() sends a single binary WebSocket message.
@@ -65,7 +77,9 @@ func NewWSConn(conn *websocket.Conn) *WSConn {
 // Read implements net.Conn.Read.
 //
 // If the current message reader is exhausted, it fetches the next binary
-// message from the WebSocket stream.  Text messages are skipped.
+// message from the WebSocket stream.  Text messages with the "[SNAPSHOT]"
+// prefix are intercepted and logged as client-side trace entries; other
+// text messages are silently discarded.
 func (w *WSConn) Read(b []byte) (int, error) {
 	for {
 		if w.reader != nil {
@@ -81,12 +95,52 @@ func (w *WSConn) Read(b []byte) (int, error) {
 		}
 
 		// Fetch next WebSocket message.
-		_, msgReader, err := w.conn.NextReader()
+		messageType, msgReader, err := w.conn.NextReader()
 		if err != nil {
 			return 0, err
 		}
+
+		// ── Text message interception ──────────────────────────────
+		// Snapshot frames from ClientSnapshotDumper are sent as text
+		// (not binary) so they bypass the game's binary packet pipeline.
+		if messageType == websocket.TextMessage {
+			handleTextMessage(msgReader)
+			// Loop to fetch next message (should be binary).
+			continue
+		}
+
+		// Binary message: assign to reader for the caller to consume.
 		w.reader = msgReader
 	}
+}
+
+// handleTextMessage reads a complete WebSocket text message and, if it is a
+// client snapshot (prefixed with "[SNAPSHOT]"), pushes it to the JSONL trace
+// log.  Non-snapshot text messages are silently discarded.
+func handleTextMessage(msgReader io.Reader) {
+	// Read the full text payload.  Snapshot frames are small (~300 bytes),
+	// so one allocation per snapshot is acceptable on this non-critical path.
+	raw, err := io.ReadAll(msgReader)
+	if err != nil {
+		return
+	}
+
+	text := string(raw)
+
+	// Only handle [SNAPSHOT]-prefixed messages.
+	if !strings.HasPrefix(text, "[SNAPSHOT] ") {
+		return
+	}
+
+	// Strip the prefix to get the raw JSON.
+	jsonStr := text[len("[SNAPSHOT] "):]
+
+	// Push into the JSONL trace log with "source": "client".
+	logger.PushTraceLog(logger.TraceLog{
+		Time:   time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		Msg:    "client_snapshot",
+		Fields: map[string]any{"source": "client", "raw": jsonStr},
+	})
 }
 
 // ─── Write ────────────────────────────────────────────────────────────────────
