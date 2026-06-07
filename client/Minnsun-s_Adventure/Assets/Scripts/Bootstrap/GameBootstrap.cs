@@ -29,7 +29,6 @@ public class GameBootstrap : MonoBehaviour
     }
 
     private NetworkManager networkManager;
-    private bool loginSent;
 
     /// <summary>Root transform for all entity GameObjects.</summary>
     private Transform entityRoot;
@@ -101,6 +100,10 @@ public class GameBootstrap : MonoBehaviour
         }
 
         Logger.D("Bootstrap", "Config loaded. LogLevel={0}", ConfigLoader.Config.logLevel);
+
+        // Create persistent event bus dispatcher
+        gameObject.AddComponent<EventBusDispatcher>();
+        Logger.D("Bootstrap", "EventBusDispatcher created");
     }
 
     // ─── Phase 2: Network ─────────────────────────────────────────────
@@ -270,6 +273,14 @@ public class GameBootstrap : MonoBehaviour
             entityService.Init(registry, uiManager, entityRoot);
             Logger.D("Bootstrap", "EntityService re-initialized with UIManager reference");
         }
+
+        // Create VirtualJoystick (persists across scenes)
+        // Must add Canvas BEFORE VirtualJoystick so Awake can find it via GetComponent<Canvas>()
+        GameObject joystickGO = new GameObject("VirtualJoystick_Canvas");
+        DontDestroyOnLoad(joystickGO);
+        joystickGO.AddComponent<Canvas>();
+        joystickGO.AddComponent<VirtualJoystick>();
+        Logger.D("Bootstrap", "VirtualJoystick created");
     }
 
     // ─── Auto-Login ───────────────────────────────────────────────────
@@ -311,7 +322,6 @@ public class GameBootstrap : MonoBehaviour
     /// </summary>
     private void OnTransportDisconnected()
     {
-        loginSent = false;
         var ui = ServiceContainer.Resolve<UIManager>();
         if (ui != null)
             ui.UpdateConnectionStatus("Disconnected", Color.gray);
@@ -320,14 +330,11 @@ public class GameBootstrap : MonoBehaviour
 
     private void AutoLogin()
     {
-        if (loginSent) return;
-        loginSent = true;
-
-        GameConfig cfg = ConfigLoader.Config;
-        Logger.I("Bootstrap", "DevMode auto-login as '{0}'", cfg.devUsername);
-
-        byte[] payload = PacketWriter.WriteLogin(cfg.devUsername, cfg.devPassword);
-        networkManager?.SendPacket(Opcodes.C2SLogin, payload);
+        // AutoLogin disabled. Using LoginUI instead.
+        if (gameObject.GetComponent<LoginUI>() == null)
+        {
+            gameObject.AddComponent<LoginUI>();
+        }
     }
 
     // ─── Cleanup ──────────────────────────────────────────────────────

@@ -38,4 +38,16 @@ public class PlayerView : EntityView
 
         Logger.I("PlayerView", "Local player initialized: {0} (ID={1})", EntityName, EntityID);
     }
+
+    protected override void Update()
+    {
+        // Local player tự quản lý vị trí qua PlayerController — không lerp.
+        // Skip EntityView.Update() để tránh xung đột giữa 2 hệ thống
+        // (PlayerController đẩy transform.position, EntityView kéo về TargetPosition cũ).
+        if (IsLocalPlayer)
+            return;
+
+        // Remote players vẫn lerp về target position như bình thường
+        base.Update();
+    }
 }

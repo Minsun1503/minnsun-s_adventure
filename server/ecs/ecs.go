@@ -51,6 +51,24 @@ const (
 	EntityGroundItem                   // Matches "ground_item" type entities
 )
 
+// WireType converts the ECS EntityType enum to the binary wire format.
+// ECS enum: EntityAny=0, EntityPlayer=1, EntityMonster=2, EntityGroundItem=3
+// Wire format: 0=player, 1=monster, 2=ground_item
+// This maps EntityPlayer(1)→0, EntityMonster(2)→1, EntityGroundItem(3)→2.
+// EntityAny(0) falls through to 0 (player) as a safe default.
+func (t EntityType) WireType() uint8 {
+	switch t {
+	case EntityPlayer:
+		return 0
+	case EntityMonster:
+		return 1
+	case EntityGroundItem:
+		return 2
+	default:
+		return 0 // safe default: treat unknown as player
+	}
+}
+
 // String maps the strongly-typed EntityType enum back to the underlying
 // string representation. Used for logging / debugging — NOT for hot-path comparison.
 func (t EntityType) String() string {

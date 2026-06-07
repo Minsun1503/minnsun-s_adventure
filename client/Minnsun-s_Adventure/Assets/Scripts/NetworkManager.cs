@@ -69,6 +69,29 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
+    public bool IsConnected
+    {
+        get
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            return false; // Ignored for now
+#else
+            var tcp = GetComponent<NetworkClient>();
+            return tcp != null && tcp.IsConnected;
+#endif
+        }
+    }
+
+    public void Reconnect()
+    {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // Ignored
+#else
+        var tcp = GetComponent<NetworkClient>();
+        if (tcp != null && tcp.enabled) tcp.Reconnect();
+#endif
+    }
+
     /// <summary>
     /// Send a binary packet using the currently active transport.
     /// Convenience method so game code doesn't need to check the platform.

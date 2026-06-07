@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 /// <summary>
 /// Attached to the Main Camera at bootstrap.
@@ -10,6 +11,8 @@ using UnityEngine;
 ///
 /// The camera always looks at its target via LookAt().
 /// Position is computed as: target.position + yaw-rotated baseOffset.
+///
+/// Uses UnityEngine.InputSystem (Mouse.current) for input.
 /// </summary>
 public class FollowCamera : MonoBehaviour
 {
@@ -40,6 +43,11 @@ public class FollowCamera : MonoBehaviour
 
     /// <summary>Current yaw (horizontal orbit) angle in degrees. 0 = default orientation.</summary>
     private float yawAngle = 0f;
+
+    // ─── Mouse drag tracking ─────────────────────────────────────────────
+
+    private bool wasRightButtonPressed;
+    private Vector2 lastMouseDelta;
 
     // ─── Initialization ──────────────────────────────────────────────────
 
@@ -96,11 +104,13 @@ public class FollowCamera : MonoBehaviour
 
     private void HandleZoomInput()
     {
-        float scroll = Input.GetAxis("Mouse ScrollWheel");
+        if (Mouse.current == null) return;
+
+        float scroll = Mouse.current.scroll.y.ReadValue();
         if (Mathf.Abs(scroll) > 0.001f)
         {
             targetOrthoSize = Mathf.Clamp(
-                targetOrthoSize - scroll * zoomSpeed,
+                targetOrthoSize - scroll * zoomSpeed * 0.1f, // scale down raw scroll value
                 minZoom,
                 maxZoom
             );
@@ -109,13 +119,15 @@ public class FollowCamera : MonoBehaviour
 
     private void HandleRotationInput()
     {
+        if (Mouse.current == null) return;
+
         // Right mouse button held + mouse X movement
-        if (Input.GetMouseButton(1))
+        if (Mouse.current.rightButton.isPressed)
         {
-            float mouseX = Input.GetAxis("Mouse X");
-            if (Mathf.Abs(mouseX) > 0.001f)
+            Vector2 delta = Mouse.current.delta.ReadValue();
+            if (Mathf.Abs(delta.x) > 0.001f)
             {
-                yawAngle += mouseX * rotateSpeed * Time.deltaTime;
+                yawAngle += delta.x * rotateSpeed * Time.deltaTime * 0.01f; // scale delta appropriately
             }
         }
     }

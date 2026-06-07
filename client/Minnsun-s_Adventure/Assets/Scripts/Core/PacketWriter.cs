@@ -77,6 +77,22 @@ public static class PacketWriter
     }
 
     /// <summary>
+    /// Build a REGISTER packet payload (opcode 11).
+    /// Format: [UsernameLen uint8 (1B)] [Username UTF-8 (N)] [PasswordLen uint8 (1B)] [Password UTF-8 (M)]
+    /// </summary>
+    public static byte[] WriteRegister(string username, string password)
+    {
+        byte[] u = Encoding.UTF8.GetBytes(username);
+        byte[] p = Encoding.UTF8.GetBytes(password);
+        byte[] payload = new byte[2 + u.Length + p.Length];
+        payload[0] = (byte)u.Length;
+        Buffer.BlockCopy(u, 0, payload, 1, u.Length);
+        payload[1 + u.Length] = (byte)p.Length;
+        Buffer.BlockCopy(p, 0, payload, 2 + u.Length, p.Length);
+        return payload;
+    }
+
+    /// <summary>
     /// Build a CHAT packet payload (opcode 20).
     /// Format: raw UTF-8 message bytes.
     /// </summary>

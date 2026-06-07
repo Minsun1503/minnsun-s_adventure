@@ -178,6 +178,7 @@ public class PacketRouter : MonoBehaviour
                 break;
             }
 
+
             case Opcodes.S2CHeartbeat:
                 // Already handled silently before reaching Route() — ignore.
                 break;

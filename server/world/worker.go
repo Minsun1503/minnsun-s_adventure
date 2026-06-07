@@ -514,7 +514,7 @@ func sendSpawnToFrom(w *connwriter.Writer, target ecs.Entity, reg *ecs.Registry)
 
 	payload := broadcast.SpawnPayload{
 		EntityID: uint64(target),
-		Type:     uint8(meta.Type),
+		Type:     meta.Type.WireType(),
 		MapID:    int32(pos.MapID),
 		X:        int32(pos.X),
 		Z:        int32(pos.Z),
@@ -537,7 +537,7 @@ func sendSpawnTo(w *connwriter.Writer, target ecs.Entity) {
 
 	payload := broadcast.SpawnPayload{
 		EntityID: uint64(target),
-		Type:     uint8(meta.Type),
+		Type:     meta.Type.WireType(),
 		MapID:    int32(pos.MapID),
 		X:        int32(pos.X),
 		Z:        int32(pos.Z),

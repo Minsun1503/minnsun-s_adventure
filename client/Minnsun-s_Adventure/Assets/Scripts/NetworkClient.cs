@@ -63,6 +63,13 @@ public class NetworkClient : MonoBehaviour
     private Thread receiveThread;
     private readonly object sendLock = new object();
 
+    public void Reconnect()
+    {
+        if (connected || reconnecting) return;
+        reconnectAttempt = 0;
+        StartCoroutine(ConnectAsync());
+    }
+
     // ─── Ping Measurement ──────────────────────────────────────────────
     /// <summary>Latest measured round-trip time in milliseconds.</summary>
     public float LastPingMs { get; private set; }
@@ -105,6 +112,7 @@ public class NetworkClient : MonoBehaviour
         if (connectTask.IsFaulted)
         {
             Debug.LogError($"[NET] Connect failed: {connectTask.Exception?.InnerException?.Message}");
+            reconnecting = false;
             // Attempt reconnect
             TryReconnect();
             yield break;
@@ -136,6 +144,7 @@ public class NetworkClient : MonoBehaviour
         if (reconnectAttempt >= MaxReconnectAttempts)
         {
             Debug.LogError($"[NET] Max reconnect attempts ({MaxReconnectAttempts}) reached. Giving up.");
+            reconnecting = false;
             UnityMainThreadDispatcher.Enqueue(() => OnDisconnected?.Invoke());
             return;
         }

@@ -180,7 +180,7 @@ func processLogin(conn net.Conn) {
 		// Send the player's own SpawnEntity so the client can create their character.
 		selfSpawn := broadcast.BuildSpawnEntity(broadcast.SpawnPayload{
 			EntityID: uint64(playerEntity),
-			Type:     uint8(snap.Meta.Type),
+			Type:     snap.Meta.Type.WireType(),
 			MapID:    int32(snap.Pos.MapID),
 			X:        int32(snap.Pos.X),
 			Z:        int32(snap.Pos.Z),

@@ -21,7 +21,8 @@ import (
 	"server/network"
 	"server/peakgo/broadcast"
 	"server/peakgo/config"
-	"server/peakgo/connwriter"
+
+	// "server/peakgo/connwriter"
 	"server/peakgo/netio"
 	"server/peakgo/perf"
 	"server/protocol"
@@ -163,40 +164,40 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
-		var lastReport perf.Report
+		// var lastReport perf.Report
 		for range ticker.C {
 			// Trigger a forced memory sample for accurate reporting
 			snap := perf.GlobalMemMonitor.Sample()
 
-			report := perf.Collect(perf.GlobalTickMonitor, perf.GlobalPacketMonitor, perf.GlobalMemMonitor)
+			// report := perf.Collect(perf.GlobalTickMonitor, perf.GlobalPacketMonitor, perf.GlobalMemMonitor)
 
-			aoiSec := (report.AoiQueries - lastReport.AoiQueries) / 5
-			bcastSec := (report.Broadcasts - lastReport.Broadcasts) / 5
+			// aoiSec := (report.AoiQueries - lastReport.AoiQueries) / 5
+			// bcastSec := (report.Broadcasts - lastReport.Broadcasts) / 5
 
 			// AOI-specific metrics (fetched directly from PacketMonitor)
-			aoiEnters := perf.GlobalPacketMonitor.AoiEnters()
-			aoiLeaves := perf.GlobalPacketMonitor.AoiLeaves()
-			visibleAvg := perf.GlobalPacketMonitor.VisibleEntitiesAvg()
-			visibleMax := perf.GlobalPacketMonitor.VisibleEntitiesMax()
+			// aoiEnters := perf.GlobalPacketMonitor.AoiEnters()
+			// aoiLeaves := perf.GlobalPacketMonitor.AoiLeaves()
+			// visibleAvg := perf.GlobalPacketMonitor.VisibleEntitiesAvg()
+			// visibleMax := perf.GlobalPacketMonitor.VisibleEntitiesMax()
 
 			// Compute drop rate percentage
-			globalSent := connwriter.GlobalSent.Load()
-			globalDrops := connwriter.GlobalDrops.Load()
-			var dropRatePct float64
-			if globalSent > 0 {
-				dropRatePct = (float64(globalDrops) / float64(globalSent)) * 100.0
-			}
+			// globalSent := connwriter.GlobalSent.Load()
+			// globalDrops := connwriter.GlobalDrops.Load()
+			// var dropRatePct float64
+			// if globalSent > 0 {
+			// 	dropRatePct = (float64(globalDrops) / float64(globalSent)) * 100.0
+			// }
 
-			// Print human-readable metrics report
-			logger.Info("[METRICS] TickAvg: %v | TickMax: %v | TickP99: %v | TickP999: %v | TickWorst1m: %v | HeapAlloc: %d MB | Sys: %d MB | HeapSys: %d MB | StackSys: %d MB | GC: %d | Goroutines: %d | AOI/s: %d | Broadcast/s: %d | AOIEnter: %d | AOILeave: %d | VisibleAvg: %.1f | VisibleMax: %d | Drops: %.4f%% (%d/%d) | SlowClients: %d | PacketsSent: %d",
-				report.TickAvg, report.TickMax, report.TickP99, report.TickP999, report.TickWorst1m,
-				report.Alloc/1024/1024, report.Sys/1024/1024, report.HeapSys/1024/1024, report.StackSys/1024/1024,
-				report.NumGC, report.Goroutines, aoiSec, bcastSec,
-				aoiEnters, aoiLeaves, visibleAvg, visibleMax,
-				dropRatePct, globalDrops, globalSent,
-				connwriter.SlowClients.Load(), globalSent)
+			// Print human-readable metrics report (temporarily disabled)
+			// logger.Info("[METRICS] TickAvg: %v | TickMax: %v | TickP99: %v | TickP999: %v | TickWorst1m: %v | HeapAlloc: %d MB | Sys: %d MB | HeapSys: %d MB | StackSys: %d MB | GC: %d | Goroutines: %d | AOI/s: %d | Broadcast/s: %d | AOIEnter: %d | AOILeave: %d | VisibleAvg: %.1f | VisibleMax: %d | Drops: %.4f%% (%d/%d) | SlowClients: %d | PacketsSent: %d",
+			// 	report.TickAvg, report.TickMax, report.TickP99, report.TickP999, report.TickWorst1m,
+			// 	report.Alloc/1024/1024, report.Sys/1024/1024, report.HeapSys/1024/1024, report.StackSys/1024/1024,
+			// 	report.NumGC, report.Goroutines, aoiSec, bcastSec,
+			// 	aoiEnters, aoiLeaves, visibleAvg, visibleMax,
+			// 	dropRatePct, globalDrops, globalSent,
+			// 	connwriter.SlowClients.Load(), globalSent)
 
-			lastReport = report
+			// lastReport = report
 
 			// Alert on threshold breaches
 			if snap != nil {

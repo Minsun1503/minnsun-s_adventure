@@ -1,12 +1,16 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 /// <summary>
 /// Attached to the local player's GameObject.
 /// Handles WASD movement (camera-relative, throttled 250ms) and Space attack (throttled 500ms).
 /// Left-click selects a monster target via raycast; Space attacks the selected target.
+/// VirtualJoystick provides touch/click-based movement and attack for mobile/UI.
 /// Shows a yellow TargetIndicator ring beneath the currently selected target.
 /// Uses PacketWriter for building binary payloads.
 /// Resolves EntityRegistry from ServiceContainer (no more FindObjectOfType).
+///
+/// Uses UnityEngine.InputSystem (Keyboard.current, Mouse.current) for input.
 /// </summary>
 public class PlayerController : MonoBehaviour
 {
@@ -26,6 +30,13 @@ public class PlayerController : MonoBehaviour
     private GameObject indicatorGO;                     // root GameObject for TargetIndicator
     private TargetIndicator targetIndicator;            // procedural ring component
 
+    // ─── Virtual Joystick ────────────────────────────────────────────────
+    private VirtualJoystick joystick;
+    private bool joystickInitialized;
+
+    // ─── Input System State (per-frame) ──────────────────────────────────
+    private bool attackKeyPressedThisFrame;
+
     private void Start()
     {
         networkManager = ServiceContainer.Resolve<NetworkManager>();
@@ -37,13 +48,45 @@ public class PlayerController : MonoBehaviour
         indicatorGO.SetActive(false); // hidden until a target is selected
         targetIndicator = indicatorGO.AddComponent<TargetIndicator>();
 
-        Logger.D("PlayerController", "Initialized with camera-relative movement + mouse targeting");
+        // Ensure VirtualJoystick singleton exists
+        EnsureJoystick();
+
+        Logger.D("PlayerController", "Initialized with camera-relative movement + mouse targeting + InputSystem");
+    }
+
+    /// <summary>
+    /// Creates the VirtualJoystick singleton if it doesn't exist already.
+    /// </summary>
+    private void EnsureJoystick()
+    {
+        if (VirtualJoystick.Instance != null)
+        {
+            joystick = VirtualJoystick.Instance;
+            joystickInitialized = true;
+            return;
+        }
+
+        // Must add Canvas BEFORE VirtualJoystick so GetComponent<Canvas>() works in Awake
+        GameObject joystickGO = new GameObject("VirtualJoystick_Canvas");
+        joystickGO.AddComponent<UnityEngine.Canvas>(); // add Canvas first
+        joystick = joystickGO.AddComponent<VirtualJoystick>();
+        joystickInitialized = true;
+        Logger.D("PlayerController", "VirtualJoystick auto-created");
     }
 
     private void Update()
     {
-        HandleTargetingInput();      // left-click raycast targeting (runs every frame for click detection)
-        HandleMovementInput();       // camera-relative WASD
+        // Read per-frame attack key state from Keyboard
+        attackKeyPressedThisFrame = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
+
+        // Check VirtualJoystick attack button
+        if (joystickInitialized && joystick != null && joystick.IsAttackPressed)
+        {
+            attackKeyPressedThisFrame = true;
+        }
+
+        HandleTargetingInput();      // left-click raycast targeting
+        HandleMovementInput();       // camera-relative WASD + Joystick
         HandleAttackInput();         // Space to attack selected target
         UpdateTargetIndicator();     // follow selected target with ring
     }
@@ -53,13 +96,16 @@ public class PlayerController : MonoBehaviour
     /// <summary>
     /// Left-click to select a monster target via Camera raycast.
     /// Clicking empty space deselects.
+    /// Uses Mouse.current (new Input System).
     /// </summary>
     private void HandleTargetingInput()
     {
-        if (!Input.GetMouseButtonDown(0))
+        if (Mouse.current == null) return;
+        if (!Mouse.current.leftButton.wasPressedThisFrame)
             return;
 
-        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+        Vector2 mousePos = Mouse.current.position.ReadValue();
+        Ray ray = Camera.main.ScreenPointToRay(new Vector3(mousePos.x, mousePos.y, 0f));
         if (Physics.Raycast(ray, out RaycastHit hit, 200f))
         {
             EntityView hitEntity = hit.collider.GetComponent<EntityView>();
@@ -113,8 +159,40 @@ public class PlayerController : MonoBehaviour
 
     private void HandleMovementInput()
     {
-        float h = Input.GetAxisRaw("Horizontal");
-        float v = Input.GetAxisRaw("Vertical");
+        // ── Read keyboard input (WASD) via new Input System ──
+        Vector2 keyboardInput = Vector2.zero;
+        if (Keyboard.current != null)
+        {
+            if (Keyboard.current.wKey.isPressed) keyboardInput.y += 1f;
+            if (Keyboard.current.sKey.isPressed) keyboardInput.y -= 1f;
+            if (Keyboard.current.aKey.isPressed) keyboardInput.x -= 1f;
+            if (Keyboard.current.dKey.isPressed) keyboardInput.x += 1f;
+
+            // Debug: log once per second if any input is detected
+            if (keyboardInput != Vector2.zero)
+                Logger.D("PlayerController", "Keyboard input: {0}", keyboardInput);
+        }
+        else
+        {
+            // This should never happen if InputSystem package is installed correctly
+            Logger.W("PlayerController", "Keyboard.current is NULL — InputSystem not initialized?");
+        }
+
+        // ── Combine with VirtualJoystick input ──
+        Vector2 joystickInput = Vector2.zero;
+        if (joystickInitialized && joystick != null)
+        {
+            joystickInput = joystick.InputDirection;
+        }
+
+        Vector2 combinedInput = keyboardInput + joystickInput;
+
+        // Clamp combined magnitude to 1 (prevents diagonal speed boost)
+        if (combinedInput.magnitude > 1f)
+            combinedInput = combinedInput.normalized;
+
+        float h = combinedInput.x;
+        float v = combinedInput.y;
 
         if (h != 0 || v != 0)
         {
@@ -160,8 +238,8 @@ public class PlayerController : MonoBehaviour
         if (attackCooldownTimer < AttackCooldown)
             return;
 
-        // Space key only (left-click is now targeting)
-        if (Input.GetKeyDown(KeyCode.Space))
+        // Space key (or virtual attack button)
+        if (attackKeyPressedThisFrame)
         {
             ulong targetID = 0;
 
