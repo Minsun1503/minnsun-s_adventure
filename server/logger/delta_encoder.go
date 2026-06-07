@@ -166,7 +166,7 @@ func (d *DeltaEncoder) Encode(fields map[string]any, trigger string) string {
 		tagStr = " [" + strings.Join(tags, "][") + "]"
 	}
 
-	return fmt.Sprintf("t=%d %s%s", now, strings.Join(parts, " "), tagStr)
+	return fmt.Sprintf("t=%d src=client %s%s", now, strings.Join(parts, " "), tagStr)
 }
 
 // ─── Global Encoder Registry ──────────────────────────────────────────────────
