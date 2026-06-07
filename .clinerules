@@ -1,4 +1,4 @@
-PEAKGO GAME SERVER AGENT RULES (V2026)
+PEAKGO GAME SERVER AGENT RULES (V2026 - CMD PROFILE)
 I. CORE ARCHITECTURE GUARDRAILS (Hàng rào kiến trúc Zero-Alloc)
 Tuyệt đối không vi phạm các quy tắc hiệu năng cao của MMORPG Go Server này trên các hot-paths:
 
@@ -12,44 +12,75 @@ ATOMIC TICK (systems/gameloop.go): CẤM gọi time.Now() hoặc time.Since() tr
 
 ANTI-CHEAT: Packet di chuyển phải được kiểm tra khoảng cách qua gmath.InRangeInt với MaxMoveDistance theo tick trước khi cập nhật vào Registry.
 
-REUSE UTILITIES & PEAKGO-FIRST WORKFLOW: 
-1. CẤM viết lại hoặc dùng thư viện ngoài cho A*, RNG, Heap, Pool, Math... BẮT BUỘC tái sử dụng các package tối ưu trong server/peakgo/ (ví dụ: astar, rng, pool, gmath, threat, combat).
-2. Khi thêm một tính năng mới hay bất cứ logic nào, BẮT BUỘC phải áp dụng package peakgo trước. Nếu peakgo chưa có hàm/package phục vụ cho tính năng đó, phải báo cáo lại để tiến hành viết thêm package peakgo. 
-3. Sau khi viết/sửa peakgo package, phải tối ưu hóa với mục tiêu zero-allocs (0 B/op, 0 allocs/op) thông qua Benchmark. 
-4. Cuối cùng mới được phép dùng nó để xây dựng logic mới ở tầng ứng dụng (server/game/ v.v.).
-ZERO-ALLOC TARGET & BENCHMARK (0 ns/op, 0 B/op, 0 allocs/op): Mỗi khi chỉnh sửa bất kỳ file nào trong server/peakgo/, BẮT BUỘC chạy benchmark riêng cho gói đó bằng cú pháp CMD (cmd /c) an toàn:
+REUSE UTILITIES & PEAKGO-FIRST WORKFLOW:
 
-cmd /c "cd C:\Minnsun-s_Adventure\server && go test -bench=. -benchmem ./peakgo/tên_gói/..."
-Lặp lại việc tối ưu cho đến khi đạt chỉ số Zero-Allocation mới được coi là hoàn thành tác vụ.
+CẤM viết lại hoặc dùng thư viện ngoài cho A*, RNG, Heap, Pool, Math... BẮT BUỘC tái sử dụng các package tối ưu trong server/peakgo/ (ví dụ: astar, rng, pool, gmath, threat, combat).
 
-II. CMD/POWERSHELL & BUILD/TEST LIFECYCLE CONTROLS
-File Locking & Redundant Builds: Tuyệt đối KHÔNG chạy go build hoặc go test nếu code đã được xác nhận đúng cú pháp bởi static phân tích/MCP compiler, hoặc khi server.exe đang chạy/MCP Bridge port đang xanh (Tránh File Locking gây crash hệ thống trên Windows - tỉ lệ 70%). Ưu tiên dùng code_get_outline hoặc go vet để check cú pháp nhẹ. Chỉ chạy go test khi người dùng yêu cầu hoặc cần chạy benchmark tối ưu hóa.
+Khi thêm một tính năng mới hay bất cứ logic nào, BẮT BUỘC phải áp dụng package peakgo trước. Nếu peakgo chưa có hàm/package phục vụ cho tính năng đó, phải báo cáo lại để tiến hành viết thêm package peakgo.
 
-BẮT BUỘC dùng CMD /C cho các lệnh phức tạp: Sử dụng CMD để di chuyển thư mục (cd) và chạy chuỗi lệnh thông qua toán tử && mà không sợ bị nuốt ký tự hay lỗi mở rộng biến trong PowerShell:
-cmd /c "cd C:\Minnsun-s_Adventure\server && <lệnh_cần_chạy>"
+Sau khi viết/sửa peakgo package, phải tối ưu hóa với mục tiêu zero-allocs (0 B/op, 0 allocs/op) thông qua Benchmark.
 
-CẢNH BÁO TREO LỆNH DO THOÁT DẤU NHÁY: Khi chạy lệnh cmd /c hoặc PowerShell, tuyệt đối KHÔNG viết dấu gạch chéo ngược `\` ngay trước dấu ngoặc kép `"` ở cuối đường dẫn (ví dụ: "...\Scripts\"" sẽ bị lỗi thoát dấu nháy `\"` khiến lệnh bị treo/đơ). Hãy sửa thành "...\Scripts"" (xóa dấu `\`) hoặc dùng dấu nháy đơn `'` bọc bên ngoài.
+Cuối cùng mới được phép dùng nó để xây dựng logic mới ở tầng ứng dụng (server/game/ v.v.).
+
+ZERO-ALLOC TARGET & BENCHMARK: Mỗi khi chỉnh sửa bất kỳ file nào trong server/peakgo/, BẮT BUỘC chạy benchmark riêng cho gói đó thông qua quy trình Lệnh đơn gốc của CMD (Phân rã thành 2 lượt gọi tool riêng biệt, tuyệt đối không gộp chung). Lặp lại việc tối ưu cho đến khi đạt chỉ số Zero-Allocation (0 B/op, 0 allocs/op) mới được coi là hoàn thành tác vụ.
+
+II. PURE CMD ATOMIC COMMANDS & LIFECYCLE CONTROLS
+MÔI TRƯỜNG THỰC THI CHUẨN: Terminal hiện tại đã được cấu hình cố định sang Windows Command Prompt (cmd.exe). CẤM sử dụng bất kỳ cú pháp hay câu lệnh đặc thù nào của PowerShell.
+
+KHÓA CHẾT LỆNH ĐƠN THUẦN TÚY (CRITICAL): Mỗi chuỗi ký tự truyền vào đối số command của công cụ execute_command chỉ được phép chứa đúng MỘT câu lệnh thô gốc và duy nhất MỘT động từ hành động (chỉ cd, hoặc chỉ go, hoặc chỉ findstr).
+
+TUYỆT ĐỐI CẤM TOÁN TỬ GỘP: CẤM ngặt nghèo việc xuất hiện các tổ hợp ký tự nối tiếp lệnh bao gồm: &&, ||, &, ;, hoặc ký tự xuống dòng (\n, \r) ở bất kỳ vị trí nào trong chuỗi lệnh, bất kể nó nằm trong hay nằm ngoài dấu ngoặc kép.
+
+CẤM HOÀN TOÀN TRÌNH BỌC LỆNH (ANTI-WRAPPER GUARD): Nghiêm cấm gõ từ khóa cmd, cmd.exe, /c, powershell, pwsh vào Terminal để tạo vỏ bọc giả lập chạy chuỗi lệnh lén lút. Hãy chạy lệnh trực tiếp trên cửa sổ CMD hiện tại của VS Code.
+
+File Locking & Redundant Builds: Tuyệt đối KHÔNG chạy go build hoặc go test nếu code đã được xác nhận đúng cú pháp bởi phân tích tĩnh/MCP compiler, hoặc khi server.exe đang chạy/MCP Bridge port đang xanh. Ưu tiên dùng code_get_outline hoặc go vet để check cú pháp nhẹ.
+
+QUY TRÌNH PHÂN RÃ HÀNH ĐỘNG (SEQUENCE): Terminal của VS Code tự động ghi nhớ trạng thái thư mục hiện hành (CWD). Muốn làm gì ở thư mục khác, bạn BẮT BUỘC phải thực hiện phân rã thành các lượt gọi độc lập:
+
+Lượt chat 1: Gọi lệnh chuyển thư mục dạng sạch: cd C:\Minnsun-s_Adventure\server
+
+Đợi hệ thống phản hồi kết quả Terminal để xác nhận đã chuyển thư mục thành công.
+
+Lượt chat 2: Gọi lệnh logic đơn mục tiêu trực tiếp tại thư mục đó: go vet ./...
 
 III. REFACTORING, FILE PATCHING & TERMINAL SAFETY
-CẤM DÙNG TERMINAL ĐỂ TẠO/SỬA FILE: Nghiêm cấm dùng echo, cat, Set-Content, Out-File, >, >> để tạo hoặc vá code (tránh lỗi "Double Interpolation" với các ký tự đặc biệt như $, \, `, * trên PowerShell). Hãy sử dụng các công cụ quản lý file tích hợp mặc định (write_to_file, replace_file_content, multi_replace_file_content).
+CẤM DÙNG TERMINAL ĐỂ TẠO/SỬA FILE: Nghiêm cấm dùng echo, cat, >, >> để tạo hoặc vá code (để tránh lỗi nuốt ký tự đặc biệt trên môi trường Windows Windows). Hãy sử dụng các công cụ quản lý file tích hợp mặc định (write_to_file, replace_file_content, multi_replace_file_content).
 
-Go Assembly (Plan 9 ASM): Các hằng số/phép toán (như NodeSZ*4) phải được tự tính toán ra giá trị số cụ thể (Immediate Constant, vị dụ: $96) trước khi ghi vào file .s để tránh xung đột cú pháp với compiler.
+Go Assembly (Plan 9 ASM): Các hằng số/phép toán (như NodeSZ*4) phải được tự tính toán ra giá trị số cụ thể (Immediate Constant, ví dụ: $96) trước khi ghi vào file .s để tránh xung đột cú pháp với compiler.
 
-Refactoring Workflow: Xuất toàn bộ file hoặc chính xác git diff nếu được yêu cầu. DỪNG LẠI NGAY sau khi cung cấp nội dung file, không tự ý chạy trình biên dịch/linter. Đảm bảo mọi log được bọc trong guard condition (ví dụ: if loggate.DebugEnabled()) để tránh cấp phát chu ích trên Production.
+Refactoring Workflow: Xuất toàn bộ file hoặc chính xác git diff nếu được yêu cầu. DỪNG LẠI NGAY sau khi cung cấp nội dung file, không tự ý chạy trình biên dịch/linter. Đảm bảo mọi log được bọc trong guard condition (ví dụ: if loggate.DebugEnabled()) để tránh cấp phát chuỗi trên Production.
 
-V. COMMAND TIMEOUT & RUNNING EXAMPLES (USING CMD)
-Mọi lệnh chạy test, vet, build phải dùng cú pháp CMD để đảm bảo tính tương thích và đơn giản:
+IV. RUNNING EXAMPLES ON PURE CMD (MỖI BƯỚC MỘT LỆNH ĐƠN)
+Khi cần thao tác, Agent phải tuân thủ nghiêm ngặt việc phân tách lệnh thô trên môi trường CMD như sau:
 
-* **Khi chạy go vet:**
-  cmd /c "cd C:\Minnsun-s_Adventure\server && go vet ./..."
+Khi chạy go vet:
 
-* **Khi chạy go test/benchmark:**
-  cmd /c "cd C:\Minnsun-s_Adventure\server && go test -bench=BenchmarkUpdateAll -benchmem ./peakgo/aoi"
+Lượt 1: cd C:\Minnsun-s_Adventure\server
 
-* **Khi build Game Server (`server.exe`):**
-  cmd /c "cd C:\Minnsun-s_Adventure\server && go build -o server.exe ."
+Lượt 2: go vet ./...
 
-* **Khi build MCP Bridge (mcp-bridge.exe):**
-  cmd /c "cd C:\Minnsun-s_Adventure\server && go build -o mcp-bridge.exe ./cmd/mcp-bridge"
+Khi chạy Benchmark tối ưu hóa gói AOI:
 
-Mọi hành vi vi phạm các quy tắc trên sẽ dẫn đến việc tiến trình bị đóng (DENY) ngay lập tức.
+Lượt 1: cd C:\Minnsun-s_Adventure\server
+
+Lượt 2: go test -bench=BenchmarkUpdateAll -benchmem ./peakgo/aoi
+
+Khi build Game Server (server.exe):
+
+Lượt 1: cd C:\Minnsun-s_Adventure\server
+
+Lượt 2: go build -o server.exe .
+
+Khi build MCP Bridge (mcp-bridge.exe):
+
+Lượt 1: cd C:\Minnsun-s_Adventure\server
+
+Lượt 2: go build -o mcp-bridge.exe ./cmd/mcp-bridge
+
+Khi cần tìm kiếm chuỗi (Thay thế grep bằng findstr chuẩn CMD):
+
+Lượt 1: cd C:\Minnsun-s_Adventure\server
+
+Lượt 2: findstr /n "Register(" server\mcp\handlers_blackbox.go (Lưu ý: CMD dùng dấu gạch chéo ngược \ cho đường dẫn file).
+
+Mọi hành vi gộp lệnh hoặc cố tình sử dụng từ khóa cmd /c vi phạm quy tắc trên sẽ dẫn đến việc tiến trình bị đóng (DENY) ngay lập tức.

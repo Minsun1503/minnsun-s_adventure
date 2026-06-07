@@ -1,5 +1,6 @@
 // Package loggate provides production-safe logging wrappers for the
 // Minnsun's Adventure game server core.
+// Also provides TraceJSON for structured JSON trace logging via logger.PushTraceLog.
 //
 // # Understanding Go's Variadic Allocation Trap
 //
@@ -56,7 +57,10 @@
 // does not escape to heap — leading to zero allocation when the check returns early.
 package loggate
 
-import "server/logger"
+import (
+	"server/logger"
+	"time"
+)
 
 // DebugEnabled reports whether the logger is configured to output DEBUG level logs.
 // Use this explicitly on hyper-critical hot paths to avoid call-site variadic slice
@@ -131,4 +135,33 @@ func Errorf(format string, args ...any) {
 //go:noinline
 func pushError(format string, args []any) {
 	logger.Error(format, args...)
+}
+
+// TraceJSON pushes a structured JSON trace entry with the given trace_id, opcode,
+// entity ID, message, and optional fields. The entry is written asynchronously
+// to the JSONL trace file (logs/trace-YYYY-MM-DD.jsonl) by the trace writer
+// background worker.
+//
+// This function is non-blocking and safe for hot-path usage. If the trace
+// channel is full, the entry is silently dropped.
+//
+// Parameters:
+//   - traceID:  Unique trace identifier (e.g. "a1b2c3d4").
+//   - opcode:   Short label describing the operation (e.g. "NET_RX", "ATTACK").
+//   - entityID: ECS entity ID associated with the event (0 if none).
+//   - msg:      Human-readable event description.
+//   - fields:   Optional structured key-value pairs (may be nil).
+//
+// Example:
+//
+//	loggate.TraceJSON("a1b2c3d4", "ATTACK", playerEntity, "Player attacked monster", map[string]any{"target": 42, "damage": 15})
+func TraceJSON(traceID, opcode string, entityID uint64, msg string, fields map[string]any) {
+	logger.PushTraceLog(logger.TraceLog{
+		Time:     time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		TraceID:  traceID,
+		Opcode:   opcode,
+		EntityID: entityID,
+		Msg:      msg,
+		Fields:   fields,
+	})
 }

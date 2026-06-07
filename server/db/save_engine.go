@@ -2,11 +2,14 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"server/ecs"
 	"server/logger"
 	"server/models"
 	"server/peakgo/circuitbreaker"
+	"server/peakgo/loggate"
+	"server/peakgo/rng"
 	"strings"
 	"sync"
 	"time"
@@ -107,7 +110,7 @@ func runPeriodicSnapshots() {
 				return true
 			}
 			// Queue a periodic save for each player
-			QueuePlayerSave(snap.ID)
+			QueuePlayerSave(snap.ID, "")
 			return true
 		})
 
@@ -157,11 +160,27 @@ func FlushSaveQueue() {
 // trade or pickup modifies the live component on a different goroutine before the worker
 // drains the queue. Position and stats are value-type fields (copied by value out of
 // sync.Map) so they are inherently snapshot-safe as well.
-func QueuePlayerSave(playerID ecs.Entity) {
+// QueuePlayerSave captures a fast inline memory snapshot and pushes it to the worker buffer thread.
+//
+// The traceID parameter propagates the caller's trace_id so the DB_QUEUE entry is correlated
+// with the network and handler layers in the same trace. If traceID is empty, a new trace_id
+// is generated server-side (e.g. for periodic snapshots or disconnect cleanup).
+func QueuePlayerSave(playerID ecs.Entity, traceID string) {
 	meta, ok := ecs.DefaultRegistry.GetMetadata(playerID)
 	if !ok || (len(meta.Name) >= 3 && meta.Name[:3] == "bot") {
 		return
 	}
+
+	// Generate a trace_id for the DB layer trace entry if caller didn't provide one.
+	if traceID == "" {
+		r := rng.Borrow()
+		traceID = fmt.Sprintf("%08x", r.Uint32())
+		rng.Return(r)
+	}
+
+	loggate.TraceJSON(traceID, "DB_QUEUE", uint64(playerID),
+		fmt.Sprintf("Queued save for player %s (entity %d)", meta.Name, playerID),
+		map[string]any{"player_name": meta.Name})
 	pos, _ := ecs.DefaultRegistry.GetPosition(playerID)
 	stats, _ := ecs.DefaultRegistry.GetStats(playerID)
 

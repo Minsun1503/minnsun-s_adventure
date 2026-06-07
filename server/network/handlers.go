@@ -3,11 +3,13 @@ package network
 import (
 	"encoding/binary"
 	"net"
+	"server/db"
 	"server/ecs"
 	"server/game"
 	"server/logger"
 	"server/peakgo/broadcast"
 	"server/peakgo/codec"
+	"server/peakgo/loggate"
 	"server/peakgo/netio"
 	"server/protocol"
 	"server/systems"
@@ -18,14 +20,16 @@ import (
 
 // ─── Movement ─────────────────────────────────────────────────────────────────
 
-func handleMove(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleMove(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
+	loggate.TraceJSON(traceID, "MOVE", uint64(playerEntity), "Move packet received", nil)
+
 	errMsg, ok := game.HandlePlayerMovementSystem(playerEntity, payload)
 	if !ok {
 		systems.SendNoticeSystem(playerEntity, []byte(errMsg))
 	}
 }
 
-func handleInventory(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleInventory(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	if len(payload) != 0 {
 		systems.SendNoticeSystem(playerEntity, []byte("Error: INV packet payload must be empty.\r\n"))
 		return
@@ -41,7 +45,7 @@ func handleInventory(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 	}
 }
 
-func handleUseItem(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleUseItem(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	noticePacket, success := game.HandleItemUsageSystem(playerEntity, payload)
 	if success {
 		systems.BroadcastSystem([]byte(noticePacket))
@@ -50,12 +54,19 @@ func handleUseItem(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 	}
 }
 
-func handleWarp(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleWarp(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	systemFeedback, _ := world.HandleWarpSystem(playerEntity, payload)
 	systems.SendNoticeSystem(playerEntity, []byte(systemFeedback))
 }
 
-func handleAttack(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleAttack(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
+	loggate.TraceJSON(traceID, "ATTACK", uint64(playerEntity), "Attack packet received", nil)
+
+	// Propagate trace to DB layer so the QueuePlayerSave is correlated
+	// with the same trace_id as NET_RX and ATTACK entries — even if the
+	// attack fails (range, dead target, etc.), the DB save trace is emitted.
+	db.QueuePlayerSave(playerEntity, traceID)
+
 	atk, ok := codec.ReadAttackPayload(payload)
 	if !ok {
 		systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid ATTACK payload length. Expected 8 bytes.\r\n"))
@@ -102,7 +113,7 @@ func handleAttack(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 	netio.DefaultPool.Put(pBuf)
 }
 
-func handleInfo(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleInfo(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	if len(payload) != 8 {
 		systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid INFO payload length. Expected 8 bytes.\r\n"))
 		return
@@ -116,7 +127,7 @@ func handleInfo(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 	systems.SendNoticeSystem(playerEntity, []byte(text))
 }
 
-func handleQuit(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleQuit(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	if len(payload) != 0 {
 		systems.SendNoticeSystem(playerEntity, []byte("Error: QUIT packet payload must be empty.\r\n"))
 		return
@@ -125,7 +136,7 @@ func handleQuit(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 	conn.Close()
 }
 
-func handlePickup(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handlePickup(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	if len(payload) != 8 {
 		systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid PICKUP payload length. Expected 8 bytes.\r\n"))
 		return
@@ -135,7 +146,7 @@ func handlePickup(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 	systems.SendNoticeSystem(playerEntity, []byte(personalFeedback))
 }
 
-func handleEquip(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleEquip(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	if len(payload) != 8 {
 		systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid EQUIP payload length. Expected 8 bytes.\r\n"))
 		return
@@ -153,7 +164,7 @@ func handleEquip(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 
 // ─── Social ───────────────────────────────────────────────────────────────────
 
-func handlePartyCreate(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handlePartyCreate(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	if len(payload) < 1 {
 		systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid PARTY CREATE payload.\r\n"))
 		return
@@ -168,7 +179,7 @@ func handlePartyCreate(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 	systems.SendNoticeSystem(playerEntity, []byte(response))
 }
 
-func handlePartyInvite(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handlePartyInvite(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	if len(payload) != 8 {
 		systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid PARTY INVITE payload length. Expected 8 bytes.\r\n"))
 		return
@@ -178,7 +189,7 @@ func handlePartyInvite(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 	systems.SendNoticeSystem(playerEntity, []byte(response))
 }
 
-func handlePartyJoin(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handlePartyJoin(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	if len(payload) != 8 {
 		systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid PARTY JOIN payload length. Expected 8 bytes.\r\n"))
 		return
@@ -190,7 +201,7 @@ func handlePartyJoin(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 
 // ─── Trade ────────────────────────────────────────────────────────────────────
 
-func handleTradeInit(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleTradeInit(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	if len(payload) != 8 {
 		systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid TRADE INIT payload length. Expected 8 bytes.\r\n"))
 		return
@@ -200,7 +211,7 @@ func handleTradeInit(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 	systems.SendNoticeSystem(playerEntity, []byte(response))
 }
 
-func handleTradeOffer(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleTradeOffer(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	if len(payload) != 12 {
 		systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid TRADE OFFER payload length. Expected 12 bytes.\r\n"))
 		return
@@ -211,21 +222,23 @@ func handleTradeOffer(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 	systems.SendNoticeSystem(playerEntity, []byte(response))
 }
 
-func handleTradeConfirm(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleTradeConfirm(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	response, _ := game.GlobalTradeRegistry.LockTradeStage(playerEntity)
 	if response != "" {
 		systems.SendNoticeSystem(playerEntity, []byte(response))
 	}
 }
 
-func handleTradeCancel(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleTradeCancel(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	response, _ := game.GlobalTradeRegistry.CancelTradeSession(playerEntity)
 	systems.SendNoticeSystem(playerEntity, []byte(response))
 }
 
 // ─── Skills & Chat ────────────────────────────────────────────────────────────
 
-func handleSkillCast(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleSkillCast(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
+	loggate.TraceJSON(traceID, "SKILL_CAST", uint64(playerEntity), "Skill cast packet received", nil)
+
 	if len(payload) != 16 {
 		systems.SendNoticeSystem(playerEntity, []byte("Error: Invalid SKILL CAST payload length. Expected 16 bytes.\r\n"))
 		return
@@ -236,12 +249,12 @@ func handleSkillCast(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
 	systems.SendNoticeSystem(playerEntity, []byte(response))
 }
 
-func handleChat(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleChat(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	msg := string(payload)
 	game.RouteChatMessage(playerEntity, msg)
 }
 
-func handleHeartbeat(conn net.Conn, playerEntity ecs.Entity, payload []byte) {
+func handleHeartbeat(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string) {
 	// Reset read deadline — this is the primary purpose of heartbeat.
 	_ = conn.SetReadDeadline(time.Now().Add(45 * time.Second))
 	// Pong back to client.

@@ -9,8 +9,9 @@ import (
 
 // PacketHandler is the function signature for a single binary opcode handler.
 // Each handler receives the player's TCP connection, their ECS entity ID,
-// and the raw payload bytes (everything after the opcode byte).
-type PacketHandler func(conn net.Conn, playerEntity ecs.Entity, payload []byte)
+// the raw payload bytes (everything after the opcode byte), and a traceID
+// string for distributed tracing across network, handler, and DB layers.
+type PacketHandler func(conn net.Conn, playerEntity ecs.Entity, payload []byte, traceID string)
 
 // packetHandlers is the opcode → handler lookup table.
 // Replaces the giant switch block in HandleBinaryPacket with an O(1) map lookup.
@@ -57,9 +58,9 @@ func RegisterHandler(opcode byte, handler PacketHandler) {
 
 // DispatchPacket looks up the handler for the given opcode and calls it.
 // Returns true if a handler was found and executed; false if the opcode is unknown.
-func DispatchPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, payload []byte) bool {
+func DispatchPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, payload []byte, traceID string) bool {
 	if handler, ok := packetHandlers[opcode]; ok {
-		handler(conn, playerEntity, payload)
+		handler(conn, playerEntity, payload, traceID)
 		return true
 	}
 	return false

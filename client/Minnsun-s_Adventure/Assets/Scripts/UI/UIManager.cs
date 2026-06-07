@@ -521,6 +521,9 @@ public class UIManager : MonoBehaviour
         CancelInvoke(nameof(ClearNotice));
         Invoke(nameof(ClearNotice), 6f);
         AppendLine($"<color=red>[SYSTEM ERROR {packet.ErrorCode}] {packet.Message}</color>");
+
+        // Auto-dump snapshot on every error packet from server
+        ClientSnapshotDumper.Dump("", $"Error_{packet.ErrorCode}");
     }
 
     private void ClearNotice()

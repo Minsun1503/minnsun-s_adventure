@@ -27,6 +27,8 @@ public class PlayerController : MonoBehaviour
 
     // ─── Targeting ───────────────────────────────────────────────────────
     private ulong selectedTargetID;                     // 0 = no target selected
+    /// <summary>Public read-only access for debug snapshot dumping.</summary>
+    public ulong SelectedTargetID => selectedTargetID;
     private GameObject indicatorGO;                     // root GameObject for TargetIndicator
     private TargetIndicator targetIndicator;            // procedural ring component
 
@@ -83,6 +85,12 @@ public class PlayerController : MonoBehaviour
         if (joystickInitialized && joystick != null && joystick.IsAttackPressed)
         {
             attackKeyPressedThisFrame = true;
+        }
+
+        // ── F9 manual snapshot dump ─────────────────────────────────
+        if (Keyboard.current != null && Keyboard.current.f9Key.wasPressedThisFrame)
+        {
+            ClientSnapshotDumper.Dump("", "F9_Manual");
         }
 
         HandleTargetingInput();      // left-click raycast targeting

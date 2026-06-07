@@ -66,7 +66,7 @@ func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 		}
 		game.GlobalTradeRegistry.CancelTradeSession(playerEntity)
 		game.RemovePlayerFromParty(playerEntity)
-		db.QueuePlayerSave(playerEntity)
+		db.QueuePlayerSave(playerEntity, "")
 		world.UnregisterPlayerAOI(playerEntity)
 		world.GlobalSpatialGrid.RemoveEntity(playerEntity)
 
@@ -139,13 +139,36 @@ func HandleClient(conn net.Conn, playerEntity ecs.Entity, snap ecs.EntitySnapsho
 
 // HandleBinaryPacket dispatches a single binary packet using the handler registry.
 // Falls back to the default unknown-opcode path if no handler is registered.
+//
+// traceID extraction:
+//   - The first 4 bytes of payload are treated as an optional trace_id hint from the client.
+//   - If payload length >= 4, those 4 bytes are consumed as a hex trace_id hint and
+//     removed from payload before dispatching.
+//   - If payload length < 4, a server-side trace_id is generated.
 func HandleBinaryPacket(conn net.Conn, playerEntity ecs.Entity, opcode byte, payload []byte) {
+	// Extract or generate traceID.
+	var traceID string
+	var cleanPayload []byte
+	if len(payload) >= 4 {
+		// Client provided a 4-byte trace_id hint (hex-encoded uint32 -> "a1b2c3d4").
+		traceID = fmt.Sprintf("%08x", codec.ReadUint32(payload[0:4]))
+		cleanPayload = payload[4:]
+	} else {
+		traceID = generateTraceID()
+		cleanPayload = payload
+	}
+
+	// Emit network-layer trace entry.
+	loggate.TraceJSON(traceID, "NET_RX", uint64(playerEntity),
+		fmt.Sprintf("Opcode %d (%s) from %s", opcode, opcodeNameOf(opcode), conn.RemoteAddr()),
+		map[string]any{"opcode_name": opcodeNameOf(opcode), "payload_len": len(cleanPayload)})
+
 	// Network packet trace middleware: only active when debug=true in config.json.
-	loggate.Debugf("[NET RX] Conn: %s | Opcode: %d (%s) | Payload: %d bytes | Hex: [% X]",
-		conn.RemoteAddr(), opcode, opcodeNameOf(opcode), len(payload), payload)
+	loggate.Debugf("[NET RX] Conn: %s | Opcode: %d (%s) | TraceID: %s | Payload: %d bytes | Hex: [% X]",
+		conn.RemoteAddr(), opcode, opcodeNameOf(opcode), traceID, len(cleanPayload), payload)
 
 	// O(1) map dispatch — replaces the giant switch block.
-	if !DispatchPacket(conn, playerEntity, opcode, payload) {
+	if !DispatchPacket(conn, playerEntity, opcode, cleanPayload, traceID) {
 		loggate.Warnf("[NET] Unknown opcode %d from %s", opcode, conn.RemoteAddr())
 		systems.SendNoticeSystem(playerEntity, []byte(fmt.Sprintf("Error: Unknown opcode %d\r\n", opcode)))
 	}

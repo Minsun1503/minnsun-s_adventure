@@ -50,7 +50,8 @@ func main() {
 	// Initialize hot-reload config before any other subsystem.
 	config.InitConfig("data/config.json")
 
-	logger.Init() // Must be early: starts async log worker (reads config via peakgo/config)
+	logger.Init()            // Must be early: starts async log worker (reads config via peakgo/config)
+	logger.InitTraceWriter() // Must be after logger.Init() — shares logDir from config
 
 	game.InitializeItemRegistry()
 	game.InitializeLootTables()
@@ -263,7 +264,10 @@ func main() {
 			}
 		}
 
-		// Step 5: Log shutdown complete and flush all logs.
+		// Step 5: Flush trace writer (JSONL) before main log flush.
+		logger.FlushTraceWriter()
+
+		// Step 6: Log shutdown complete and flush all logs.
 		logger.Info("[SHUTDOWN] Server shut down gracefully.")
 		logger.Flush()
 		os.Exit(0)
