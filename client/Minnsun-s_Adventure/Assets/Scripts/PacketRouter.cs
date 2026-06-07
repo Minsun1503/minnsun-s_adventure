@@ -166,6 +166,14 @@ public class PacketRouter : MonoBehaviour
                 break;
             }
 
+            case Opcodes.S2CError:
+            {
+                var packet = Decoders.DecodeError(data);
+                if (packet.HasValue && uiManager != null)
+                    uiManager.ShowError(packet.Value);
+                break;
+            }
+
             case Opcodes.S2CHeartbeat:
                 // Already handled silently before reaching Route() — ignore.
                 break;

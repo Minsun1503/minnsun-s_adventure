@@ -81,29 +81,48 @@ public class MapRenderer : MonoBehaviour
     /// </summary>
     private Mesh CreateGroundMesh()
     {
-        float half = groundSize * 0.5f;
+        int segments = 4; // 4x4 grid of quads
+        int vertexCount = (segments + 1) * (segments + 1);
+        Vector3[] vertices = new Vector3[vertexCount];
+        Vector2[] uv = new Vector2[vertexCount];
+        int[] triangles = new int[segments * segments * 6];
 
-        Vector3[] vertices = new Vector3[]
-        {
-            new Vector3(-half, 0, -half),
-            new Vector3( half, 0, -half),
-            new Vector3(-half, 0,  half),
-            new Vector3( half, 0,  half)
-        };
+        float sizePerSegment = groundSize / segments;
+        float halfSize = groundSize * 0.5f;
 
-        int[] triangles = new int[]
+        int vi = 0;
+        for (int z = 0; z <= segments; z++)
         {
-            0, 2, 1,
-            2, 3, 1
-        };
+            float zPos = -halfSize + z * sizePerSegment;
+            float zUv = (float)z / segments;
+            for (int x = 0; x <= segments; x++)
+            {
+                float xPos = -halfSize + x * sizePerSegment;
+                float xUv = (float)x / segments;
 
-        Vector2[] uv = new Vector2[]
+                vertices[vi] = new Vector3(xPos, 0, zPos);
+                uv[vi] = new Vector2(xUv, zUv);
+                vi++;
+            }
+        }
+
+        int ti = 0;
+        for (int z = 0; z < segments; z++)
         {
-            new Vector2(0, 0),
-            new Vector2(1, 0),
-            new Vector2(0, 1),
-            new Vector2(1, 1)
-        };
+            for (int x = 0; x < segments; x++)
+            {
+                int row1 = z * (segments + 1);
+                int row2 = (z + 1) * (segments + 1);
+
+                triangles[ti++] = row1 + x;
+                triangles[ti++] = row2 + x;
+                triangles[ti++] = row1 + x + 1;
+
+                triangles[ti++] = row2 + x;
+                triangles[ti++] = row2 + x + 1;
+                triangles[ti++] = row1 + x + 1;
+            }
+        }
 
         Mesh mesh = new Mesh();
         mesh.name = "GroundMesh";

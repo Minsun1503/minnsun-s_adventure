@@ -95,6 +95,12 @@ public static class Decoders
         public string Message;
     }
 
+    public struct ErrorPacket
+    {
+        public ushort ErrorCode;
+        public string Message;
+    }
+
     // ─── Decoders ───────────────────────────────────────────────────────
 
     /// <summary>
@@ -299,6 +305,30 @@ public static class Decoders
 
         NoticePacket p;
         p.Message = Encoding.UTF8.GetString(data, 0, data.Length);
+        return p;
+    }
+
+    /// <summary>
+    /// Decode Error payload (opcode 0xFF).
+    /// Layout: ErrorCode(2) + MessageLen(2) + Message(N)
+    /// </summary>
+    public static ErrorPacket? DecodeError(byte[] data)
+    {
+        if (data == null || data.Length < 4)
+        {
+            Debug.LogWarning("[Decode] Error payload too short");
+            return null;
+        }
+
+        ErrorPacket p;
+        p.ErrorCode = ReadUint16BE(data, 0);
+        ushort msgLen = ReadUint16BE(data, 2);
+        if (data.Length < 4 + msgLen)
+        {
+            Debug.LogWarning("[Decode] Error payload truncated");
+            return null;
+        }
+        p.Message = Encoding.UTF8.GetString(data, 4, msgLen);
         return p;
     }
 }

@@ -514,6 +514,15 @@ public class UIManager : MonoBehaviour
         Invoke(nameof(ClearNotice), 5f);
     }
 
+    /// <summary>Show a system error (Notice + Red chat message).</summary>
+    public void ShowError(Decoders.ErrorPacket packet)
+    {
+        noticeText.text = $"<color=red>Error {packet.ErrorCode}:</color> {packet.Message}";
+        CancelInvoke(nameof(ClearNotice));
+        Invoke(nameof(ClearNotice), 6f);
+        AppendLine($"<color=red>[SYSTEM ERROR {packet.ErrorCode}] {packet.Message}</color>");
+    }
+
     private void ClearNotice()
     {
         noticeText.text = "";
