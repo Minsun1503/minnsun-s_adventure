@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 
 const (
 	opcodeC2SMove   byte = 1
+	opcodeC2SInv    byte = 2
 	opcodeC2SAttack byte = 5
 	opcodeC2SLogin  byte = 10
 
@@ -51,6 +53,9 @@ var (
 	flagTeleport = flag.Bool("teleport", false, "Bots teleport randomly every tick (Phase 6)")
 	flagBorder   = flag.Bool("border", false, "Bots cross cell borders repeatedly (Phase 5)")
 	flagBoss     = flag.Bool("boss", false, "Bots converge on single point + spam attack (Phase 8)")
+
+	// Scenario mode flag
+	flagScenario = flag.String("scenario", "", "Run scripted scenario (move/attack/inventory/combat_loop)")
 
 	// Border test state
 	borderStep atomic.Int32
@@ -90,6 +95,9 @@ type Bot struct {
 	connected  atomic.Bool
 	readerDone chan struct{}
 	stopCh     chan struct{}
+
+	// Scenario mode: channel for forwarding parsed packets to scenario goroutine.
+	scenarioMsgCh chan ScenarioPacket
 }
 
 // ─── Global Metrics (atomic counters) ─────────────────────────────────────────
@@ -116,6 +124,12 @@ var (
 func main() {
 	flag.Parse()
 	startTime = time.Now()
+
+	// Scenario mode: run a single scripted scenario and exit.
+	if *flagScenario != "" {
+		runScenario(*flagScenario)
+		return
+	}
 
 	printBanner()
 
@@ -160,6 +174,72 @@ func main() {
 	// Phase 5: Clean shutdown
 	shutdownAll()
 	printFinalReport()
+}
+
+// runScenario selects and runs a single scripted scenario with one bot.
+// It writes a final JSONL result line to stdout so the MCP caller can parse it.
+func runScenario(name string) {
+	scenario := getScenario(name)
+	if scenario == nil {
+		fmt.Fprintf(os.Stderr, `{"source":"scenario_runner","scenario":"%s","status":"fail","error":"unknown scenario"}`+"\n", name)
+		os.Exit(1)
+	}
+
+	// Generate a trace ID for this session.
+	traceID := fmt.Sprintf("%08x", time.Now().UnixNano())
+
+	// Determine duration: use -duration flag if set, otherwise default per scenario.
+	duration := *flagDuration
+	if duration <= 0 {
+		duration = 30 * time.Second
+	}
+
+	// Connect a single bot.
+	bot := &Bot{
+		id:         0,
+		username:   fmt.Sprintf("%s0000", *flagPrefix),
+		password:   "stress123",
+		mapID:      1,
+		x:          0,
+		z:          0,
+		stopCh:     make(chan struct{}),
+		readerDone: make(chan struct{}),
+	}
+
+	if err := bot.connectAndLogin(); err != nil {
+		result := map[string]any{
+			"source":   "scenario_runner",
+			"scenario": name,
+			"status":   "fail",
+			"trace_id": traceID,
+			"error":    err.Error(),
+		}
+		json.NewEncoder(os.Stdout).Encode(result)
+		os.Exit(1)
+	}
+
+	// Run the scenario.
+	err := scenario.Run(bot, traceID, duration)
+
+	// Clean up.
+	bot.disconnect()
+
+	// Write result as JSONL to stdout.
+	result := map[string]any{
+		"source":   "scenario_runner",
+		"scenario": name,
+		"status":   "pass",
+		"trace_id": traceID,
+	}
+	if err != nil {
+		result["status"] = "fail"
+		result["error"] = err.Error()
+	}
+	json.NewEncoder(os.Stdout).Encode(result)
+
+	if err != nil {
+		os.Exit(1)
+	}
 }
 
 func printBanner() {
@@ -314,6 +394,7 @@ func (b *Bot) sendLogin() error {
 
 // readLoop drains all incoming server packets.
 // It parses SpawnEntity to discover attack targets and Success to capture EntityID.
+// In scenario mode, packets are also forwarded to scenarioMsgCh.
 func (b *Bot) readLoop() {
 	defer func() {
 		b.connected.Store(false)
@@ -356,6 +437,15 @@ func (b *Bot) readLoop() {
 
 		opcode := buf[0]
 		payload := buf[1:]
+
+		// Forward to scenario channel if present.
+		if b.scenarioMsgCh != nil {
+			select {
+			case b.scenarioMsgCh <- ScenarioPacket{Opcode: opcode, Payload: payload}:
+			default:
+				// Channel full: drop.
+			}
+		}
 
 		switch opcode {
 		case opcodeS2CSuccess:
@@ -410,6 +500,43 @@ func (b *Bot) behaviorLoop() {
 		case <-ticker.C:
 			b.sendActions()
 		}
+	}
+}
+
+// sendMove sends a C2SMove packet to the server with the given coordinates.
+func (b *Bot) sendMove(x, z int32) {
+	if !b.connected.Load() || b.conn == nil {
+		return
+	}
+	packet := make([]byte, 11)
+	binary.BigEndian.PutUint16(packet[0:2], 9) // 1 opcode + 8 payload
+	packet[2] = opcodeC2SMove
+	binary.BigEndian.PutUint32(packet[3:7], uint32(x))
+	binary.BigEndian.PutUint32(packet[7:11], uint32(z))
+	if n, err := b.conn.Write(packet); err == nil {
+		b.x = x
+		b.z = z
+		b.moveSent.Add(1)
+		totalMoveWritten.Add(1)
+		totalBytesWritten.Add(int64(n))
+		b.bytesSent.Add(int64(n))
+	}
+}
+
+// sendAttack sends a C2SAttack packet targeting the given entity ID.
+func (b *Bot) sendAttack(targetID uint64) {
+	if !b.connected.Load() || b.conn == nil {
+		return
+	}
+	packet := make([]byte, 11)
+	binary.BigEndian.PutUint16(packet[0:2], 9)
+	packet[2] = opcodeC2SAttack
+	binary.BigEndian.PutUint64(packet[3:11], targetID)
+	if n, err := b.conn.Write(packet); err == nil {
+		b.attackSent.Add(1)
+		totalAttackWritten.Add(1)
+		totalBytesWritten.Add(int64(n))
+		b.bytesSent.Add(int64(n))
 	}
 }
 

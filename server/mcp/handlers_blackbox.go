@@ -2,7 +2,8 @@
 //
 // handlers_blackbox.go provides MCP tools for reading and filtering the
 // structured JSONL trace files produced by Phase 1+2, plus a controlled
-// file patching tool with automatic build-verification and rollback.
+// file patching tool with automatic build-verification and rollback,
+// and a scenario runner tool for scripted bot behavior tests.
 package mcp
 
 import (
@@ -390,6 +391,101 @@ func init() {
 			"exit_code":   exitCode,
 			"output_path": outputPath,
 			"build_log":   buildLog,
+		})
+	})
+
+	// ─── blackbox_run_scenario ────────────────────────────────────────────────
+	// Runs a scripted bot scenario by spawning the netstress tool with -scenario.
+	// Params: {"scenario": "combat_loop", "bots": 1, "duration_sec": 30}
+	// Response: {"status": "pass"/"fail", "trace_id": "...", "output": "..."}
+
+	Register("blackbox_run_scenario", func(req Request) Response {
+		var p struct {
+			Scenario    string `json:"scenario"`
+			Bots        int    `json:"bots"`
+			DurationSec int    `json:"duration_sec"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil || p.Scenario == "" {
+			return rpcError(req.ID, ErrCodeInvalidParams, "'scenario' parameter is required")
+		}
+		if p.Bots <= 0 {
+			p.Bots = 1
+		}
+		if p.DurationSec <= 0 {
+			p.DurationSec = 30
+		}
+
+		// Calculate timeout: duration + 30s buffer (minimum 60s).
+		timeoutSec := p.DurationSec + 30
+		if timeoutSec < 60 {
+			timeoutSec = 60
+		}
+		timeout := time.Duration(timeoutSec) * time.Second
+
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		// Build command: go run ./cmd/netstress -scenario <name> -duration <sec>s
+		serverDir := findServerDir()
+		cmd := exec.CommandContext(ctx, "go", "run", "./cmd/netstress",
+			"-scenario", p.Scenario,
+			"-duration", fmt.Sprintf("%ds", p.DurationSec),
+		)
+		cmd.Dir = serverDir
+
+		output, err := cmd.CombinedOutput()
+
+		exitCode := 0
+		if err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return rpcResult(req.ID, map[string]any{
+					"status":       "timeout",
+					"scenario":     p.Scenario,
+					"duration_sec": p.DurationSec,
+					"trace_id":     "",
+					"output":       string(output),
+				})
+			}
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = 1
+			}
+		}
+
+		// Try to parse the final JSONL line for structured result.
+		type scenarioResult struct {
+			Source   string `json:"source"`
+			Scenario string `json:"scenario"`
+			Status   string `json:"status"`
+			TraceID  string `json:"trace_id"`
+			Error    string `json:"error,omitempty"`
+		}
+		var parsedResult scenarioResult
+
+		// Scan output lines for the JSON result line (last line with source=scenario_runner).
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, `"source":"scenario_runner"`) ||
+				strings.Contains(line, `"source": "scenario_runner"`) {
+				json.Unmarshal([]byte(line), &parsedResult)
+			}
+		}
+
+		resultStatus := "fail"
+		if parsedResult.Status == "pass" {
+			resultStatus = "pass"
+		} else if exitCode == 0 && parsedResult.TraceID != "" && parsedResult.Error == "" {
+			resultStatus = "pass"
+		}
+
+		return rpcResult(req.ID, map[string]any{
+			"status":       resultStatus,
+			"scenario":     p.Scenario,
+			"duration_sec": p.DurationSec,
+			"trace_id":     parsedResult.TraceID,
+			"exit_code":    exitCode,
+			"output":       string(output),
 		})
 	})
 }
