@@ -168,6 +168,14 @@ public class GameBootstrap : MonoBehaviour
         Logger.D("Bootstrap", "CameraService registered in ServiceContainer");
 
         // ── Camera ────────────────────────────────────────────────────
+        // Disable existing scene cameras (like the default main camera) to prevent AudioListener warning spams
+        var existingCams = FindObjectsByType<Camera>(FindObjectsSortMode.None);
+        foreach (var c in existingCams)
+        {
+            c.gameObject.SetActive(false);
+            Logger.D("Bootstrap", "Disabled existing camera '{0}' to avoid conflicts", c.name);
+        }
+
         GameObject cam = new GameObject("MainCamera");
         cam.tag = "MainCamera";
         DontDestroyOnLoad(cam);
