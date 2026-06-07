@@ -13,7 +13,7 @@ public class Bootstrap : MonoBehaviour
     {
         // Destroy self and let GameBootstrap handle initialization
         // If GameBootstrap already exists, just destroy this
-        var existing = FindObjectOfType<GameBootstrap>();
+        var existing = FindFirstObjectByType<GameBootstrap>();
         if (existing != null)
         {
             Debug.Log("[Bootstrap] GameBootstrap already exists — destroying legacy Bootstrap");
