@@ -68,6 +68,9 @@ public class GameBootstrap : MonoBehaviour
         // Subscribe to connection event for auto-login
         EventBus<EventBusDispatcher.ConnectionEvent>.Subscribe(OnConnectionEvent);
 
+        // Subscribe to entity spawn event for auto snapshot
+        EventBus<EventBusDispatcher.EntitySpawnedEvent>.Subscribe(OnEntitySpawned);
+
         networkManager = ServiceContainer.Resolve<NetworkManager>();
         if (networkManager != null)
         {
@@ -319,13 +322,29 @@ public class GameBootstrap : MonoBehaviour
 
     /// <summary>
     /// Called when the transport disconnects — reset login flag for reconnect auto-login.
+    /// Also stops auto snapshot if running.
     /// </summary>
     private void OnTransportDisconnected()
     {
+        ClientSnapshotDumper.StopAutoSnapshot();
+
         var ui = ServiceContainer.Resolve<UIManager>();
         if (ui != null)
             ui.UpdateConnectionStatus("Disconnected", Color.gray);
         Logger.W("Bootstrap", "Transport disconnected");
+    }
+
+    /// <summary>
+    /// Called when an entity spawns. If it's the local player, start auto snapshots.
+    /// </summary>
+    private void OnEntitySpawned(EventBusDispatcher.EntitySpawnedEvent evt)
+    {
+        var registry = ServiceContainer.Resolve<EntityRegistry>();
+        if (registry != null && registry.LocalPlayerID == evt.EntityID)
+        {
+            Logger.I("Bootstrap", "Local player spawned — starting auto snapshots (2s interval)");
+            ClientSnapshotDumper.StartAutoSnapshot(2f);
+        }
     }
 
     private void AutoLogin()
@@ -342,6 +361,9 @@ public class GameBootstrap : MonoBehaviour
     private void OnDestroy()
     {
         EventBus<EventBusDispatcher.ConnectionEvent>.Unsubscribe(OnConnectionEvent);
+        EventBus<EventBusDispatcher.EntitySpawnedEvent>.Unsubscribe(OnEntitySpawned);
+
+        ClientSnapshotDumper.StopAutoSnapshot();
 
         if (networkManager != null)
         {
