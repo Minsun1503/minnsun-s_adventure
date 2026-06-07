@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"server/ecs"
 	"server/logger"
-	"server/peakgo/perf"
 	"sync"
 	"time"
 )
@@ -123,10 +122,12 @@ func StartPeriodicSnapshot() {
 }
 
 // takeWorldSnapshot captures the complete world state and writes it to disk.
+// Phase 1 (synchronous, fast): collects all entity state from the ECS registry.
+// Phase 2 (async goroutine, slow): serializes + writes to disk, no locks held.
 func takeWorldSnapshot(snapshotType string) {
 	start := time.Now()
 
-	// Collect all entities
+	// ── Phase 1: Collect entity state (nhanh, có lock registry) ──────────────
 	allEntities := ecs.DefaultRegistry.GetAllEntities()
 	if len(allEntities) == 0 {
 		logger.Info("[SNAPSHOT] No entities to snapshot.")
@@ -193,7 +194,7 @@ func takeWorldSnapshot(snapshotType string) {
 		}
 	}
 
-	// Build the snapshot
+	// Build the snapshot data (vẫn trong Phase 1, chỉ là copy memory)
 	snapshot := WorldSnapshotData{
 		Meta: SnapshotMeta{
 			Version:      SnapshotVersion,
@@ -207,25 +208,24 @@ func takeWorldSnapshot(snapshotType string) {
 		Entities: entities,
 	}
 
-	// Write to disk
-	if err := writeSnapshotToDisk(&snapshot); err != nil {
-		logger.Error("[SNAPSHOT] Failed to write snapshot: %v", err)
-		return
-	}
+	// ── Phase 2: Write disk (chậm, không giữ lock nào, chạy goroutine riêng) ─
+	go func() {
+		if err := writeSnapshotToDisk(&snapshot); err != nil {
+			logger.Error("[SNAPSHOT] Failed to write snapshot: %v", err)
+			return
+		}
 
-	// Cleanup old snapshots
-	cleanupOldSnapshots()
+		cleanupOldSnapshots()
 
-	elapsed := time.Since(start)
-	logger.Info("[SNAPSHOT] %s snapshot complete: %d entities (%d players, %d monsters) in %v.",
-		snapshotType, len(entities), playerCount, monsterCount, elapsed)
+		elapsed := time.Since(start)
+		logger.Info("[SNAPSHOT] %s snapshot complete: %d entities (%d players, %d monsters) in %v.",
+			snapshotType, len(entities), playerCount, monsterCount, elapsed)
 
-	if elapsed > 10*time.Second {
-		logger.Warn("[PERF] World snapshot took %v — consider reducing entity count.", elapsed)
-	}
-
-	// Record performance metric
-	perf.GlobalTickMonitor.RecordTick(elapsed)
+		if elapsed > 10*time.Second {
+			logger.Warn("[PERF] World snapshot took %v — consider reducing entity count.", elapsed)
+		}
+		// KHÔNG gọi RecordTick — snapshot không phải tick, không thuộc TickMonitor.
+	}()
 }
 
 // writeSnapshotToDisk serializes and writes a world snapshot to a file.
