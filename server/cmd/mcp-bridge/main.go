@@ -306,6 +306,252 @@ func main() {
 								"properties": map[string]any{},
 							},
 						},
+						// ─── Blackbox Scenario & Client Tools ────────────────────────────
+						{
+							"name":        "blackbox_run_scenario",
+							"description": "Chạy scripted bot scenario (move/attack/inventory/combat_loop). Params: scenario, bots, duration_sec.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"scenario":     map[string]any{"type": "string", "description": "Tên scenario: move, attack, inventory, combat_loop"},
+									"bots":         map[string]any{"type": "number", "description": "Số bot (mặc định: 1)"},
+									"duration_sec": map[string]any{"type": "number", "description": "Thời gian chạy (mặc định: 30)"},
+								},
+								"required": []string{"scenario"},
+							},
+						},
+						{
+							"name":        "blackbox_run_client",
+							"description": "Chạy Minnsun-s_Adventure.exe ở background, poll port 13000 đến khi ready. Trả về {status: ready}.",
+							"inputSchema": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{},
+							},
+						},
+						{
+							"name":        "blackbox_ui_state",
+							"description": "Kết nối TCP port 13000, gửi GET_STATE, trả về JSON scene hiện tại + active interactable elements.",
+							"inputSchema": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{},
+							},
+						},
+						{
+							"name":        "blackbox_ui_click",
+							"description": "Kết nối TCP port 13000, gửi CLICK|target, invoke Button.onClick trên Unity main thread.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"target": map[string]any{"type": "string", "description": "Tên GameObject chứa Button component"},
+								},
+								"required": []string{"target"},
+							},
+						},
+						{
+							"name":        "blackbox_ui_type",
+							"description": "Kết nối TCP port 13000, gửi TYPE|target|value, set InputField.text trên Unity main thread.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"target": map[string]any{"type": "string", "description": "Tên GameObject chứa InputField component"},
+									"value":  map[string]any{"type": "string", "description": "Giá trị cần nhập"},
+								},
+								"required": []string{"target", "value"},
+							},
+						},
+						{
+							"name":        "blackbox_read_delta",
+							"description": "Đọc N dòng cuối từ file delta-*.txt. Mỗi dòng là state change hoặc anomaly từ client snapshot. Gọi TRƯỚC KHI đọc source code khi debug.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"tail": map[string]any{"type": "number", "description": "Số dòng cuối cần đọc (mặc định: 50)"},
+								},
+							},
+						},
+						// ─── ECS Tools ───────────────────────────────────────────────────
+						{
+							"name":        "ecs_get_entity",
+							"description": "Lấy toàn bộ component data của một entity theo ID.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"entity_id": map[string]any{"type": "number", "description": "Entity ID"},
+								},
+								"required": []string{"entity_id"},
+							},
+						},
+						{
+							"name":        "ecs_get_stats",
+							"description": "Lấy stats (HP, MP, Level, Dam...) của một entity.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"entity_id": map[string]any{"type": "number", "description": "Entity ID"},
+								},
+								"required": []string{"entity_id"},
+							},
+						},
+						{
+							"name":        "ecs_get_position",
+							"description": "Lấy vị trí hiện tại của entity.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"entity_id": map[string]any{"type": "number", "description": "Entity ID"},
+								},
+								"required": []string{"entity_id"},
+							},
+						},
+						{
+							"name":        "ecs_get_inventory",
+							"description": "Lấy danh sách inventory của entity.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"entity_id": map[string]any{"type": "number", "description": "Entity ID"},
+								},
+								"required": []string{"entity_id"},
+							},
+						},
+						{
+							"name":        "ecs_spawn_monster",
+							"description": "Spawn monster tại tọa độ chỉ định.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"monster_id": map[string]any{"type": "number", "description": "Monster template ID"},
+									"map_id":     map[string]any{"type": "number", "description": "Map ID"},
+									"x":          map[string]any{"type": "number", "description": "Tọa độ X"},
+									"z":          map[string]any{"type": "number", "description": "Tọa độ Z"},
+								},
+								"required": []string{"monster_id", "x", "z"},
+							},
+						},
+						{
+							"name":        "ecs_remove_entity",
+							"description": "Xóa entity khỏi ECS registry.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"entity_id": map[string]any{"type": "number", "description": "Entity ID cần xóa"},
+								},
+								"required": []string{"entity_id"},
+							},
+						},
+						{
+							"name":        "ecs_diagnostics",
+							"description": "Trả về diagnostics tổng quan của ECS (entity count, component count, memory).",
+							"inputSchema": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{},
+							},
+						},
+						{
+							"name":        "ecs_snapshot_metrics",
+							"description": "Snapshot metrics chi tiết của ECS tại thời điểm gọi.",
+							"inputSchema": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{},
+							},
+						},
+						// ─── Admin Tools ─────────────────────────────────────────────────
+						{
+							"name":        "admin_kick_player",
+							"description": "Kick player khỏi server.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"player_id": map[string]any{"type": "number", "description": "Entity ID của player"},
+								},
+								"required": []string{"player_id"},
+							},
+						},
+						{
+							"name":        "admin_give_item",
+							"description": "Cho player một item.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"player_id": map[string]any{"type": "number", "description": "Entity ID của player"},
+									"item_id":   map[string]any{"type": "number", "description": "Item template ID"},
+									"quantity":  map[string]any{"type": "number", "description": "Số lượng (mặc định: 1)"},
+								},
+								"required": []string{"player_id", "item_id"},
+							},
+						},
+						{
+							"name":        "admin_set_stat",
+							"description": "Set stat (HP, MP, Level...) của player.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"player_id": map[string]any{"type": "number", "description": "Entity ID"},
+									"stat":      map[string]any{"type": "string", "description": "Tên stat: hp, mp, level, exp"},
+									"value":     map[string]any{"type": "number", "description": "Giá trị mới"},
+								},
+								"required": []string{"player_id", "stat", "value"},
+							},
+						},
+						// ─── World Tools ─────────────────────────────────────────────────
+						{
+							"name":        "world_query_radius",
+							"description": "Tìm tất cả entity trong bán kính từ một điểm.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"map_id": map[string]any{"type": "number", "description": "Map ID"},
+									"x":      map[string]any{"type": "number", "description": "Tọa độ X trung tâm"},
+									"z":      map[string]any{"type": "number", "description": "Tọa độ Z trung tâm"},
+									"radius": map[string]any{"type": "number", "description": "Bán kính tìm kiếm"},
+								},
+								"required": []string{"x", "z", "radius"},
+							},
+						},
+						{
+							"name":        "world_grid_stats",
+							"description": "Trả về thống kê spatial grid (chunk count, entity distribution).",
+							"inputSchema": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{},
+							},
+						},
+						// ─── Game Tools ──────────────────────────────────────────────────
+						{
+							"name":        "game_online_players",
+							"description": "Lấy danh sách player đang online.",
+							"inputSchema": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{},
+							},
+						},
+						{
+							"name":        "game_config",
+							"description": "Trả về config hiện tại của server (không bao gồm secrets).",
+							"inputSchema": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{},
+							},
+						},
+						{
+							"name":        "server_stats",
+							"description": "Trả về runtime stats của server (goroutines, memory, GC, uptime).",
+							"inputSchema": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{},
+							},
+						},
+						{
+							"name":        "server_broadcast",
+							"description": "Broadcast notice message đến tất cả player đang online.",
+							"inputSchema": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"message": map[string]any{"type": "string", "description": "Nội dung thông báo"},
+								},
+								"required": []string{"message"},
+							},
+						},
 					},
 				},
 			}
