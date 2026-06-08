@@ -1,0 +1,126 @@
+[32m[2026-06-08 22:41:43.488] [INFO ][0m [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[32m[2026-06-08 22:41:43.488] [INFO ][0m [BOOT] Khởi động bằng cờ -dev: Bỏ qua kết nối MySQL.
+[33m[2026-06-08 22:41:43.492] [WARN ][0m [DATABASE] SQL Server Ping Fault: Error 1045 (28000): Access denied for user ''@'localhost' (using password: NO) — running in dev_mode (no DB)
+[32m[2026-06-08 22:41:43.492] [INFO ][0m [SAVE BUFFER] Emergency buffer initialized at data\save_buffer\save_buffer_16.buf
+[32m[2026-06-08 22:41:43.492] [INFO ][0m [BOOT] No DB available — ECS ID counter starts from default (dev_mode).
+[32m[2026-06-08 22:41:43.492] [INFO ][0m [RECOVERY] No world snapshot marker found — no recovery data available.
+[32m[2026-06-08 22:41:43.492] [INFO ][0m [BOOT] No crash recovery data — spawning fresh monsters.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [PERSISTENCE] Asynchronous DB Save Worker thread active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Loaded 3 monster templates.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [SPAWN] Sea King (entity 4294967297) at (30, 40) | HP:120 ATK:18 aggro:8 leash:16 melee:2
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [SPAWN] Bandit (entity 4294967298) at (70, 20) | HP:60 ATK:10 aggro:12 leash:24 melee:2
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [SPAWN] Marine Guard (entity 4294967299) at (50, 80) | HP:200 ATK:25 aggro:6 leash:12 melee:2
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Spawned 3 live monster instances into ECS.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Server listening on [::]:1503
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [WORLD] Initialized global World instance.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [WORLD] Cross-map transfer orchestrator started
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [WORLD] Started map 1
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #2 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [ENGINE] Heartbeat game loop started at 4 ticks/sec.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #0 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #1 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #6 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #3 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #4 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #5 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #8 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #7 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #9 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #10 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #11 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #13 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #12 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #14 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #15 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #22 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #16 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #17 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #18 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #19 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #20 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #21 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #26 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #23 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #24 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #25 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #28 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #27 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #29 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #30 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #31 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #32 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #33 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #34 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #35 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #37 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #36 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #39 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #38 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #40 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #41 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #42 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #43 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #47 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #44 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #45 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #46 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #49 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #48 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #50 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #51 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #52 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #53 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #54 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #55 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #56 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #57 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #58 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #59 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #63 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #60 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #61 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #62 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #66 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #64 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #65 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #67 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #68 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #69 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #70 active.
+[32m[2026-06-08 22:41:43.493] [INFO ][0m [BOOT] Connection login worker #71 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #74 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #72 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #73 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #76 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #75 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #77 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #78 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #79 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #80 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #85 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #81 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #82 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #83 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #84 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #86 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #89 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #88 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #90 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #91 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #87 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #94 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #92 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #93 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #96 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #95 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #97 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #98 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Connection login worker #99 active.
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] MCP admin interface available on http://localhost:8080/mcp
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Admin dashboard available on http://localhost:9090/
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Performance alert monitor started (5s interval).
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] WebSocket transport listening on ws://localhost:8081/ws
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] Periodic world snapshot started (interval: 5m0s).
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [BOOT] WebSocket listener starting on :8081/ws
+[32m[2026-06-08 22:41:43.494] [INFO ][0m [SNAPSHOT] Periodic world snapshot started (interval: 5m0s).
+[32m[2026-06-08 22:41:43.495] [INFO ][0m [MCP] JSON-RPC server listening on :8080

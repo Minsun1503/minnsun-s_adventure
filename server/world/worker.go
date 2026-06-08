@@ -92,8 +92,37 @@ func NewMapWorker(mapID int, fn MapTickFn) *MapWorker {
 // ─── Per-Map AOI Operations ─────────────────────────────────────────────────
 
 // RegisterPlayerAOI registers a player entity as an AOI watcher on this map.
+// After registration, it queries all existing entities within the watcher's AOI range
+// and sends SpawnEntity packets to the player so they can see monsters and other players.
 func (mw *MapWorker) RegisterPlayerAOI(entity ecs.Entity) {
 	mw.AOIManager.RegisterWatcher(entity, WatcherRadius)
+
+	// Get the player's position from the global ECS registry (MapWorker registry is a separate instance).
+	pos, ok := ecs.DefaultRegistry.GetPosition(entity)
+	if !ok {
+		return
+	}
+
+	// Get the player's connection for sending packets.
+	connComp, hasConn := ecs.DefaultRegistry.GetConnection(entity)
+	if !hasConn || connComp.Writer == nil {
+		return
+	}
+
+	// Query all entities (monsters, other players) within AOI range from the global spatial grid.
+	candidates := GlobalSpatialGrid.QueryRadius(pos, WatcherRadius, entity)
+	if candidates == nil || len(*candidates) == 0 {
+		FreeQueryCandidates(candidates)
+		return
+	}
+
+	// Send SpawnEntity for each entity in range.
+	for _, entry := range *candidates {
+		sendSpawnTo(connComp.Writer, entry.ID)
+		perf.GlobalPacketMonitor.RecordAoiEnter()
+	}
+
+	FreeQueryCandidates(candidates)
 }
 
 // UnregisterPlayerAOI removes a player from this map's AOI watcher set.

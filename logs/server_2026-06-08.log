@@ -1,0 +1,17 @@
+[2026-06-08 17:45:32.280] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-08 17:56:05.324] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-08 17:56:05.338] [INFO ] [DATABASE] Relational system matrices initialized and ready.
+[2026-06-08 17:56:05.339] [INFO ] [SAVE BUFFER] Emergency buffer initialized at data\save_buffer\save_buffer_1.buf
+[2026-06-08 17:56:05.339] [INFO ] [PERSISTENCE] Asynchronous DB Save Worker thread active.
+[2026-06-08 17:56:58.271] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-08 17:56:58.282] [INFO ] [DATABASE] Relational system matrices initialized and ready.
+[2026-06-08 18:15:19.165] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-08 18:15:19.175] [INFO ] [DATABASE] Relational system matrices initialized and ready.
+[2026-06-08 18:15:19.177] [INFO ] [SAVE BUFFER] Emergency buffer initialized at data\save_buffer\save_buffer_3.buf
+[2026-06-08 18:15:19.177] [INFO ] [PERSISTENCE] Asynchronous DB Save Worker thread active.
+[2026-06-08 18:15:19.177] [INFO ] [RECOVERY] No world snapshot marker found — no recovery data available.
+[2026-06-08 18:15:41.647] [INFO ] [LOGGER] Initialized. Mode: INFO+ | LogDir: logs | MaxFileMB: 10
+[2026-06-08 18:15:41.669] [INFO ] [DATABASE] Relational system matrices initialized and ready.
+[2026-06-08 18:15:41.670] [INFO ] [SAVE BUFFER] Emergency buffer initialized at data\save_buffer\save_buffer_4.buf
+[2026-06-08 18:15:41.670] [INFO ] [PERSISTENCE] Asynchronous DB Save Worker thread active.
+[2026-06-08 18:15:41.671] [INFO ] [RECOVERY] No world snapshot marker found — no recovery data available.
