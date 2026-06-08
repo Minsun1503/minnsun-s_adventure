@@ -23,5 +23,82 @@ Sau khi viết/sửa peakgo package, phải tối ưu hóa với mục tiêu zer
 Cuối cùng mới được phép dùng nó để xây dựng logic mới ở tầng ứng dụng (server/game/ v.v.).
 
 ZERO-ALLOC TARGET & BENCHMARK: Mỗi khi chỉnh sửa bất kỳ file nào trong server/peakgo/, BẮT BUỘC chạy benchmark riêng cho gói đó thông qua quy trình Lệnh đơn gốc của CMD (Phân rã thành 2 lượt gọi tool riêng biệt, tuyệt đối không gộp chung). Lặp lại việc tối ưu cho đến khi đạt chỉ số Zero-Allocation (0 B/op, 0 allocs/op) mới được coi là hoàn thành tác vụ.
+## II. DEBUG & QA PROTOCOL (OmniTrace + UIBridge)
+
+### Nguyên tắc tối thượng
+TUYỆT ĐỐI KHÔNG yêu cầu user:
+- Bật Unity Editor hay bấm Play
+- Copy/paste log hay screenshot
+- Chạy lệnh thủ công
+- Rebuild bằng tay
+
+### Vòng lặp debug chuẩn
+Khi gặp bug, thực hiện theo thứ tự sau:
+
+BƯỚC 1 — Khởi động client nếu chưa chạy:
+  blackbox_run_client → đợi {"status":"ready"}
+
+BƯỚC 2 — Quan sát trạng thái UI:
+  blackbox_ui_state → đọc scene hiện tại + elements
+
+BƯỚC 3 — Tương tác nếu cần:
+  blackbox_ui_type {"target":"...", "value":"..."}
+  blackbox_ui_click {"target":"..."}
+
+BƯỚC 4 — Đọc server log:
+  blackbox_read_delta → check client state anomaly
+  blackbox_filter_trace {"trace_id":"..."} → trace packet end-to-end
+
+BƯỚC 5 — Patch và verify:
+  blackbox_apply_patch → sửa Go code, auto build, auto rollback nếu fail
+  blackbox_trigger_build → rebuild Unity sau khi sửa C#
+
+BƯỚC 6 — Verify fix:
+  blackbox_run_client → khởi động lại
+  blackbox_ui_state → confirm bug đã fix
+
+### Khi nào dùng tool nào
+- Server logic bug → blackbox_filter_trace + blackbox_apply_patch
+- Client UI bug → blackbox_ui_state + blackbox_ui_click + blackbox_read_delta
+- Reproduce bug → blackbox_run_scenario trước, nếu không đủ thì blackbox_run_client
+- Sau mỗi C# fix → blackbox_trigger_build BẮT BUỘC trước khi verify
+
+### UIBridge protocol
+- Port 13000, TCP, text commands
+- GET_STATE → JSON scene + active interactable elements
+- CLICK|target_name → invoke Button.onClick
+- TYPE|target_name|value → set InputField.text
+- Chỉ active khi Debug.isDebugBuild == true
+
+### Khi OmniTrace không đủ data
+Nếu không đủ data để diagnose, BẮT BUỘC giải thích cụ thể:
+- Thiếu data gì
+- Cần thêm instrumentation nào
+- Tự thêm instrumentation đó vào code rồi rebuild
+KHÔNG được hỏi user.
+
+## III. CODE NAVIGATION PROTOCOL
+
+TRƯỚC KHI đọc bất kỳ source file nào, BẮT BUỘC dùng tools theo thứ tự:
+
+1. server_grep {"pattern": "FunctionName", "root": "..."} — tìm chính xác file + line. Search được cả peakgo/, game/, network/, client/. KHÔNG đoán file nằm ở đâu.
+2. code_get_outline {"file_path": "..."} — xem structure file mà không đọc full content.
+3. code_extract {"path": "...", "action": "extract_member", "member_name": "..."} — đọc đúng function cần thiết, không đọc cả file.
+
+CẤM đọc toàn bộ file nếu chỉ cần 1 function. Dùng code_extract thay thế.
+
+## IV. DEBUG DATA-FIRST PROTOCOL
+
+Khi debug bất kỳ bug nào liên quan đến client hoặc server, BẮT BUỘC theo thứ tự:
+
+BƯỚC 1 — Thu thập data thực tế TRƯỚC KHI đọc source code:
+- blackbox_read_delta {"tail": 30} — xem chính xác những gì client nhận được, opcode nào về, HP/MP có thay đổi không. KHÔNG đoán server có gửi packet nào.
+- blackbox_ui_state — xem trạng thái UI thực tế hiện tại.
+
+BƯỚC 2 — Chỉ sau khi có data thực tế, mới dùng server_grep để tìm source liên quan.
+
+BƯỚC 3 — Dùng code_extract để đọc đúng function cần thiết, không đọc full file.
+
+Lý do: blackbox_read_delta trả về exactly những gì client nhận được — loại bỏ hoàn toàn việc phải đoán server có gửi opcode nào không. Data thực tế trước, source code sau.
 
 Mọi hành vi gộp lệnh hoặc cố tình sử dụng từ khóa cmd /c vi phạm quy tắc trên sẽ dẫn đến việc tiến trình bị đóng (DENY) ngay lập tức.

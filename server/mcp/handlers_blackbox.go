@@ -744,6 +744,10 @@ func readLastLines(path string, n int) []string {
 		total++
 	}
 
+	if err := scanner.Err(); err != nil {
+		return []string{}
+	}
+
 	if total < n {
 		return ring[:total]
 	}

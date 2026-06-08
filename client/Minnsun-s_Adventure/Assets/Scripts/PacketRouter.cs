@@ -13,14 +13,23 @@ using UnityEngine;
 public class PacketRouter : MonoBehaviour
 {
     private UIManager uiManager;
+    private Decoders.StatsPacket? pendingStats; // cached if UI not ready yet
 
     /// <summary>
     /// Called by Bootstrap after creating UI.
     /// Keeps a UIManager reference for UI-only packets (Chat, Notice).
+    /// Also flushes any pending stats packet that arrived before Init.
     /// </summary>
     public void Init(UIManager ui)
     {
         uiManager = ui;
+        if (pendingStats.HasValue)
+        {
+            var registry = ServiceContainer.Resolve<EntityRegistry>();
+            if (registry != null && pendingStats.Value.EntityID == registry.LocalPlayerID)
+                uiManager.UpdateHUD(pendingStats.Value);
+            pendingStats = null;
+        }
     }
 
     /// <summary>
@@ -116,9 +125,14 @@ public class PacketRouter : MonoBehaviour
                                 packet.Value.Dam, packet.Value.Level
                             );
 
-                            // If local player, refresh HUD
-                            if (packet.Value.EntityID == registry.LocalPlayerID && uiManager != null)
-                                uiManager.UpdateHUD(packet.Value);
+                            // If local player, refresh HUD — cache if UI not ready yet
+                            if (packet.Value.EntityID == registry.LocalPlayerID)
+                            {
+                                if (uiManager != null)
+                                    uiManager.UpdateHUD(packet.Value);
+                                else
+                                    pendingStats = packet.Value; // cache for later
+                            }
                         }
                     }
 
@@ -140,6 +154,28 @@ public class PacketRouter : MonoBehaviour
                     // Show damage number via UIManager
                     if (uiManager != null)
                         uiManager.ShowDamageNumber(packet.Value);
+
+                    // Fallback: if target is local player, refresh HUD from registry
+                    // (in case server StatsSync packet hasn't arrived yet).
+                    var registry = ServiceContainer.Resolve<EntityRegistry>();
+                    if (registry != null && uiManager != null && packet.Value.TargetID == registry.LocalPlayerID)
+                    {
+                        EntityView view = registry.Get(packet.Value.TargetID);
+                        if (view != null)
+                        {
+                            var statsPacket = new Decoders.StatsPacket
+                            {
+                                EntityID = view.EntityID,
+                                HP = view.HP,
+                                MaxHP = view.MaxHP,
+                                MP = view.MP,
+                                MaxMP = view.MaxMP,
+                                Dam = view.Dam,
+                                Level = view.Level
+                            };
+                            uiManager.UpdateHUD(statsPacket);
+                        }
+                    }
 
                     // Publish combat event for EntityService (HP update, flash, despawn)
                     EventBus<EventBusDispatcher.CombatHitEvent>.Publish(

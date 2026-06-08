@@ -43,6 +43,13 @@ var combatHitFramePool = pool.NewBytesPool(combatHitFrameSize)
 // kill messages. The pool will discard any buffer that grows beyond 4x.
 var noticeFramePool = pool.NewBytesPool(256)
 
+// statsSyncFrameSize is the fixed frame size for a StatsSync packet:
+// 2 (length) + 1 (opcode) + 56 (payload) = 59 bytes
+const statsSyncFrameSize = 59
+
+// statsSyncFramePool reuses StatsSync frame buffers to avoid per-hit allocation.
+var statsSyncFramePool = pool.NewBytesPool(statsSyncFrameSize)
+
 // CombatResult is returned by AttackSystem to handleCommand.
 // It carries enough information to route the response without
 // handleCommand needing to know anything about ECS internals.
@@ -335,6 +342,9 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 	// remove từ spatial grid trước khi ECS cleanup
 	world.GlobalSpatialGrid.RemoveEntity(targetID)
 
+	// Broadcast StatsSync with HP=0 before removing entity (so clients see the death).
+	broadcastStatsSync(targetID)
+
 	if targetMeta.Type == ecs.EntityPlayer {
 		// Publish player death event
 		eventbus.GlobalBus.Publish(eventbus.TopicPlayerDeath, eventbus.PlayerDeathEvent{
@@ -343,7 +353,6 @@ func DeathSystem(targetID, killerID ecs.Entity, targetMeta, killerMeta ecs.Metad
 			PlayerName: targetMeta.Name,
 			MapID:      targetPos.MapID,
 		})
-
 	} else {
 		// ── Threat Table Cleanup ─────────────────────────────────────────────
 		// Release threat table memory when a monster dies to prevent aggro
@@ -425,11 +434,50 @@ func broadcastHit(r CombatResult) {
 	attackerPos, _ := ecs.DefaultRegistry.GetPosition(r.AttackerID)
 	protocol.BroadcastToNeighbors(attackerPos, frame, r.AttackerID)
 
+	// Broadcast StatsSync for the target so all clients update their HP/MP bars.
+	broadcastStatsSync(r.TargetID)
+
 	// Guard loggate.Debugf to avoid variadic allocation when debug is off
 	if loggate.DebugEnabled() {
 		loggate.Debugf("[HIT] %s → %s | dmg=%d hp_left=%d",
 			r.AttackerName, r.TargetName, r.Damage, r.TargetHP)
 	}
+}
+
+// broadcastStatsSync builds and sends a StatsSync packet (opcode 0x13) for entityID
+// to all connected neighbors. Uses the statsSyncFramePool for zero-alloc reuse.
+func broadcastStatsSync(entityID ecs.Entity) {
+	stats, ok := ecs.DefaultRegistry.GetStats(entityID)
+	if !ok {
+		return
+	}
+	targetPos, ok := ecs.DefaultRegistry.GetPosition(entityID)
+	if !ok {
+		return
+	}
+
+	sp := broadcast.StatsSyncPayload{
+		EntityID:     uint64(entityID),
+		HP:           int32(stats.HP),
+		MaxHP:        int32(stats.MaxHP),
+		MP:           int32(stats.MP),
+		MaxMP:        int32(stats.MaxMP),
+		Dam:          int32(stats.Dam),
+		Level:        int32(stats.Level),
+		Defense:      int32(stats.Defense),
+		MagicDefense: int32(stats.MagicDefense),
+		MagicAttack:  int32(stats.MagicAttack),
+		HitRate:      int32(stats.HitRate),
+		DodgeRate:    int32(stats.DodgeRate),
+		CritRate:     int32(stats.CritRate),
+	}
+
+	dst := statsSyncFramePool.Get()
+	frame := broadcast.WriteStatsSync(*dst, sp)
+	*dst = frame
+	statsSyncFramePool.Put(dst)
+
+	protocol.BroadcastToNeighbors(targetPos, frame, entityID)
 }
 
 // ─── Small integer helpers (avoid fmt.Sprintf) ────────────────────────────────
