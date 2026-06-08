@@ -57,6 +57,9 @@ public class GameBootstrap : MonoBehaviour
         // Phase 6: UI
         BootstrapUI();
 
+        // Phase 7: Debug UIBridge (debug build only)
+        BootstrapDebugBridge();
+
         // Freeze service container — no more registrations allowed
         ServiceContainer.Freeze();
 
@@ -284,6 +287,30 @@ public class GameBootstrap : MonoBehaviour
         joystickGO.AddComponent<Canvas>();
         joystickGO.AddComponent<VirtualJoystick>();
         Logger.D("Bootstrap", "VirtualJoystick created");
+    }
+
+    // ─── Phase 7: Debug UIBridge ────────────────────────────────────────
+
+    private void BootstrapDebugBridge()
+    {
+        if (!Debug.isDebugBuild)
+        {
+            Logger.D("Bootstrap", "Skipping UIBridge (not a debug build)");
+            return;
+        }
+
+        Logger.I("Bootstrap", "Phase 7: Initializing UIBridge + MainThreadDispatcher (debug build)");
+
+        // MainThreadDispatcher singleton — created on demand, but ensure it exists early
+        var mtd = MainThreadDispatcher.Instance;
+        if (mtd != null)
+        {
+            Logger.D("Bootstrap", "MainThreadDispatcher ready");
+        }
+
+        // UIBridge — TCP listener on port 13000
+        gameObject.AddComponent<UIBridge>();
+        Logger.D("Bootstrap", "UIBridge added to root GameObject");
     }
 
     // ─── Auto-Login ───────────────────────────────────────────────────

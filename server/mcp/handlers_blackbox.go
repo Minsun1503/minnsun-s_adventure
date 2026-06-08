@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -487,6 +488,167 @@ func init() {
 			"exit_code":    exitCode,
 			"output":       string(output),
 		})
+	})
+
+	// ─── UIBridge helpers ────────────────────────────────────────────────────
+
+	// sendUICommand connects to the Unity UIBridge TCP port (13000), sends a
+	// command string, and returns the JSON response. Connection is closed after
+	// each command. On failure returns an error message suitable for rpcError.
+	sendUICommand := func(cmd string) (string, error) {
+		addr := "127.0.0.1:13000"
+		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			return "", fmt.Errorf("cannot connect to Unity UIBridge at %s: %v", addr, err)
+		}
+		defer conn.Close()
+
+		// Send command + newline
+		_, err = conn.Write([]byte(cmd + "\n"))
+		if err != nil {
+			return "", fmt.Errorf("write error: %v", err)
+		}
+
+		// Read response (up to 64 KB)
+		buf := make([]byte, 65536)
+		n, err := conn.Read(buf)
+		if err != nil {
+			return "", fmt.Errorf("read error: %v", err)
+		}
+
+		return strings.TrimSpace(string(buf[:n])), nil
+	}
+
+	// ─── blackbox_run_client ─────────────────────────────────────────────────
+	// Launches the Unity game client executable in background and polls port 13000
+	// until it becomes reachable (up to 30 seconds).
+
+	Register("blackbox_run_client", func(req Request) Response {
+		cfg := config.C()
+
+		// Resolve client executable path.
+		clientExe := cfg.UnityClientExe
+		if clientExe == "" {
+			clientExe = os.Getenv("UNITY_CLIENT_EXE")
+		}
+		if clientExe == "" {
+			// Default fallback
+			clientExe = "Minnsun-s_Adventure.exe"
+		}
+
+		// Check if already running by attempting connection.
+		if testConn, testErr := net.DialTimeout("tcp", "127.0.0.1:13000", 1*time.Second); testErr == nil {
+			testConn.Close()
+			return rpcResult(req.ID, map[string]any{
+				"status": "already_running",
+				"note":   "UIBridge port 13000 is already open",
+			})
+		}
+
+		// Launch the client executable.
+		cmd := exec.Command(clientExe)
+		cmd.Dir = filepath.Dir(clientExe)
+		// Detach: don't capture output, let it run independently.
+		err := cmd.Start()
+		if err != nil {
+			return rpcError(req.ID, ErrCodeInternal,
+				fmt.Sprintf("failed to start client '%s': %v", clientExe, err))
+		}
+
+		// Poll port 13000 every 500ms for up to 30 seconds.
+		deadline := time.Now().Add(30 * time.Second)
+		var lastErr error
+		for time.Now().Before(deadline) {
+			conn, pollErr := net.DialTimeout("tcp", "127.0.0.1:13000", 500*time.Millisecond)
+			if pollErr == nil {
+				conn.Close()
+				return rpcResult(req.ID, map[string]any{
+					"status":     "ready",
+					"pid":        cmd.Process.Pid,
+					"client_exe": clientExe,
+					"wait_sec":   30 - int(time.Until(deadline).Seconds()),
+				})
+			}
+			lastErr = pollErr
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		return rpcError(req.ID, ErrCodeInternal,
+			fmt.Sprintf("client '%s' started but UIBridge port 13000 not reachable within 30s. Last error: %v",
+				clientExe, lastErr))
+	})
+
+	// ─── blackbox_ui_state ───────────────────────────────────────────────────
+	// Connects to Unity UIBridge, sends GET_STATE, returns the JSON scene state.
+
+	Register("blackbox_ui_state", func(req Request) Response {
+		resp, err := sendUICommand("GET_STATE")
+		if err != nil {
+			return rpcError(req.ID, ErrCodeInternal, err.Error())
+		}
+
+		// Parse the JSON response to return as structured result.
+		var state map[string]any
+		if parseErr := json.Unmarshal([]byte(resp), &state); parseErr != nil {
+			return rpcResult(req.ID, map[string]any{
+				"raw_response": resp,
+			})
+		}
+
+		return rpcResult(req.ID, state)
+	})
+
+	// ─── blackbox_ui_click ───────────────────────────────────────────────────
+	// Sends CLICK|<target> to Unity UIBridge and returns response.
+
+	Register("blackbox_ui_click", func(req Request) Response {
+		var p struct {
+			Target string `json:"target"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil || p.Target == "" {
+			return rpcError(req.ID, ErrCodeInvalidParams, "'target' parameter is required")
+		}
+
+		resp, err := sendUICommand("CLICK|" + p.Target)
+		if err != nil {
+			return rpcError(req.ID, ErrCodeInternal, err.Error())
+		}
+
+		var result map[string]any
+		if parseErr := json.Unmarshal([]byte(resp), &result); parseErr != nil {
+			return rpcResult(req.ID, map[string]any{
+				"raw_response": resp,
+			})
+		}
+
+		return rpcResult(req.ID, result)
+	})
+
+	// ─── blackbox_ui_type ────────────────────────────────────────────────────
+	// Sends TYPE|<target>|<value> to Unity UIBridge and returns response.
+
+	Register("blackbox_ui_type", func(req Request) Response {
+		var p struct {
+			Target string `json:"target"`
+			Value  string `json:"value"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil || p.Target == "" {
+			return rpcError(req.ID, ErrCodeInvalidParams, "'target' and 'value' parameters are required")
+		}
+
+		resp, err := sendUICommand("TYPE|" + p.Target + "|" + p.Value)
+		if err != nil {
+			return rpcError(req.ID, ErrCodeInternal, err.Error())
+		}
+
+		var result map[string]any
+		if parseErr := json.Unmarshal([]byte(resp), &result); parseErr != nil {
+			return rpcResult(req.ID, map[string]any{
+				"raw_response": resp,
+			})
+		}
+
+		return rpcResult(req.ID, result)
 	})
 
 	// ─── blackbox_read_delta ──────────────────────────────────────────────────

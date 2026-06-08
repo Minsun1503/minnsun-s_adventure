@@ -1,0 +1,7 @@
+goos: windows
+goarch: amd64
+pkg: server/game
+cpu: Intel(R) Core(TM) i5-8500T CPU @ 2.10GHz
+BenchmarkAttackSystemAllocs-6   	 4201268	       289.1 ns/op	      56 B/op	       2 allocs/op
+PASS
+ok  	server/game	1.538s

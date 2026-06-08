@@ -58,6 +58,9 @@ type GameConfig struct {
 	UnityExe         string `json:"unity_exe"`
 	UnityProjectPath string `json:"unity_project_path"`
 	UnityBuildOutput string `json:"unity_build_output"`
+
+	// Unity Client Bridge (UIBridge)
+	UnityClientExe string `json:"unity_client_exe"`
 }
 
 // DefaultConfig returns a sensible default config matching the current hardcoded values.
