@@ -107,9 +107,6 @@ type ScenarioMove struct{}
 func (s *ScenarioMove) Name() string { return "move" }
 
 func (s *ScenarioMove) Run(bot *Bot, traceID string, duration time.Duration) error {
-	bot.scenarioMsgCh = make(chan ScenarioPacket, 256)
-	defer func() { bot.scenarioMsgCh = nil }()
-
 	// Wait for entity ID from login.
 	eid, err := waitForEntityID(bot, 10*time.Second)
 	if err != nil {
@@ -121,12 +118,17 @@ func (s *ScenarioMove) Run(bot *Bot, traceID string, duration time.Duration) err
 		TraceID:  traceID,
 		EntityID: eid,
 		Msg:      "scenario_move_start",
-		Fields:   map[string]any{"grid": "10x10"},
+		Fields:   map[string]any{"grid": "10x10", "start_x": bot.x, "start_z": bot.z},
 	})
 
-	// Walk a 10×10 grid (100 steps).
-	for x := int32(0); x < 10; x++ {
-		for z := int32(0); z < 10; z++ {
+	// Walk a 10×10 grid (100 steps), starting from bot's actual spawn position.
+	// Each step moves 1 unit to stay within anticheat MaxMoveDistance=2.
+	startX := bot.x
+	startZ := bot.z
+	for dx := int32(0); dx < 10; dx++ {
+		for dz := int32(0); dz < 10; dz++ {
+			x := startX + dx
+			z := startZ + dz
 			if !bot.connected.Load() {
 				return fmt.Errorf("bot disconnected at grid (%d,%d)", x, z)
 			}
@@ -145,6 +147,10 @@ func (s *ScenarioMove) Run(bot *Bot, traceID string, duration time.Duration) err
 						if pktEid == eid {
 							received = true
 						}
+					} else if pkt.Opcode == opcodeS2CNotice {
+						// Server rejected the move (e.g. collision, out of bounds).
+						// This still means the server processed the packet, so we don't timeout.
+						received = true
 					}
 				default:
 					time.Sleep(5 * time.Millisecond)

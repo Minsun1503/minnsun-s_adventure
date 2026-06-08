@@ -37,29 +37,37 @@ func StartLoginWorkerPool(workerCount int) {
 
 // parseAuthPayload extracts username and password from a binary auth packet payload.
 // Format: [UsernameLen uint8][Username UTF-8][PasswordLen uint8][Password UTF-8]
+// Unity client prepends 4 bytes TraceId; bot/stress tool does NOT.
 // Returns empty packetAuth and false on any parse error.
 func parseAuthPayload(payload []byte) (packetAuth, bool) {
-	if len(payload) < 2 {
+	// Auto-detect TraceId prefix: if first byte looks invalid as a username length
+	// (0 or >16) but payload is long enough, skip 4 bytes of TraceId.
+	authBytes := payload
+	if len(payload) >= 6 && (payload[0] > 16 || payload[0] == 0) {
+		authBytes = payload[4:]
+	}
+
+	if len(authBytes) < 2 {
 		return packetAuth{}, false
 	}
 
-	usernameLen := int(payload[0])
-	if usernameLen == 0 || usernameLen > len(payload)-1 {
+	usernameLen := int(authBytes[0])
+	if usernameLen == 0 || usernameLen > len(authBytes)-1 {
 		return packetAuth{}, false
 	}
 	pos := 1 + usernameLen
 
-	if pos >= len(payload) {
+	if pos >= len(authBytes) {
 		return packetAuth{}, false
 	}
-	passwordLen := int(payload[pos])
+	passwordLen := int(authBytes[pos])
 	pos++
-	if passwordLen == 0 || pos+passwordLen > len(payload) {
+	if passwordLen == 0 || pos+passwordLen > len(authBytes) {
 		return packetAuth{}, false
 	}
 
-	username := models.SanitizeUsername(string(payload[1 : 1+usernameLen]))
-	password := string(payload[pos : pos+passwordLen])
+	username := models.SanitizeUsername(string(authBytes[1 : 1+usernameLen]))
+	password := string(authBytes[pos : pos+passwordLen])
 
 	return packetAuth{username: username, password: password}, true
 }

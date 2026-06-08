@@ -301,6 +301,9 @@ func init() {
 			unityExe = os.Getenv("UNITY_PATH")
 		}
 		if unityExe == "" {
+			unityExe = `C:\Program Files\Unity\Hub\Editor\6000.3.17f1\Editor\Unity.exe`
+		}
+		if unityExe == "" {
 			return rpcError(req.ID, ErrCodeInvalidParams,
 				"unity_exe not set in config.json and UNITY_PATH env var not found")
 		}
@@ -340,7 +343,7 @@ func init() {
 		}
 
 		// Ensure log directory exists.
-		logFilePath := `C:\Minnsun-s_Adventure\server\logs\unity_build.log`
+		logFilePath := `c:\Users\ADMIN\Desktop\minnsun-s_adventure\server\logs\unity_build.log`
 		if err := os.MkdirAll(filepath.Dir(logFilePath), 0755); err != nil {
 			return rpcError(req.ID, ErrCodeInternal,
 				fmt.Sprintf("failed to create log directory: %v", err))

@@ -204,6 +204,7 @@ func runScenario(name string) {
 		z:          0,
 		stopCh:     make(chan struct{}),
 		readerDone: make(chan struct{}),
+		scenarioMsgCh: make(chan ScenarioPacket, 1024),
 	}
 
 	if err := bot.connectAndLogin(); err != nil {
@@ -508,11 +509,12 @@ func (b *Bot) sendMove(x, z int32) {
 	if !b.connected.Load() || b.conn == nil {
 		return
 	}
-	packet := make([]byte, 11)
-	binary.BigEndian.PutUint16(packet[0:2], 9) // 1 opcode + 8 payload
+	// Move wire format: [Length 2B: 0x000D][Opcode 0x01][TraceID 4B][X int32 BE][Z int32 BE]
+	packet := make([]byte, 15)
+	binary.BigEndian.PutUint16(packet[0:2], 13) // 1 opcode + 12 payload
 	packet[2] = opcodeC2SMove
-	binary.BigEndian.PutUint32(packet[3:7], uint32(x))
-	binary.BigEndian.PutUint32(packet[7:11], uint32(z))
+	binary.BigEndian.PutUint32(packet[7:11], uint32(x))
+	binary.BigEndian.PutUint32(packet[11:15], uint32(z))
 	if n, err := b.conn.Write(packet); err == nil {
 		b.x = x
 		b.z = z
@@ -528,10 +530,11 @@ func (b *Bot) sendAttack(targetID uint64) {
 	if !b.connected.Load() || b.conn == nil {
 		return
 	}
-	packet := make([]byte, 11)
-	binary.BigEndian.PutUint16(packet[0:2], 9)
+	// Attack wire format: [Length 2B: 0x000D][Opcode 0x05][TraceID 4B][TargetID uint64 BE]
+	packet := make([]byte, 15)
+	binary.BigEndian.PutUint16(packet[0:2], 13) // 1 opcode + 12 payload
 	packet[2] = opcodeC2SAttack
-	binary.BigEndian.PutUint64(packet[3:11], targetID)
+	binary.BigEndian.PutUint64(packet[7:15], targetID)
 	if n, err := b.conn.Write(packet); err == nil {
 		b.attackSent.Add(1)
 		totalAttackWritten.Add(1)
@@ -605,10 +608,10 @@ func (b *Bot) sendActions() {
 		if target == 0 {
 			target = 99999
 		}
-		packet2 := make([]byte, 11)
-		binary.BigEndian.PutUint16(packet2[0:2], 9)
+		packet2 := make([]byte, 15)
+		binary.BigEndian.PutUint16(packet2[0:2], 13) // 1 opcode + 12 payload
 		packet2[2] = opcodeC2SAttack
-		binary.BigEndian.PutUint64(packet2[3:11], target)
+		binary.BigEndian.PutUint64(packet2[7:15], target)
 		if n, err := b.conn.Write(packet2); err == nil {
 			b.attackSent.Add(1)
 			totalAttackWritten.Add(1)
@@ -619,12 +622,12 @@ func (b *Bot) sendActions() {
 
 	// ── Send MOVE packet ──
 	if *flagMove {
-		// Move wire format: [Length 2B: 0x0009][Opcode 0x01][X int32 BE][Z int32 BE]
-		packet := make([]byte, 11)
-		binary.BigEndian.PutUint16(packet[0:2], 9) // 1 opcode + 8 payload
+		// Move wire format: [Length 2B: 0x000D][Opcode 0x01][TraceID 4B][X int32 BE][Z int32 BE]
+		packet := make([]byte, 15)
+		binary.BigEndian.PutUint16(packet[0:2], 13) // 1 opcode + 12 payload
 		packet[2] = opcodeC2SMove
-		binary.BigEndian.PutUint32(packet[3:7], uint32(targetX))
-		binary.BigEndian.PutUint32(packet[7:11], uint32(targetZ))
+		binary.BigEndian.PutUint32(packet[7:11], uint32(targetX))
+		binary.BigEndian.PutUint32(packet[11:15], uint32(targetZ))
 
 		if n, err := b.conn.Write(packet); err == nil {
 			b.x = targetX
@@ -646,11 +649,11 @@ func (b *Bot) sendActions() {
 			target = 99999 // dummy target — still stresses server entity lookup
 		}
 
-		// Attack wire format: [Length 2B: 0x0009][Opcode 0x05][TargetID uint64 BE]
-		packet := make([]byte, 11)
-		binary.BigEndian.PutUint16(packet[0:2], 9)
+		// Attack wire format: [Length 2B: 0x000D][Opcode 0x05][TraceID 4B][TargetID uint64 BE]
+		packet := make([]byte, 15)
+		binary.BigEndian.PutUint16(packet[0:2], 13) // 1 opcode + 12 payload
 		packet[2] = opcodeC2SAttack
-		binary.BigEndian.PutUint64(packet[3:11], target)
+		binary.BigEndian.PutUint64(packet[7:15], target)
 
 		if n, err := b.conn.Write(packet); err == nil {
 			b.attackSent.Add(1)

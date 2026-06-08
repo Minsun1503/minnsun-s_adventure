@@ -11,7 +11,6 @@ public class LoginUI : MonoBehaviour
 {
     private string username = "test";
     private string password = "password123";
-    private bool showUI = true;
 
     // Canvas references for UIBridge scanning
     private GameObject canvasGO;
@@ -36,7 +35,6 @@ public class LoginUI : MonoBehaviour
         var reg = ServiceContainer.Resolve<EntityRegistry>();
         if (reg != null && reg.LocalPlayerID == evt.EntityID)
         {
-            showUI = false;
             if (canvasGO != null)
                 canvasGO.SetActive(false);
         }

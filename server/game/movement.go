@@ -126,6 +126,7 @@ func MovementSystem(entity ecs.Entity, x, z int) bool {
 // ─── PROTOCOL BINARY ENCODING HELPER ─────────────────────────────────────────
 
 // broadcastBinaryMovement thực hiện đóng gói nhị phân không cấp phát và phát sóng diện rộng.
+// Gửi PositionSync đến chính entity move (qua Writer), sau đó broadcast đến neighbors.
 func broadcastBinaryMovement(entity ecs.Entity, pos ecs.PositionComponent) {
 	pBuf := netio.DefaultPool.Get()
 	defer netio.DefaultPool.Put(pBuf)
@@ -136,6 +137,16 @@ func broadcastBinaryMovement(entity ecs.Entity, pos ecs.PositionComponent) {
 		Z:        int32(pos.Z),
 	}
 	buf := broadcast.WritePositionSync((*pBuf)[:0], payload)
+
+	// Gửi PositionSync trực tiếp cho chính entity move (không bị exclude bởi BroadcastToNeighbors)
+	// Ưu tiên Writer (non-blocking), fallback Conn.Write (blocking) cho stress-test bot không có Writer.
+	if connComp, ok := ecs.DefaultRegistry.GetConnection(entity); ok {
+		if connComp.Writer != nil {
+			connComp.Writer.Send(buf)
+		} else if connComp.Conn != nil {
+			_ = netio.WritePacket(connComp.Conn, buf)
+		}
+	}
 
 	protocol.BroadcastToNeighbors(pos, buf, entity)
 
